@@ -1,0 +1,17 @@
+{
+  "_note": "SAMPLE DATA — para demostración de la plataforma. No representa assets comerciales reales de DGL.",
+  "assets": [
+    { "id": "AST-01", "title": "Script — Reactivación de cuenta inactiva 60 días", "type": "Script de Llamada", "service": "General", "segment": "Inactive-60", "status": "Actualizado", "updatedDate": "2026-06-28" },
+    { "id": "AST-02", "title": "Script — Objeción de precio (no ceder por descuento)", "type": "Objeciones y Respuestas", "service": "General", "segment": "Quoted-Not-Booked", "status": "Actualizado", "updatedDate": "2026-07-01" },
+    { "id": "AST-03", "title": "One-Pager — Capacidad Cross Border Texas/México", "type": "One-Pager", "service": "Cross Border", "segment": "Manufactura / Automotriz", "status": "Actualizado", "updatedDate": "2026-06-20" },
+    { "id": "AST-04", "title": "Battlecard — DGL vs. Freight Brokers Regionales", "type": "Battlecard", "service": "General", "segment": "Cuentas en riesgo por competencia", "status": "Actualizado", "updatedDate": "2026-06-15" },
+    { "id": "AST-05", "title": "Brochure — Warehousing & Transloading", "type": "Brochure", "service": "Warehousing", "segment": "Freight Forwarders / Importadores", "status": "Actualizado", "updatedDate": "2026-06-10" },
+    { "id": "AST-06", "title": "Presentación — Capacidad Refrigerada Cross-Border", "type": "Presentación", "service": "Refrigerated", "segment": "Food & Beverage", "status": "En revisión", "updatedDate": "2026-07-02" },
+    { "id": "AST-07", "title": "Email — Seguimiento post-cotización 24h", "type": "Email Listo", "service": "General", "segment": "Todas las cotizaciones", "status": "Actualizado", "updatedDate": "2026-07-05" },
+    { "id": "AST-08", "title": "Argumentario — Valor vs. Precio en FTL", "type": "Argumentario de Precio", "service": "FTL", "segment": "General", "status": "Actualizado", "updatedDate": "2026-06-18" },
+    { "id": "AST-09", "title": "Caso de Uso — Reducción de tránsito Intermodal", "type": "Caso de Uso", "service": "Intermodal", "segment": "Manufactura", "status": "Actualizado", "updatedDate": "2026-05-30" },
+    { "id": "AST-10", "title": "Propuesta Comercial — Programa Dedicado Flatbed/Oversize", "type": "Propuesta Comercial", "service": "Flatbed", "segment": "Industrial / Construcción", "status": "Actualizado", "updatedDate": "2026-06-22" },
+    { "id": "AST-11", "title": "One-Pager — Programa HazMat Certificado", "type": "One-Pager", "service": "HazMat", "segment": "Químicos / Industrial", "status": "Actualizado", "updatedDate": "2026-06-05" },
+    { "id": "AST-12", "title": "Script — Cross Selling Drayage a Transloading", "type": "Script de Llamada", "service": "Transloading", "segment": "Clientes activos de Drayage", "status": "Nuevo", "updatedDate": "2026-07-08" }
+  ]
+}
