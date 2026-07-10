@@ -1,0 +1,98 @@
+/* ============================================================
+   DGL MARKETING EXECUTION OS — RESPONSIVE LAYER
+   Desktop XL -> Laptop -> Tablet -> Mobile
+   ============================================================ */
+
+/* Laptop */
+@media (max-width: 1440px) {
+  .kpi-grid { grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .main-content { padding: 22px 22px 50px; }
+}
+
+/* Small laptop */
+@media (max-width: 1200px) {
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .grid-2 { grid-template-columns: 1fr; }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  :root { --sidebar-w: 236px; }
+}
+
+/* Tablet */
+@media (max-width: 980px) {
+  .app-shell { grid-template-columns: var(--sidebar-w-collapsed) 1fr; }
+  .sidebar .brand-text, .sidebar .nav-item .label, .sidebar .nav-group-label, .sidebar .nav-badge { display: none; }
+  .sidebar .nav-item { justify-content: center; }
+  .sidebar-toggle span { display: none; }
+  .global-search { max-width: 220px; }
+  .grid-3 { grid-template-columns: 1fr 1fr; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .topbar-title-block .desc { display: none; }
+  .user-chip .name, .user-chip .role { display: none; }
+}
+
+/* Mobile */
+@media (max-width: 720px) {
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0; width: 260px;
+    transform: translateX(-100%); transition: transform var(--normal) var(--ease);
+    box-shadow: var(--shadow-lg); z-index: 100;
+  }
+  .sidebar.mobile-open { transform: translateX(0); }
+  .sidebar .brand-text, .sidebar .nav-item .label, .sidebar .nav-group-label, .sidebar .nav-badge { display: block; }
+  .sidebar .nav-item { justify-content: flex-start; }
+
+  .mobile-menu-btn { display: flex !important; }
+  .global-search { display: none; }
+  .topbar { padding: 0 14px; gap: 10px; }
+  .topbar-title-block h1 { font-size: 15px; }
+
+  .main-content { padding: 16px 14px 90px; }
+  .kpi-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .kpi-value { font-size: 21px; }
+  .grid-3 { grid-template-columns: 1fr; }
+  .grid-cards { grid-template-columns: 1fr; }
+
+  .page-head { flex-direction: column; align-items: stretch; }
+  .page-head-actions { width: 100%; }
+  .page-head-actions .btn { flex: 1; }
+
+  .filter-bar { flex-direction: column; align-items: stretch; }
+  .filter-bar .filter-count { margin-left: 0; }
+
+  .table-wrap { border: none; }
+  table.data-table { display: none; } /* replaced by mobile card list */
+  .mobile-card-list { display: flex; flex-direction: column; gap: 10px; }
+  .mobile-record-card { padding: 14px; border-radius: var(--radius-md); background: var(--card); border: 1px solid var(--border); }
+  .mobile-record-card .mr-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 8px; }
+  .mobile-record-card .mr-title { font-size: 13.5px; font-weight: 700; }
+  .mobile-record-card .mr-row { display: flex; justify-content: space-between; font-size: 12px; padding: 4px 0; border-top: 1px dashed var(--border); }
+  .mobile-record-card .mr-row:first-of-type { border-top: none; }
+  .mobile-record-card .mr-label { color: var(--muted); }
+  .mobile-record-card .mr-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .mobile-record-card .mr-actions .btn { flex: 1; }
+
+  .modal-box { width: 100%; max-width: 100%; border-radius: 16px 16px 0 0; position: fixed; bottom: 0; left: 0; max-height: 92vh; }
+  .modal-overlay { align-items: flex-end; }
+
+  .quick-actions-fab { display: flex !important; }
+
+  .bottom-nav { display: flex !important; }
+  .main-content { padding-bottom: 96px; }
+}
+
+@media (min-width: 721px) {
+  .mobile-menu-btn { display: none !important; }
+  .bottom-nav { display: none !important; }
+  .quick-actions-fab { display: none !important; }
+}
+
+@media (min-width: 981px) {
+  .desktop-only-hide { display: none; }
+}
+
+/* Print / export friendliness (kept minimal, dark-first product) */
+@media print {
+  .sidebar, .topbar, .quick-actions-fab, .bottom-nav { display: none !important; }
+  .app-shell { grid-template-columns: 1fr; }
+}
