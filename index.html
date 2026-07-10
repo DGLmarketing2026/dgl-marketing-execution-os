@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DGL Marketing Execution OS</title>
+<meta name="description" content="Plataforma interna de ejecución de Marketing para Dedicated Ground Logistics (DGL). Conversión, retención, reactivación y crecimiento de cartera." />
+
+<!-- ============================================================
+     BOOT DIAGNOSTICS — must be the first script in the document.
+     Registers error/timeout handlers BEFORE any other resource is
+     requested, so a failed CDN or a missing project file never
+     leaves the user staring at an infinite "Cargando..." screen.
+     Works identically on file://, localhost or a GitHub Pages
+     subpath (https://<user>.github.io/<repo>/) since it never
+     assumes a root path.
+     ============================================================ -->
+<script>
+(function () {
+  "use strict";
+  var ready = false;
+  var pending = [];
+
+  function flush() {
+    var box = document.getElementById("bootError");
+    var btn = document.getElementById("bootReload");
+    if (!box || !pending.length) return;
+    box.style.display = "block";
+    box.textContent = pending.join("\n");
+    if (btn) btn.style.display = "inline-block";
+  }
+  function report(msg) {
+    if (pending.indexOf(msg) === -1) pending.push(msg);
+    flush();
+  }
+
+  window.__dglMarkReady = function () { ready = true; pending = []; flush(); };
+  window.__dglBootFail = report;
+
+  // Catches 404s / blocked CDNs for <script>/<link> tags (capture phase —
+  // resource errors do not bubble, so this must run in the capture phase).
+  window.addEventListener("error", function (e) {
+    if (e && e.target && (e.target.tagName === "SCRIPT" || e.target.tagName === "LINK")) {
+      var url = e.target.src || e.target.href || "recurso desconocido";
+      report("No se pudo cargar: " + url);
+    } else if (e && e.message && !ready) {
+      var loc = e.filename ? " (" + e.filename.split("/").pop() + (e.lineno ? ":" + e.lineno : "") + ")" : "";
+      report("Error de JavaScript: " + e.message + loc);
+    }
+  }, true);
+
+  window.addEventListener("unhandledrejection", function (e) {
+    if (!ready) report("Promesa no controlada: " + (e.reason && e.reason.message ? e.reason.message : e.reason));
+  });
+
+  document.addEventListener("DOMContentLoaded", flush);
+  document.addEventListener("click", function (e) {
+    if (e.target && e.target.id === "bootReload") window.location.reload();
+  });
+
+  // Watchdog: if the app hasn't signaled readiness after 8s, stop
+  // spinning forever and tell the user something is actually wrong.
+  setTimeout(function () {
+    if (!ready) {
+      report("La plataforma tarda más de lo esperado en iniciar. Revisa la consola del navegador (F12 → Console) para ver el detalle, confirma tu conexión a internet (se cargan Chart.js y Lucide Icons desde CDN) y verifica que las carpetas assets/ y components/ se hayan publicado junto a index.html.");
+    }
+  }, 8000);
+})();
+</script>
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+<!-- Styles -->
+<link rel="stylesheet" href="assets/css/styles.css" />
+<link rel="stylesheet" href="assets/css/responsive.css" />
+
+<!-- Icons (Lucide) -->
+<script src="https://unpkg.com/lucide@0.294.0/dist/umd/lucide.js" crossorigin="anonymous"></script>
+<!-- Charts -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+<div id="app">
+  <!-- App shell is rendered by assets/js/app.js. This placeholder is
+       replaced the moment init() succeeds — see __dglMarkReady() above. -->
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;color:#6B7280;font-family:Inter,-apple-system,sans-serif;font-size:13px;text-align:center;padding:24px;background:#060816">
+    <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#77B82A,#5a9420);display:flex;align-items:center;justify-content:center;font-weight:800;color:#06210a;font-size:15px">DG</div>
+    <div>Cargando DGL Marketing Execution OS…</div>
+    <div id="bootError" style="display:none;max-width:520px;color:#ff9c9c;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:14px 16px;font-size:12px;line-height:1.6;text-align:left;white-space:pre-line"></div>
+    <button id="bootReload" style="display:none;padding:8px 18px;border-radius:8px;border:1px solid rgba(255,255,255,0.16);background:rgba(255,255,255,0.06);color:#fff;font-size:12px;cursor:pointer;font-family:inherit">Reintentar</button>
+  </div>
+</div>
+
+<!-- ============================================================
+     DATA LAYER
+     ============================================================ -->
+<script src="assets/js/data.js"></script>
+
+<!-- ============================================================
+     REUSABLE COMPONENTS
+     ============================================================ -->
+<script src="components/kpi-cards.js"></script>
+<script src="components/campaign-cards.js"></script>
+<script src="components/tables.js"></script>
+<script src="components/modals.js"></script>
+<script src="components/filters.js"></script>
+<script src="components/sidebar.js"></script>
+<script src="components/header.js"></script>
+
+<!-- ============================================================
+     CHARTS
+     ============================================================ -->
+<script src="assets/js/charts.js"></script>
+
+<!-- ============================================================
+     MODULES (16 functional modules)
+     ============================================================ -->
+<script src="assets/js/modules.js"></script>
+
+<!-- ============================================================
+     INTERACTIONS (modals, filters, search, sidebar, toasts)
+     ============================================================ -->
+<script src="assets/js/interactions.js"></script>
+
+<!-- ============================================================
+     APP SHELL / ROUTER — must load last
+     ============================================================ -->
+<script src="assets/js/app.js"></script>
+
+</body>
+</html>
