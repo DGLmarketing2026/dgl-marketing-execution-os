@@ -1,7 +1,7 @@
 (function (global) {
   "use strict";
 
-  const ENDPOINT = "https://script.google.com/a/macros/dglus.com/s/AKfycbz48XbgUkg4cNexwhzvXvN9lJsr9D0s4DUz5zzyO5wmIh1z5BRZHZVABO1EiBC_wcG0/exec";
+  const ENDPOINT = "https://script.google.com/macros/s/AKfycbz48XbgUkg4cNexwhzvXvN9lJsr9D0s4DUz5zzyO5wmIh1z5BRZHZVABO1EiBC_wcG0/exec";
   const KEY_NAME = "dgl_gas_api_key_session";
   const D = () => global.DGL_DATA;
   let live = false;
@@ -191,16 +191,12 @@
       if (!promptForKey || !(await ensureKey())) return false;
     }
 
-    setStatus("sync", "Sincronizando…");
+    setStatus("sync", "Cargando datos principales…");
 
     try {
-      const [bootstrap, abm, retention, growth, seo] = await Promise.all([
-        jsonp("bootstrap", {}, true),
-        jsonp("list", { module: "abm" }, true),
-        jsonp("list", { module: "retention" }, true),
-        jsonp("list", { module: "growth" }, true),
-        jsonp("list", { module: "seoGeo" }, true)
-      ]);
+      // Bootstrap is the only blocking request. Supplementary modules load
+      // afterward and never keep the platform stuck in "Sincronizando".
+      const bootstrap = await jsonp("bootstrap", {}, true);
 
       replaceArray("campaigns", (bootstrap.campaigns || []).map(mapCampaign));
       replaceArray(
@@ -236,25 +232,6 @@
         )
       );
       replaceArray(
-        "abmAccounts",
-        (abm || []).map((account) =>
-          Object.assign({}, account, {
-            currentServices: parseList(account.currentServices),
-            suggestedServices: parseList(account.suggestedServices),
-            activeCampaign: account.activeCampaignId || "Sin campaña"
-          })
-        )
-      );
-      replaceArray("retentionCampaigns", retention || []);
-      replaceArray(
-        "growthOpportunities",
-        (growth || []).map((opportunity) =>
-          Object.assign({}, opportunity, {
-            currentServices: parseList(opportunity.currentServices)
-          })
-        )
-      );
-      replaceArray(
         "governance",
         (bootstrap.approvals || []).map((approval) => ({
           id: approval.id,
@@ -270,15 +247,6 @@
           channel: approval.channel
         }))
       );
-
-      if (D().seoGeo && seo.length) {
-        D().seoGeo.strategicKeywords = seo.map((record) => ({
-          keyword: record.keyword || record.topic,
-          volume: Number(record.metricValue || 0),
-          visibility: Number(record.metricValue || 0),
-          trend: "flat"
-        }));
-      }
 
       const pendingTasks = (bootstrap.tasks || []).filter(
         (task) => task.status === "Pending"
@@ -302,14 +270,69 @@
 
       setStatus("online", "Apps Script conectado");
       rerender();
+
+      // Load non-critical modules in the background.
+      Promise.allSettled([
+        jsonp("list", { module: "abm" }, true),
+        jsonp("list", { module: "retention" }, true),
+        jsonp("list", { module: "growth" }, true),
+        jsonp("list", { module: "seoGeo" }, true)
+      ]).then((results) => {
+        const [abmResult, retentionResult, growthResult, seoResult] = results;
+
+        if (abmResult.status === "fulfilled") {
+          replaceArray(
+            "abmAccounts",
+            (abmResult.value || []).map((account) =>
+              Object.assign({}, account, {
+                currentServices: parseList(account.currentServices),
+                suggestedServices: parseList(account.suggestedServices),
+                activeCampaign: account.activeCampaignId || "Sin campaña"
+              })
+            )
+          );
+        }
+
+        if (retentionResult.status === "fulfilled") {
+          replaceArray("retentionCampaigns", retentionResult.value || []);
+        }
+
+        if (growthResult.status === "fulfilled") {
+          replaceArray(
+            "growthOpportunities",
+            (growthResult.value || []).map((opportunity) =>
+              Object.assign({}, opportunity, {
+                currentServices: parseList(opportunity.currentServices)
+              })
+            )
+          );
+        }
+
+        if (
+          seoResult.status === "fulfilled" &&
+          D().seoGeo &&
+          (seoResult.value || []).length
+        ) {
+          D().seoGeo.strategicKeywords = seoResult.value.map((record) => ({
+            keyword: record.keyword || record.topic,
+            volume: Number(record.metricValue || 0),
+            visibility: Number(record.metricValue || 0),
+            trend: "flat"
+          }));
+        }
+
+        rerender();
+      });
+
       return true;
     } catch (error) {
       if (/Unauthorized/i.test(error.message)) {
         sessionStorage.removeItem(KEY_NAME);
       }
 
-      setStatus("error", "Error de conexión");
+      setStatus("error", "Error: " + error.message);
       toast(error.message, "error");
+      console.error("DGL Apps Script sync failed:", error);
       return false;
     }
   }
