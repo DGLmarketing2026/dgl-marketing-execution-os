@@ -400,3 +400,82 @@
     mondayActionPlan
   };
 })(window);
+
+/**
+ * DGL Marketing Execution OS — Campaign Execution API Client
+ * ------------------------------------------------------------
+ * Talks to the Google Apps Script Web App that backs the "Campañas"
+ * sheet (real persistence, real audience generation, real Gmail
+ * drafts). This replaces the static campaigns sample array above
+ * with live data once the page finishes its first synchronous render.
+ *
+ * Fails silently to the sample data if the API is unreachable
+ * (offline, deploy URL changed, etc.) — console.warn only, never throws,
+ * so the rest of the platform keeps working exactly as before.
+ */
+(function (global) {
+  "use strict";
+
+  const API_BASE = "https://script.google.com/macros/s/AKfycbxBQ7R7Rjx6qerjZ1MeMWjO73sUkV53yAhpbMNACVae3ZFZLyPOn9CW8YVjEihT9z_iWw/exec";
+
+  async function apiGet(action, params) {
+    const qs = new URLSearchParams(Object.assign({ action: action }, params || {})).toString();
+    const res = await fetch(API_BASE + "?" + qs);
+    return res.json();
+  }
+
+  async function apiPost(body) {
+    const res = await fetch(API_BASE, { method: "POST", body: JSON.stringify(body) });
+    return res.json();
+  }
+
+  async function refreshCampaignsFromAPI() {
+    try {
+      const json = await apiGet("campaigns");
+      if (json && json.ok && Array.isArray(json.campaigns)) {
+        const arr = global.DGL_DATA.campaigns;
+        arr.length = 0;
+        json.campaigns.forEach(function (c) {
+          if (!c.cta) c.cta = "Ver Campaña";
+          arr.push(c);
+        });
+        global.DGL_DATA.meta.liveSync = true;
+        global.DGL_DATA.meta.lastSync = new Date().toISOString();
+        return true;
+      }
+    } catch (err) {
+      console.warn("DGL_API: no se pudo sincronizar campañas reales, se mantiene sample data.", err);
+    }
+    return false;
+  }
+
+  async function createCampaign(payload) {
+    return apiPost(Object.assign({ action: "create" }, payload));
+  }
+
+  async function updateCampaign(id, fields) {
+    return apiPost({ action: "update", id: id, fields: fields });
+  }
+
+  async function generateAudience(id, segmentFilter) {
+    return apiPost({ action: "generateAudience", id: id, segmentFilter: segmentFilter });
+  }
+
+  async function sendCampaignEmails(id) {
+    return apiPost({ action: "sendCampaignEmails", id: id });
+  }
+
+  async function logResponse(id) {
+    return apiPost({ action: "logResponse", id: id });
+  }
+
+  global.DGL_API = {
+    API_BASE: API_BASE,
+    refreshCampaignsFromAPI: refreshCampaignsFromAPI,
+    createCampaign: createCampaign,
+    updateCampaign: updateCampaign,
+    generateAudience: generateAudience,
+    sendCampaignEmails: sendCampaignEmails,
+    logResponse: logResponse
+  };
+})(window);
