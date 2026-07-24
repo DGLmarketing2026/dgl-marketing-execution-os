@@ -54,6 +54,19 @@
   global.DGL_INTERACTIONS.toast = toast;
 
   /* ---------------------------------------------------------------
+   * RE-RENDER HELPER (used after real writes to Campaign Execution)
+   * --------------------------------------------------------------- */
+  function rerenderCampaignView() {
+    const currentId = window.location.hash.replace("#/", "").trim();
+    if (currentId !== "campaign-execution") return;
+    const mainEl = document.getElementById("mainContent");
+    if (mainEl && global.DGL_MODULE_RENDERERS && global.DGL_MODULE_RENDERERS["campaign-execution"]) {
+      global.DGL_MODULE_RENDERERS["campaign-execution"](mainEl, true);
+    }
+  }
+  global.DGL_INTERACTIONS.rerenderCampaignView = rerenderCampaignView;
+
+  /* ---------------------------------------------------------------
    * DETAIL MODAL BUILDERS
    * --------------------------------------------------------------- */
   function detailRow(label, value) {
@@ -178,24 +191,78 @@
     UI().openModal({
       title: "Crear Nueva Campaña",
       bodyHtml: `
-        <div class="form-field"><label>Nombre de campaña</label><input type="text" placeholder="Ej. Reactivación 60 días — Automotriz" /></div>
+        <div class="form-field"><label>Nombre de campaña</label><input type="text" id="campName" placeholder="Ej. Reactivación 60 días — Automotriz" /></div>
         <div class="form-grid-2">
           <div class="form-field"><label>Tipo de campaña</label>
-            <select>${types.map((t) => `<option ${t === preset ? "selected" : ""}>${t}</option>`).join("")}</select>
+            <select id="campType">${types.map((t) => `<option ${t === preset ? "selected" : ""}>${t}</option>`).join("")}</select>
           </div>
-          <div class="form-field"><label>Canal</label><select><option>Email</option><option>Email + Llamada</option><option>Email + LinkedIn</option><option>Email masivo segmentado</option></select></div>
+          <div class="form-field"><label>Canal</label><select id="campChannel"><option>Email</option><option>Email + Llamada</option><option>Email + LinkedIn</option><option>Email masivo segmentado</option></select></div>
         </div>
-        <div class="form-field"><label>Segmento objetivo</label><input type="text" placeholder="Ej. Inactive-60 · Industrial" /></div>
+        <div class="form-field"><label>Segmento objetivo</label><input type="text" id="campSegment" placeholder="Ej. Inactive-60 · Industrial" /></div>
         <div class="form-grid-2">
-          <div class="form-field"><label>KPI principal</label><input type="text" placeholder="Ej. Cuentas reactivadas" /></div>
-          <div class="form-field"><label>Responsable</label><input type="text" placeholder="Ej. C. Serna" /></div>
+          <div class="form-field"><label>KPI principal</label><input type="text" id="campKpi" placeholder="Ej. Cuentas reactivadas" /></div>
+          <div class="form-field"><label>Responsable</label><input type="text" id="campOwner" placeholder="Ej. C. Serna" /></div>
         </div>
-        <div class="form-field"><label>Resultado esperado</label><input type="text" placeholder="Ej. 4 cuentas reactivadas en 30 días" /></div>
+        <div class="form-field"><label>Resultado esperado</label><input type="text" id="campExpected" placeholder="Ej. 4 cuentas reactivadas en 30 días" /></div>
       `,
       footHtml: `<button class="btn btn-ghost" data-action="close-modal">Cancelar</button>
         <button class="btn btn-primary" data-action="submit-create-campaign"><i data-lucide="check"></i>Crear Campaña</button>`
     });
   }
+
+  function campaignDetailBody(c) {
+    const approvalOptions = ["Pendiente", "Aprobada", "En revisión", "Rechazada"];
+    const statusOptions = ["Draft", "Scheduled", "Active", "Paused", "Completed"];
+    return `
+      <div class="flex justify-between" style="margin-bottom:12px">
+        <span class="tag">${c.type}</span>
+        <span class="badge badge-info">${c.approvalStatus || "Pendiente"}</span>
+      </div>
+      ${detailRow("Objetivo", c.objective)}
+      ${detailRow("Segmento", c.segment)}
+      ${detailRow("Canal", c.channel)}
+      ${detailRow("KPI", c.kpi)}
+      ${detailRow("Resultado esperado", c.expectedResult)}
+      ${detailRow("Audiencia real generada", (c.audienceCount || 0) + " cuentas")}
+      ${detailRow("Borradores de email creados", c.emailsSent || 0)}
+      ${detailRow("Respuestas registradas", c.responsesLogged || 0)}
+      <div class="divider"></div>
+      <div class="form-grid-2">
+        <div class="form-field"><label>Estado operativo</label>
+          <select id="editStatus">${statusOptions.map((s) => `<option ${s === c.status ? "selected" : ""}>${s}</option>`).join("")}</select>
+        </div>
+        <div class="form-field"><label>Estado de aprobación</label>
+          <select id="editApproval">${approvalOptions.map((s) => `<option ${s === c.approvalStatus ? "selected" : ""}>${s}</option>`).join("")}</select>
+        </div>
+      </div>
+      <div class="form-grid-2">
+        <div class="form-field"><label>Responsable</label><input type="text" id="editOwner" value="${c.owner || ""}" /></div>
+        <div class="form-field"><label>Fecha límite</label><input type="text" id="editDueDate" placeholder="AAAA-MM-DD" value="${c.dueDate || ""}" /></div>
+      </div>
+      <div class="form-field"><label>Próxima acción</label><input type="text" id="editNextAction" value="${c.nextAction || ""}" /></div>
+    `;
+  }
+
+  function campaignDetailFoot(c) {
+    return `
+      <button class="btn btn-ghost" data-action="close-modal">Cerrar</button>
+      <button class="btn btn-secondary" data-action="generate-audience" data-id="${c.id}"><i data-lucide="users"></i>Generar Audiencia</button>
+      <button class="btn btn-secondary" data-action="log-campaign-response" data-id="${c.id}"><i data-lucide="reply"></i>Registrar Respuesta</button>
+      <button class="btn btn-secondary" data-action="send-campaign-emails" data-id="${c.id}"><i data-lucide="mail"></i>Crear Borradores</button>
+      <button class="btn btn-primary" data-action="save-campaign-edit" data-id="${c.id}"><i data-lucide="check"></i>Guardar Cambios</button>
+    `;
+  }
+
+  function openCampaignDetail(id) {
+    const c = D().campaigns.find((x) => x.id === id);
+    if (!c) return;
+    UI().openModal({
+      title: c.name,
+      bodyHtml: campaignDetailBody(c),
+      footHtml: campaignDetailFoot(c)
+    });
+  }
+  global.DGL_INTERACTIONS.openCampaignDetail = openCampaignDetail;
 
   function openSimpleForm(title, fields, submitAction, submitLabel) {
     UI().openModal({
@@ -204,6 +271,128 @@
       footHtml: `<button class="btn btn-ghost" data-action="close-modal">Cancelar</button>
         <button class="btn btn-primary" data-action="${submitAction}"><i data-lucide="check"></i>${submitLabel}</button>`
     });
+  }
+
+  /* ---------------------------------------------------------------
+   * REAL CAMPAIGN EXECUTION ACTIONS (talk to DGL_API / Apps Script)
+   * --------------------------------------------------------------- */
+  async function handleSubmitCreateCampaign() {
+    const val = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : ""; };
+    const payload = {
+      name: val("campName"),
+      type: val("campType"),
+      channel: val("campChannel"),
+      segment: val("campSegment"),
+      kpi: val("campKpi"),
+      owner: val("campOwner"),
+      expectedResult: val("campExpected")
+    };
+    if (!payload.name) {
+      toast("Escribe un nombre de campaña antes de crearla.", "error");
+      return;
+    }
+    if (!global.DGL_API) {
+      toast("API de campañas no disponible. Revisa la conexión.", "error");
+      return;
+    }
+    UI().closeModal();
+    toast("Creando campaña...");
+    try {
+      const res = await global.DGL_API.createCampaign(payload);
+      if (res && res.ok) {
+        if (!res.campaign.cta) res.campaign.cta = "Ver Campaña";
+        D().campaigns.push(res.campaign);
+        toast("Campaña " + res.campaign.name + " creada (" + res.campaign.id + ").");
+        rerenderCampaignView();
+      } else {
+        toast("No se pudo crear la campaña: " + (res && res.error ? res.error : "error desconocido"), "error");
+      }
+    } catch (err) {
+      toast("Error de conexión al crear la campaña.", "error");
+    }
+  }
+
+  async function handleSaveCampaignEdit(id) {
+    const val = (elId) => { const el = document.getElementById(elId); return el ? el.value.trim() : undefined; };
+    const fields = {
+      status: val("editStatus"),
+      approvalStatus: val("editApproval"),
+      owner: val("editOwner"),
+      dueDate: val("editDueDate"),
+      nextAction: val("editNextAction")
+    };
+    if (!global.DGL_API) { toast("API de campañas no disponible.", "error"); return; }
+    toast("Guardando cambios...");
+    try {
+      const res = await global.DGL_API.updateCampaign(id, fields);
+      if (res && res.ok) {
+        const idx = D().campaigns.findIndex((c) => c.id === id);
+        if (idx !== -1) D().campaigns[idx] = res.campaign;
+        UI().closeModal();
+        toast("Campaña actualizada.");
+        rerenderCampaignView();
+      } else {
+        toast("No se pudo guardar: " + (res && res.error ? res.error : "error desconocido"), "error");
+      }
+    } catch (err) {
+      toast("Error de conexión al guardar cambios.", "error");
+    }
+  }
+
+  async function handleGenerateAudience(id) {
+    if (!global.DGL_API) { toast("API de campañas no disponible.", "error"); return; }
+    toast("Generando audiencia real desde el CRM...");
+    try {
+      const res = await global.DGL_API.generateAudience(id);
+      if (res && res.ok) {
+        const c = D().campaigns.find((x) => x.id === id);
+        if (c) c.audienceCount = res.audienceTotal;
+        toast("Audiencia generada: +" + res.audienceAdded + " cuentas (total " + res.audienceTotal + ").");
+        openCampaignDetail(id);
+        rerenderCampaignView();
+      } else {
+        toast("No se pudo generar audiencia: " + (res && res.error ? res.error : "error desconocido"), "error");
+      }
+    } catch (err) {
+      toast("Error de conexión al generar audiencia.", "error");
+    }
+  }
+
+  async function handleSendCampaignEmails(id) {
+    if (!global.DGL_API) { toast("API de campañas no disponible.", "error"); return; }
+    toast("Creando borradores de email en Gmail...");
+    try {
+      const res = await global.DGL_API.sendCampaignEmails(id);
+      if (res && res.ok) {
+        const c = D().campaigns.find((x) => x.id === id);
+        if (c) c.emailsSent = res.emailsSentTotal;
+        toast(res.draftsCreated + " borradores creados en Gmail. Revísalos antes de enviar.");
+        openCampaignDetail(id);
+        rerenderCampaignView();
+      } else {
+        toast("No se pudieron crear borradores: " + (res && res.error ? res.error : "error desconocido"), "error");
+      }
+    } catch (err) {
+      toast("Error de conexión al crear borradores.", "error");
+    }
+  }
+
+  async function handleLogCampaignResponse(id) {
+    if (!global.DGL_API) { toast("API de campañas no disponible.", "error"); return; }
+    try {
+      const res = await global.DGL_API.logResponse(id);
+      if (res && res.ok) {
+        const c = D().campaigns.find((x) => x.id === id);
+        if (c) c.responsesLogged = res.responsesLogged;
+        toast("Respuesta registrada (" + res.responsesLogged + " en total).");
+        openCampaignDetail(id);
+        rerenderCampaignView();
+      } else {
+        toast("No se pudo registrar la respuesta.", "error");
+      }
+    } catch (err) {
+      toast("Error de conexión al registrar respuesta.", "error");
+    }
   }
 
   /* ---------------------------------------------------------------
@@ -221,13 +410,19 @@
       case "open-growth-detail": openGrowthDetail(id); break;
       case "open-abm-detail": openAbmDetail(id); break;
       case "open-asset-detail": openAssetDetail(id); break;
+      case "open-campaign": openCampaignDetail(id); break;
       case "open-create-campaign": openCreateCampaign(btn.dataset.preset); break;
       case "open-sequence-builder": openSimpleForm("Nueva Secuencia de Email", ["Nombre de la secuencia", "Trigger de activación", "Segmento", "Número de emails"], "submit-generic", "Crear Secuencia"); break;
       case "open-create-playbook": openSimpleForm("Nuevo Playbook de Automatización", ["Nombre del playbook", "Trigger", "Segmento", "Acción a ejecutar", "Canal"], "submit-generic", "Crear Playbook"); break;
       case "open-upload-asset": openSimpleForm("Agregar Asset a la Biblioteca", ["Título del asset", "Tipo", "Servicio relacionado", "Segmento objetivo"], "submit-generic", "Guardar Asset"); break;
       case "open-add-abm": openSimpleForm("Agregar Cuenta ABM", ["Nombre de la cuenta", "Perfil comercial", "Servicios actuales", "Servicio sugerido"], "submit-generic", "Agregar Cuenta"); break;
 
-      case "submit-create-campaign": UI().closeModal(); toast("Campaña creada en modo demo. Se sincronizará al conectar CRM."); break;
+      case "submit-create-campaign": handleSubmitCreateCampaign(); break;
+      case "save-campaign-edit": handleSaveCampaignEdit(id); break;
+      case "generate-audience": handleGenerateAudience(id); break;
+      case "send-campaign-emails": handleSendCampaignEmails(id); break;
+      case "log-campaign-response": handleLogCampaignResponse(id); break;
+
       case "submit-generic": UI().closeModal(); toast("Guardado en modo demo."); break;
       case "mark-recovery-sent": UI().closeModal(); toast("Acción de recuperación registrada."); break;
       case "enroll-sequence": UI().closeModal(); toast("Cuenta inscrita en secuencia de reactivación."); break;

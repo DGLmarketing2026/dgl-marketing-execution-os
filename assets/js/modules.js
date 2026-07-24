@@ -120,7 +120,7 @@
   /* ===================================================================
    * 2. CAMPAIGN EXECUTION CENTER
    * =================================================================== */
-  function renderCampaignExecution(container) {
+  function renderCampaignExecution(container, alreadySynced) {
     const campaigns = D().campaigns;
     const types = [...new Set(campaigns.map((c) => c.type))];
     const statuses = [...new Set(campaigns.map((c) => c.status))];
@@ -129,7 +129,7 @@
       ${pageHead({
         eyebrow: "Campaign Execution Center",
         title: "Centro de Ejecución de Campañas",
-        lede: "Planeación, lanzamiento y monitoreo de campañas orientadas a conversión, reactivación, retención y crecimiento de cartera.",
+        lede: "Planeación, lanzamiento y monitoreo de campañas orientadas a conversión, reactivación, retención y crecimiento de cartera." + (D().meta.liveSync ? " — Conectado a datos reales." : ""),
         actions: `<button class="btn btn-primary" data-action="open-create-campaign"><i data-lucide="plus"></i>Crear Campaña</button>`
       })}
       ${UI().filterBar({ scope: "campaigns", searchPlaceholder: "Buscar campaña...", selects: [{ key: "type", label: "Tipo", options: types }, { key: "status", label: "Estado", options: statuses }], resultCount: campaigns.length })}
@@ -144,6 +144,18 @@
     renderResults(campaigns);
     global.DGL_INTERACTIONS.wireFilters(scope, campaigns, { search: ["name", "objective", "segment"] }, renderResults);
     afterRender();
+
+    // Refresh once from the real Campaign Execution API (Apps Script + Sheet).
+    // Falls back silently to sample data if the API is unreachable; on
+    // success it re-renders this same module with the live campaigns.
+    if (!alreadySynced && global.DGL_API) {
+      global.DGL_API.refreshCampaignsFromAPI().then(function (changed) {
+        const stillOnThisView = window.location.hash.replace("#/", "").trim() === "campaign-execution";
+        if (changed && stillOnThisView) {
+          renderCampaignExecution(container, true);
+        }
+      });
+    }
   }
 
   /* ===================================================================
