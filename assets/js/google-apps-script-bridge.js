@@ -5,6 +5,7 @@
   const KEY_NAME = "dgl_gas_api_key_session";
   const D = () => global.DGL_DATA;
   let live = false;
+  let syncing = false;
 
   function key() { return sessionStorage.getItem(KEY_NAME) || ""; }
   function today() { return new Date().toISOString().slice(0, 10); }
@@ -157,14 +158,20 @@
   function markLive() {
     if (!live) return;
 
+    let changed = false;
     document.querySelectorAll(".sample-flag").forEach((element) => {
-      element.innerHTML =
-        '<i data-lucide="database" style="width:11px;height:11px"></i> Datos en vivo';
+      if (element.dataset.dglLive === "true") return;
+
+      element.dataset.dglLive = "true";
+      element.textContent = "DATOS EN VIVO";
       element.style.color = "#9fe870";
       element.style.borderColor = "rgba(119,184,42,.45)";
+      changed = true;
     });
 
-    if (global.lucide) global.lucide.createIcons();
+    if (changed && global.lucide && typeof global.lucide.createIcons === "function") {
+      global.lucide.createIcons();
+    }
   }
 
   function updateAnalytics(dashboard) {
@@ -187,16 +194,28 @@
   }
 
   async function syncAll(promptForKey) {
+    if (syncing) return false;
     if (!key()) {
       if (!promptForKey || !(await ensureKey())) return false;
     }
 
+    syncing = true;
     setStatus("sync", "Cargando datos principales…");
 
     try {
-      // Bootstrap is the only blocking request. Supplementary modules load
-      // afterward and never keep the platform stuck in "Sincronizando".
-      const bootstrap = await jsonp("bootstrap", {}, true);
+      // Keep the initial connection lightweight and reliable.
+      const campaigns = await jsonp("list", { module: "campaigns" }, true);
+      const bootstrap = {
+        campaigns: Array.isArray(campaigns) ? campaigns : [],
+        customers: [],
+        quotes: [],
+        sequences: [],
+        playbooks: [],
+        assets: [],
+        approvals: [],
+        tasks: [],
+        dashboard: {}
+      };
 
       replaceArray("campaigns", (bootstrap.campaigns || []).map(mapCampaign));
       replaceArray(
@@ -334,6 +353,8 @@
       toast(error.message, "error");
       console.error("DGL Apps Script sync failed:", error);
       return false;
+    } finally {
+      syncing = false;
     }
   }
 
@@ -719,7 +740,7 @@
       })
       .catch(() => setStatus("error", "Backend no disponible"));
 
-    new MutationObserver(markLive).observe(document.body, {
+    new MutationObserver(() => { if (live) markLive(); }).observe(document.body, {
       childList: true,
       subtree: true
     });
