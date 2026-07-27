@@ -214,22 +214,7 @@ const bootstrap = {
   dashboard: {}
 };
 
-const value = (index, fallback) =>
-  results[index].status === "fulfilled"
-    ? results[index].value
-    : fallback;
-
-const bootstrap = {
-  campaigns: value(0, []),
-  customers: value(1, []),
-  quotes: value(2, []),
-  sequences: value(3, []),
-  playbooks: value(4, []),
-  assets: value(5, []),
-  approvals: value(6, []),
-  tasks: value(7, []),
-  dashboard: value(8, {})
-};
+const campaigns = await jsonp(
 
       replaceArray("campaigns", (bootstrap.campaigns || []).map(mapCampaign));
       replaceArray(
