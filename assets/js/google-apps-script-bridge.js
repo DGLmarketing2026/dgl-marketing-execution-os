@@ -154,65 +154,7 @@
     setTimeout(markLive, 20);
   }
 
- function markLive() {
-  if (!live) return;
-
-  let changed = false;
-
-  document.querySelectorAll(".sample-flag").forEach((element) => {
-    if (element.dataset.dglLive === "true") return;
-
-    element.dataset.dglLive = "true";
-    element.innerHTML =
-      '<i data-lucide="database" style="width:11px;height:11px"></i> Datos en vivo';
-    element.style.color = "#9fe870";
-    element.style.borderColor = "rgba(119,184,42,.45)";
-    changed = true;
-  });
-
-  if (changed && global.lucide) {
-    global.lucide.createIcons();
-  }
-}
-  if (!live) return;
-
-  let changed = false;
-
-  document.querySelectorAll(".sample-flag").forEach((element) => {
-    if (element.dataset.dglLive === "true") return;
-
-    element.dataset.dglLive = "true";
-    element.innerHTML =
-      '<i data-lucide="database" style="width:11px;height:11px"></i> Datos en vivo';
-    element.style.color = "#9fe870";
-    element.style.borderColor = "rgba(119,184,42,.45)";
-    changed = true;
-  });
-
-  if (changed && global.lucide) {
-    global.lucide.createIcons();
-  }
-}
-  if (!live) return;
-
-  let changed = false;
-
-  document.querySelectorAll(".sample-flag").forEach((element) => {
-    if (element.dataset.dglLive === "true") return;
-
-    element.dataset.dglLive = "true";
-    element.innerHTML =
-      '<i data-lucide="database" style="width:11px;height:11px"></i> Datos en vivo';
-    element.style.color = "#9fe870";
-    element.style.borderColor = "rgba(119,184,42,.45)";
-    changed = true;
-  });
-
-  if (changed && global.lucide) {
-    global.lucide.createIcons();
-  }
-}
-  
+  function markLive() {
     if (!live) return;
 
     document.querySelectorAll(".sample-flag").forEach((element) => {
@@ -254,24 +196,7 @@
     try {
       // Bootstrap is the only blocking request. Supplementary modules load
       // afterward and never keep the platform stuck in "Sincronizando".
-  const campaigns = await jsonp(
-  "list",
-  { module: "campaigns" },
-  true
-);
-
-const bootstrap = {
-  campaigns: Array.isArray(campaigns) ? campaigns : [],
-  customers: [],
-  quotes: [],
-  sequences: [],
-  playbooks: [],
-  assets: [],
-  approvals: [],
-  tasks: [],
-  dashboard: {}
-};
-
+      const bootstrap = await jsonp("bootstrap", {}, true);
 
       replaceArray("campaigns", (bootstrap.campaigns || []).map(mapCampaign));
       replaceArray(
