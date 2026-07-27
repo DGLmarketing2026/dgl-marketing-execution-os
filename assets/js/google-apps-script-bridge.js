@@ -193,6 +193,25 @@
     global.lucide.createIcons();
   }
 }
+  if (!live) return;
+
+  let changed = false;
+
+  document.querySelectorAll(".sample-flag").forEach((element) => {
+    if (element.dataset.dglLive === "true") return;
+
+    element.dataset.dglLive = "true";
+    element.innerHTML =
+      '<i data-lucide="database" style="width:11px;height:11px"></i> Datos en vivo';
+    element.style.color = "#9fe870";
+    element.style.borderColor = "rgba(119,184,42,.45)";
+    changed = true;
+  });
+
+  if (changed && global.lucide) {
+    global.lucide.createIcons();
+  }
+}
   
     if (!live) return;
 
