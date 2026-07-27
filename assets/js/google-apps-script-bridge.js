@@ -196,17 +196,23 @@
     try {
       // Bootstrap is the only blocking request. Supplementary modules load
       // afterward and never keep the platform stuck in "Sincronizando".
-   const results = await Promise.allSettled([
-  jsonp("list", { module: "campaigns" }, true),
-  jsonp("list", { module: "customers" }, true),
-  jsonp("list", { module: "quotes" }, true),
-  jsonp("list", { module: "emailSequences" }, true),
-  jsonp("list", { module: "playbooks" }, true),
-  jsonp("list", { module: "assets" }, true),
-  jsonp("list", { module: "approvals" }, true),
-  jsonp("list", { module: "campaignTasks" }, true),
-  jsonp("dashboard", {}, true)
-]);
+  const campaigns = await jsonp(
+  "list",
+  { module: "campaigns" },
+  true
+);
+
+const bootstrap = {
+  campaigns: Array.isArray(campaigns) ? campaigns : [],
+  customers: [],
+  quotes: [],
+  sequences: [],
+  playbooks: [],
+  assets: [],
+  approvals: [],
+  tasks: [],
+  dashboard: {}
+};
 
 const value = (index, fallback) =>
   results[index].status === "fulfilled"
