@@ -214,7 +214,6 @@ const bootstrap = {
   dashboard: {}
 };
 
-const campaigns = await jsonp(
 
       replaceArray("campaigns", (bootstrap.campaigns || []).map(mapCampaign));
       replaceArray(
