@@ -38,7 +38,7 @@
           <div class="avatar">CS</div>
           <div>
             <div class="name">Cristian Serna</div>
-            <div class="role">Director de Marketing</div>
+            <div class="role">Team Leader Marketing</div>
           </div>
         </div>
       </div>
