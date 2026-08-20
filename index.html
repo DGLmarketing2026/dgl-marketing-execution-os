@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>DGL Marketing Execution OS</title>
-<meta name="description" content="Plataforma interna de ejecución de Marketing para Dedicated Ground Logistics (DGL). Conversión, retención, reactivación y crecimiento de cartera." />
+<title>DGL Marketing Campaign OS · V3</title>
+<meta name="description" content="Plataforma interna de Marketing para convertir señales de NOVA y Salesforce en audiencias, campañas y revenue atribuible sobre cuentas existentes." />
 
 <script>
 (function () {
@@ -42,9 +42,7 @@
     if (e.target && e.target.id === "bootReload") window.location.reload();
   });
   setTimeout(function () {
-    if (!ready) {
-      report("La plataforma tarda más de lo esperado en iniciar. Revisa la consola del navegador (F12 → Console) para ver el detalle.");
-    }
+    if (!ready) report("La plataforma tarda más de lo esperado en iniciar. Revisa la consola del navegador (F12 → Console) para ver el detalle.");
   }, 8000);
 })();
 </script>
@@ -61,7 +59,7 @@
 <div id="app">
   <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;color:#6B7280;font-family:Inter,-apple-system,sans-serif;font-size:13px;text-align:center;padding:24px;background:#060816">
     <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#77B82A,#5a9420);display:flex;align-items:center;justify-content:center;font-weight:800;color:#06210a;font-size:15px">DG</div>
-    <div>Cargando DGL Marketing Execution OS…</div>
+    <div>Cargando DGL Marketing Campaign OS…</div>
     <div id="bootError" style="display:none;max-width:520px;color:#ff9c9c;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:14px 16px;font-size:12px;line-height:1.6;text-align:left;white-space:pre-line"></div>
     <button id="bootReload" style="display:none;padding:8px 18px;border-radius:8px;border:1px solid rgba(255,255,255,0.16);background:rgba(255,255,255,0.06);color:#fff;font-size:12px;cursor:pointer;font-family:inherit">Reintentar</button>
   </div>
@@ -76,11 +74,13 @@
 <script src="components/filters.js"></script>
 <script src="components/sidebar.js"></script>
 <script src="components/header.js"></script>
-
 <script src="assets/js/charts.js"></script>
 <script src="assets/js/modules.js"></script>
+<script src="assets/js/account-growth-os-v112.js?v=20260811-2"></script>
+<script src="assets/js/marketing-campaign-os-v2.js?v=20260819-1"></script>
+<script src="assets/js/campaign-studio-v3.js?v=20260819-3"></script>
 <script src="assets/js/interactions.js"></script>
-<script src="assets/js/app.js"></script>
+<script src="assets/js/app.js?v=20260819-3"></script>
 
 </body>
 </html>
