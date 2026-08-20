@@ -1,6 +1,5 @@
 /**
- * DGL Marketing Campaign OS — App Shell / Router
- * NOVA/Salesforce -> Audiences -> Campaigns -> Channels -> Attribution
+ * DGL Marketing Campaign OS — App Shell / Router V5
  */
 (function (global) {
   "use strict";
@@ -15,6 +14,7 @@
     {
       label: "Campaigns",
       items: [
+        { id: "campaign-opportunities", label: "Campaign Opportunity Center", icon: "radar", group: "Campaigns" },
         { id: "campaign-execution", label: "Campaign Control", icon: "megaphone", group: "Campaigns" },
         { id: "campaign-studio", label: "Campaign Studio", icon: "palette", group: "Campaigns" },
         { id: "reactivation", label: "Reactivation Campaigns", icon: "refresh-cw", group: "Campaigns" },
@@ -76,12 +76,10 @@
   function getModuleById(id) {
     return ALL_MODULES.find((m) => m.id === id) || ALL_MODULES.find((m) => m.id === DEFAULT_MODULE);
   }
-
   function currentRouteId() {
     const hash = window.location.hash.replace("#/", "").trim();
     return ALL_MODULES.some((m) => m.id === hash) ? hash : DEFAULT_MODULE;
   }
-
   function renderShellOnce() {
     const root = document.getElementById("app");
     root.innerHTML = `
@@ -93,29 +91,26 @@
         </div>
       </div>
       <div class="quick-actions-fab" id="quickFab" style="display:none;position:fixed;bottom:20px;right:20px;z-index:150">
-        <a href="#/nova-audiences" class="btn btn-primary" title="NOVA Audience Engine" style="border-radius:999px;width:54px;height:54px;padding:0;box-shadow:0 10px 26px rgba(119,184,42,0.4);display:flex;align-items:center;justify-content:center">
-          <i data-lucide="database"></i>
+        <a href="#/campaign-opportunities" class="btn btn-primary" title="Campaign Opportunity Center" style="border-radius:999px;width:54px;height:54px;padding:0;box-shadow:0 10px 26px rgba(119,184,42,0.4);display:flex;align-items:center;justify-content:center">
+          <i data-lucide="radar"></i>
         </a>
       </div>
       <nav class="bottom-nav" id="bottomNav" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#0a0c1e;border-top:1px solid var(--border);padding:8px 6px;justify-content:space-around;z-index:140">
         <a href="#/command-center" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="layout-dashboard"></i>Home</a>
-        <a href="#/nova-audiences" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="database"></i>Audiences</a>
-        <a href="#/campaign-execution" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="megaphone"></i>Campaigns</a>
+        <a href="#/campaign-opportunities" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="radar"></i>Opportunities</a>
+        <a href="#/campaign-studio" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="palette"></i>Studio</a>
         <a href="#/service-marketing" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="layers-3"></i>Services</a>
         <a href="#/campaign-attribution" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="circle-dollar-sign"></i>Revenue</a>
       </nav>
     `;
-
     document.getElementById("quickFab").style.display = "";
     document.getElementById("bottomNav").style.display = "";
   }
-
   function renderRoute() {
     const id = currentRouteId();
     const mod = getModuleById(id);
     const mainEl = document.getElementById("mainContent");
     const headerMount = document.getElementById("headerMount");
-
     headerMount.innerHTML = window.DGL_UI.renderHeader(mod);
     mainEl.innerHTML = window.DGL_UI.skeletonKpis(4);
     if (window.lucide) window.lucide.createIcons();
@@ -124,9 +119,8 @@
       setTimeout(() => {
         try {
           const renderer = window.DGL_MODULE_RENDERERS[id];
-          if (renderer) {
-            renderer(mainEl);
-          } else {
+          if (renderer) renderer(mainEl);
+          else {
             mainEl.innerHTML = window.DGL_UI.emptyState({
               icon: "alert-triangle",
               title: "Módulo no encontrado",
@@ -146,7 +140,6 @@
       }, 120);
     });
   }
-
   function init() {
     try {
       renderShellOnce();
@@ -159,12 +152,9 @@
       if (window.__dglMarkReady) window.__dglMarkReady();
     } catch (err) {
       console.error("DGL Marketing Campaign OS — fallo al iniciar:", err);
-      if (window.__dglBootFail) {
-        window.__dglBootFail("Error al iniciar la aplicación: " + (err && err.message ? err.message : err));
-      }
+      if (window.__dglBootFail) window.__dglBootFail("Error al iniciar la aplicación: " + (err && err.message ? err.message : err));
     }
   }
-
   document.addEventListener("DOMContentLoaded", init);
   global.DGL_APP = { MODULE_GROUPS, ALL_MODULES };
 })(window);
