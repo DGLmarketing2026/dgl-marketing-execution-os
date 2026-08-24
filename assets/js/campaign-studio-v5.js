@@ -105,23 +105,36 @@
 
   function brandHeader(s,isDark=false){
     if(s.logoUrl){
-      return `<img src="${esc(s.logoUrl)}" alt="DGL Freight Broker" style="display:block;max-width:190px;max-height:68px;border:0">`;
+      return `<div style="min-height:42px;position:relative"><div style="position:absolute;left:0;top:0;height:42px;display:flex;align-items:center;border-left:4px solid #77B82A;padding-left:13px;font-family:Arial,sans-serif;font-size:11px;font-weight:900;letter-spacing:1.8px;color:${isDark?"#fff":"#05035C"}">DEDICATED GROUND LOGISTICS</div><img src="${esc(s.logoUrl)}" alt="Official DGL logo" onerror="this.style.display='none'" style="position:relative;display:block;max-width:190px;max-height:68px;border:0;background:${isDark?"#07112E":"#fff"}"></div>`;
     }
     return `<div style="height:42px;display:flex;align-items:center;border-left:4px solid #77B82A;padding-left:13px">
       <div style="font-family:Arial,sans-serif;font-size:11px;font-weight:900;letter-spacing:1.8px;color:${isDark?"#fff":"#05035C"}">DEDICATED GROUND LOGISTICS</div>
     </div>`;
   }
 
-  function heroAsset(s,height=250){
-    if(s.heroUrl) return `<img src="${esc(s.heroUrl)}" alt="" style="display:block;width:100%;height:${height}px;object-fit:cover;border:0">`;
+  function assetPath(s){
     const svc=Lib().SERVICES[s.service]||Lib().SERVICES.Multiservicio;
-    return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="height:${height}px;background:linear-gradient(145deg,#05035C 0%,#111B4A 58%,#77B82A 180%);background-color:#05035C">
-      <tr><td style="padding:30px;font-family:Arial,sans-serif;vertical-align:bottom">
-        <div style="width:38px;height:4px;background:#77B82A;margin-bottom:14px"></div>
-        <div style="font-size:9px;font-weight:900;letter-spacing:1.8px;color:#A8D879">DGL GROUND NETWORK</div>
-        <div style="font-size:27px;line-height:1.05;font-weight:900;color:#FFFFFF;margin-top:8px">${esc(svc.label)}</div>
-        <div style="font-size:10px;line-height:1.5;color:#CAD2E5;margin-top:9px">Capacity · coordination · visibility</div>
-      </td></tr></table>`;
+    return s.heroUrl||svc.asset||"assets/creative/ftl-53-dry-van.svg";
+  }
+
+  function heroAsset(s,height=250){
+    const svc=Lib().SERVICES[s.service]||Lib().SERVICES.Multiservicio;
+    return `<div style="height:${height}px;background:#E8EDF0;position:relative;overflow:hidden">
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;font-family:Arial,sans-serif;text-align:center;color:#667085;font-size:11px">${esc(svc.visual||"Approved logistics asset")}</div>
+      <img src="${esc(assetPath(s))}" alt="${esc(svc.visual||svc.name)}" onerror="this.style.display='none'" style="position:relative;display:block;width:100%;height:${height}px;object-fit:cover;border:0">
+    </div>`;
+  }
+
+  function thumbnail(s){
+    const composition={
+      editorial:`<div class="mini-copy"><b>MOVE FREIGHT.</b><i></i><small>Capacity that responds.</small><em>START A MOVE</em></div><div class="mini-photo"></div>`,
+      split:`<div class="mini-dark"><small>GROUND CAPACITY</small><b>READY<br>TO MOVE.</b><em>GET CAPACITY</em></div><div class="mini-photo"></div>`,
+      route:`<small>ROUTE INTELLIGENCE</small><b>PORT → INLAND</b><div class="mini-route"><i></i><i></i><i></i></div>`,
+      service:`<small>SERVICE ARCHITECTURE</small><b>ONE PARTNER.<br>MORE OPTIONS.</b><div class="mini-modules"><i>FTL</i><i>LTL</i><i>PORT</i></div>`,
+      case:`<small>CASE / PROOF</small><b>CONTINUITY<br>IN MOTION.</b><div class="mini-proof"><i>PROBLEM</i><i>SOLUTION</i><i>RESULT</i></div>`,
+      minimal:`<small>DIRECT COMMERCIAL NOTE</small><b>IS THIS MOVE<br>STILL ACTIVE?</b><p>A short response keeps the quote moving.</p><em>REPLY</em>`
+    };
+    return composition[s.thumb]||composition.editorial;
   }
 
   function emailHtml(){
@@ -263,12 +276,14 @@
     if(service)service.textContent=s.service;
     const objective=document.getElementById("v5ObjectiveValue");
     if(objective)objective.textContent=s.objective;
+    const asset=document.querySelector("#v5HeroAssetPreview img"),svc=Lib().SERVICES[s.service]||Lib().SERVICES.Multiservicio;
+    if(asset){asset.src=assetPath(s);asset.alt=svc.visual||`${svc.name} hero asset`;asset.onerror=()=>{asset.hidden=true};asset.hidden=false}
   }
 
   function updateQA(){
     const set=(id,on,text)=>{const e=document.getElementById(id);if(e)e.innerHTML=`<i data-lucide="${on?"check-circle-2":"circle"}"></i>${text}`};
     set("qaBrand",!!value("v5LogoUrl"),value("v5LogoUrl")?"Official logo loaded":"Official logo pending");
-    set("qaVisual",!!value("v5HeroUrl"),value("v5HeroUrl")?"Hero asset loaded":"Hero optional / pending");
+    set("qaVisual",true,value("v5HeroUrl")?"Approved hero loaded":"Service hero loaded");
     set("qaCopy",!!value("v5Headline"),"Message generated");
     set("qaApproval",state.approved,state.approved?"Creative approved":"Approval pending");
     if(global.lucide)global.lucide.createIcons();
@@ -281,7 +296,7 @@
       <div class="v5-topbar">
         <div>
           <div class="v5-kicker">Creative Conversion Engine</div>
-          <h1>Campaign Studio <span>V5.2</span></h1>
+          <h1>Campaign Studio <span>V5.3</span></h1>
           <p>Convierte una oportunidad validada en una campaña con estrategia, diseño, copy, secuencia y aprobación creativa.</p>
         </div>
         <div class="v5-top-actions">
@@ -324,15 +339,15 @@
             <div class="v5-section-head"><div><h3>Creative Direction</h3><p>Basado en el lenguaje visual histórico de DGL, sin copiar piezas anteriores.</p></div><span class="v5-badge green">6 SYSTEMS</span></div>
             <div class="v5-creative-grid">
               ${systems.map(s=>`<div class="v5-creative-card" data-system="${esc(s.id)}">
-                <div class="v5-thumb ${esc(s.thumb)}"><span class="accent"></span></div>
+                <div class="v5-thumb ${esc(s.thumb)}">${thumbnail(s)}</div>
                 <div class="v5-creative-copy"><strong>${esc(s.name)}</strong><span>${esc(s.use)}</span><small>${esc(s.desc)}</small></div>
               </div>`).join("")}
             </div>
-            <div class="v5-strategy-grid" style="margin-top:12px">
+            <div class="v5-strategy-grid v5-asset-controls" style="margin-top:12px">
               <div class="v5-field"><label>CTA Intent</label><select id="v5CtaIntent" class="v5-input">${ctaOptions()}</select></div>
-              <div class="v5-field"><label>Hero Asset URL</label><input id="v5HeroUrl" class="v5-input" placeholder="Approved DGL image URL"></div>
-              <div class="v5-field"><label>Official Logo URL</label><input id="v5LogoUrl" class="v5-input" placeholder="Official DGL logo asset"></div>
-              <div class="v5-field"><label>Personalization</label><div class="v5-personalization">
+              <div class="v5-field v5-asset-field"><label>Hero Asset</label><div class="v5-asset-selector"><div class="v5-asset-preview" id="v5HeroAssetPreview"><img src="assets/creative/ftl-53-dry-van.svg" alt="Selected FTL hero"></div><div><strong>Service-aware library</strong><span>Automatically matches the selected freight service.</span></div></div><input id="v5HeroUrl" class="v5-input" placeholder="Or paste an approved asset path / URL"></div>
+              <div class="v5-field v5-asset-field"><label>Official Logo</label><div class="v5-asset-selector neutral"><div class="v5-logo-placeholder">OFFICIAL<br>ASSET</div><div><strong>Approved logo only</strong><span>Neutral fallback active. No simulated logo.</span></div></div><input id="v5LogoUrl" class="v5-input" placeholder="Configure approved official logo path"></div>
+              <div class="v5-field v5-token-field"><label>Personalization Tokens</label><div class="v5-token-note"><strong>Recipient-safe merge fields</strong><span>Preview uses fictional samples only.</span></div><div class="v5-personalization">
                 <label class="v5-toggle"><input id="v5PFirst" type="checkbox" checked> First name</label>
                 <label class="v5-toggle"><input id="v5PCompany" type="checkbox" checked> Company</label>
                 <label class="v5-toggle"><input id="v5PService" type="checkbox" checked> Service</label>
