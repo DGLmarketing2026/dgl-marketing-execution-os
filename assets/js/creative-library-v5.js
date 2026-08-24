@@ -1,7 +1,7 @@
 
 (function(global){
   "use strict";
-  const VERSION="5.3";
+  const VERSION="5.3.1";
 
   const CREATIVE_SYSTEMS={
     "editorial-white":{
@@ -81,49 +81,49 @@
       descriptor:"Full Truckload",proof:["53' Dry Van","Nationwide Capacity","Bilingual Support"],
       label:"FTL · U.S. GROUND CAPACITY",
       headlineES:"CAPACIDAD FTL PARA SU PRÓXIMO MOVIMIENTO.",
-      headlineEN:"FTL CAPACITY FOR YOUR NEXT MOVE.",asset:"assets/creative/ftl-53-dry-van.svg",visual:"American 53' dry van · highway / inland"
+      headlineEN:"FTL CAPACITY FOR YOUR NEXT MOVE.",asset:"assets/creative/dgl-ftl-truck.webp",visual:"DGL 53' dry van · highway / inland"
     },
     "LTL":{
       name:"LTL",
       descriptor:"Less Than Truckload",proof:["LTL Coverage","Shipment Visibility","Operational Support"],
       label:"LTL · FLEXIBLE GROUND CAPACITY",
       headlineES:"LTL QUE TRABAJA DE FORMA MÁS INTELIGENTE.",
-      headlineEN:"LTL THAT WORKS SMARTER.",asset:"assets/creative/ltl-terminal.svg",visual:"Pallet freight · terminal / partial shipment"
+      headlineEN:"LTL THAT WORKS SMARTER.",asset:"assets/creative/dgl-ltl-terminal.png",visual:"Pallet freight · terminal / partial shipment"
     },
     "Drayage":{
       name:"Drayage",
       descriptor:"Port & Inland",proof:["Port-to-Inland","Container Drayage","Major U.S. Ports"],
       label:"DRAYAGE · PORT TO INLAND",
       headlineES:"DEL PUERTO AL SIGUIENTE MOVIMIENTO.",
-      headlineEN:"FROM PORT TO NEXT MOVE.",asset:"assets/creative/drayage-port.svg",visual:"Container + chassis · port / inland"
+      headlineEN:"FROM PORT TO NEXT MOVE.",asset:"assets/creative/dgl-container-transload.jpg",visual:"Container + transload · port / inland"
     },
     "Cross Border":{
       name:"Cross Border",
       descriptor:"Mexico · USA · Canada",proof:["Cross-Border Coordination","Inland Capacity","Bilingual Support"],
       label:"MEXICO · USA · CANADA",
       headlineES:"PRECISIÓN SIN FRONTERAS.",
-      headlineEN:"PRECISION WITHOUT BORDERS.",asset:"assets/creative/cross-border-corridor.svg",visual:"Mexico · USA · Canada corridor"
+      headlineEN:"PRECISION WITHOUT BORDERS.",asset:"assets/creative/dgl-ftl-truck.webp",visual:"DGL truck · Mexico · USA · Canada corridor"
     },
     "Reefer":{
       name:"Reefer",
       descriptor:"Temperature Controlled",proof:["Reefer Capacity","Produce & Food","Operational Visibility"],
       label:"TEMPERATURE CONTROLLED",
       headlineES:"TEMPERATURA CONTROLADA. EJECUCIÓN CONTROLADA.",
-      headlineEN:"CONTROLLED TEMPERATURE. CONTROLLED EXECUTION.",asset:"assets/creative/reefer-temperature.svg",visual:"Temperature-controlled freight"
+      headlineEN:"CONTROLLED TEMPERATURE. CONTROLLED EXECUTION.",asset:"assets/creative/dgl-ftl-truck.webp",visual:"Photography-based temperature-controlled freight"
     },
     "Intermodal":{
       name:"Intermodal",
       descriptor:"Rail & Inland",proof:["Intermodal Options","Rail & Inland","Network Coverage"],
       label:"RAIL · RAMP · INLAND",
       headlineES:"MÁS FORMAS DE MOVER SU CARGA.",
-      headlineEN:"MORE WAYS TO MOVE YOUR FREIGHT.",asset:"assets/creative/intermodal-rail.svg",visual:"Rail · ramp · inland"
+      headlineEN:"MORE WAYS TO MOVE YOUR FREIGHT.",asset:"assets/creative/dgl-container-transload.jpg",visual:"Container · ramp · inland"
     },
     "Multiservicio":{
       name:"Multiservicio",
       descriptor:"DGL Ground Solutions",proof:["FTL","LTL","Drayage"],
       label:"DGL GROUND SOLUTIONS",
       headlineES:"UNA RELACIÓN. MÁS OPCIONES.",
-      headlineEN:"ONE RELATIONSHIP. MORE OPTIONS.",asset:"assets/creative/ftl-53-dry-van.svg",visual:"DGL ground network"
+      headlineEN:"ONE RELATIONSHIP. MORE OPTIONS.",asset:"assets/creative/dgl-ftl-truck.webp",visual:"DGL ground network"
     }
   };
 

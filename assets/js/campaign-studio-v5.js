@@ -7,6 +7,8 @@
   const Copy=()=>global.DGL_COPY_ENGINE_V5;
   const Seq=()=>global.DGL_CAMPAIGN_SEQUENCES_V4;
   const API=()=>global.DGL_API||{};
+  const OFFICIAL_LOGO="assets/brand/dgl-logo-white.png";
+  const DEFAULT_HERO="assets/creative/dgl-ftl-truck.webp";
 
   const state={device:"desktop",approved:false,generated:null,incoming:null};
 
@@ -39,7 +41,7 @@
       qnbWindow:value("v5QnbWindow")||"0-14",
       lane:value("v5Lane"),
       heroUrl:value("v5HeroUrl"),
-      logoUrl:value("v5LogoUrl"),
+      logoUrl:value("v5LogoUrl")||OFFICIAL_LOGO,
       personalizeFirstName:checked("v5PFirst"),
       personalizeCompany:checked("v5PCompany"),
       personalizeService:checked("v5PService"),
@@ -103,18 +105,13 @@
     renderSequence();updatePreview();updateQA();
   }
 
-  function brandHeader(s,isDark=false){
-    if(s.logoUrl){
-      return `<div style="min-height:42px;position:relative"><div style="position:absolute;left:0;top:0;height:42px;display:flex;align-items:center;border-left:4px solid #77B82A;padding-left:13px;font-family:Arial,sans-serif;font-size:11px;font-weight:900;letter-spacing:1.8px;color:${isDark?"#fff":"#05035C"}">DEDICATED GROUND LOGISTICS</div><img src="${esc(s.logoUrl)}" alt="Official DGL logo" onerror="this.style.display='none'" style="position:relative;display:block;max-width:190px;max-height:68px;border:0;background:${isDark?"#07112E":"#fff"}"></div>`;
-    }
-    return `<div style="height:42px;display:flex;align-items:center;border-left:4px solid #77B82A;padding-left:13px">
-      <div style="font-family:Arial,sans-serif;font-size:11px;font-weight:900;letter-spacing:1.8px;color:${isDark?"#fff":"#05035C"}">DEDICATED GROUND LOGISTICS</div>
-    </div>`;
+  function brandHeader(s){
+    return `<div style="min-height:72px;display:flex;align-items:center;padding:0 34px;background:#05035C;border-bottom:4px solid #77B82A"><img src="${esc(s.logoUrl||OFFICIAL_LOGO)}" alt="DGL — Dedicated Ground Logistics" style="display:block;width:184px;max-width:46%;height:52px;object-fit:contain;object-position:left center;border:0"></div>`;
   }
 
   function assetPath(s){
     const svc=Lib().SERVICES[s.service]||Lib().SERVICES.Multiservicio;
-    return s.heroUrl||svc.asset||"assets/creative/ftl-53-dry-van.svg";
+    return s.heroUrl||svc.asset||DEFAULT_HERO;
   }
 
   function heroAsset(s,height=250){
@@ -149,7 +146,7 @@
       <div style="display:none;max-height:0;overflow:hidden">${esc(pre)}</div>
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:34px 12px">
       <table role="presentation" width="620" style="width:100%;max-width:620px;background:#fff;border:1px solid #E5E7EB;border-radius:14px">
-        <tr><td style="padding:25px 34px">${brandHeader(s)}</td></tr>
+        <tr><td style="padding:0">${brandHeader(s)}</td></tr>
         <tr><td style="padding:18px 34px 38px;font-family:Arial,sans-serif">
           <div style="font-size:9px;color:#77B82A;font-weight:900;letter-spacing:1.4px">DIRECT COMMERCIAL NOTE</div>
           <div style="font-size:32px;line-height:1.08;font-weight:900;color:#05035C;margin-top:13px">${esc(h)}</div>
@@ -165,7 +162,7 @@
       <div style="display:none;max-height:0;overflow:hidden">${esc(pre)}</div>
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:30px 12px">
       <table role="presentation" width="680" style="width:100%;max-width:680px;background:#fff;border-radius:16px;overflow:hidden">
-        <tr><td colspan="2" style="padding:24px 32px">${brandHeader(s)}</td></tr>
+        <tr><td colspan="2" style="padding:0">${brandHeader(s)}</td></tr>
         <tr>
           <td width="52%" style="background:#05035C;padding:34px 30px;font-family:Arial,sans-serif;vertical-align:top">
             <div style="font-size:9px;color:#9BD54F;font-weight:900;letter-spacing:1.5px">${esc(service.label)}</div>
@@ -184,13 +181,13 @@
       <div style="display:none;max-height:0;overflow:hidden">${esc(pre)}</div>
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:30px 12px">
       <table role="presentation" width="680" style="width:100%;max-width:680px;background:#fff;border-radius:16px;overflow:hidden">
-        <tr><td style="padding:24px 32px">${brandHeader(s)}</td></tr>
-        <tr><td style="background:#07112E;padding:34px 36px;font-family:Arial,sans-serif">
+        <tr><td style="padding:0">${brandHeader(s)}</td></tr>
+        <tr><td style="position:relative;background:#07112E;padding:0;font-family:Arial,sans-serif">${heroAsset(s,235)}<div style="position:absolute;inset:0;background:linear-gradient(90deg,rgba(7,17,46,.94),rgba(7,17,46,.38));padding:34px 36px;box-sizing:border-box">
           <div style="font-size:9px;color:#95D54A;font-weight:900;letter-spacing:1.6px">ROUTE INTELLIGENCE</div>
           <div style="font-size:30px;line-height:1.08;color:#fff;font-weight:900;margin-top:12px">${esc(h)}</div>
           <div style="margin:26px 0 4px;border-top:3px dashed #77B82A;position:relative"></div>
           <div style="display:flex;justify-content:space-between;color:#fff;font-size:11px;font-weight:800;margin-top:8px"><span>${esc(s.lane||"ORIGIN")}</span><span>DGL CAPACITY</span></div>
-        </td></tr>
+        </div></td></tr>
         <tr><td style="padding:30px 36px;font-family:Arial,sans-serif">
           <p style="font-size:15px;line-height:1.7;color:#4F5868;margin:0">${esc(b)}</p>
           <p style="font-size:15px;line-height:1.7;color:#4F5868;margin:8px 0 23px">${esc(b2)}</p>${button}
@@ -203,7 +200,7 @@
       <div style="display:none;max-height:0;overflow:hidden">${esc(pre)}</div>
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:30px 12px">
       <table role="presentation" width="680" style="width:100%;max-width:680px;background:#fff;border-radius:16px;overflow:hidden">
-        <tr><td style="padding:24px 32px">${brandHeader(s)}</td></tr>
+        <tr><td style="padding:0">${brandHeader(s)}</td></tr>
         <tr><td>${heroAsset(s,230)}</td></tr>
         <tr><td style="padding:30px 34px;font-family:Arial,sans-serif">
           <div style="font-size:30px;line-height:1.06;font-weight:900;color:#05035C">${esc(h)}</div>
@@ -221,13 +218,13 @@
       <div style="display:none;max-height:0;overflow:hidden">${esc(pre)}</div>
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:30px 12px">
       <table role="presentation" width="680" style="width:100%;max-width:680px;background:#07112E;border-radius:16px;overflow:hidden">
-        <tr><td style="padding:25px 34px">${brandHeader(s,true)}</td></tr>
-        <tr><td style="padding:24px 34px 12px;font-family:Arial,sans-serif">
+        <tr><td style="padding:0">${brandHeader(s)}</td></tr>
+        <tr><td style="position:relative;padding:0;font-family:Arial,sans-serif">${heroAsset(s,270)}<div style="position:absolute;inset:0;padding:24px 34px 12px;background:linear-gradient(90deg,rgba(7,17,46,.97),rgba(7,17,46,.42));box-sizing:border-box">
           <div style="display:inline-block;background:#77B82A;color:#071005;padding:8px 13px;border-radius:7px;font-size:10px;font-weight:900">CASE / PROOF</div>
           <div style="font-size:31px;line-height:1.08;color:#fff;font-weight:900;margin-top:18px">${esc(h)}</div>
           <p style="font-size:14px;line-height:1.65;color:#D2D7E3;margin:19px 0 8px">${esc(b)}</p>
           <p style="font-size:14px;line-height:1.65;color:#D2D7E3;margin:0 0 23px">${esc(b2)}</p>
-        </td></tr>
+        </div></td></tr>
         <tr><td style="padding:8px 34px 30px"><table role="presentation" width="100%"><tr>
           <td style="border-right:1px solid #29304B;padding:14px;font-family:Arial,sans-serif"><div style="font-size:9px;color:#77B82A;font-weight:900">SOLUTION</div><div style="color:#fff;font-size:12px;margin-top:7px">${esc(s.service)}</div></td>
           <td style="border-right:1px solid #29304B;padding:14px;font-family:Arial,sans-serif"><div style="font-size:9px;color:#77B82A;font-weight:900">RESULT</div><div style="color:#fff;font-size:12px;margin-top:7px">Commercial continuity</div></td>
@@ -241,7 +238,7 @@
     <div style="display:none;max-height:0;overflow:hidden">${esc(pre)}</div>
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:30px 12px">
     <table role="presentation" width="680" style="width:100%;max-width:680px;background:#fff;border-radius:16px;overflow:hidden">
-      <tr><td colspan="2" style="padding:25px 34px">${brandHeader(s)}</td></tr>
+      <tr><td colspan="2" style="padding:0">${brandHeader(s)}</td></tr>
       <tr>
         <td width="58%" style="padding:34px 26px 36px 34px;font-family:Arial,sans-serif;vertical-align:top">
           <div style="width:36px;height:4px;background:#77B82A;border-radius:99px"></div>
@@ -282,7 +279,7 @@
 
   function updateQA(){
     const set=(id,on,text)=>{const e=document.getElementById(id);if(e)e.innerHTML=`<i data-lucide="${on?"check-circle-2":"circle"}"></i>${text}`};
-    set("qaBrand",!!value("v5LogoUrl"),value("v5LogoUrl")?"Official logo loaded":"Official logo pending");
+    set("qaBrand",true,"Official DGL logo loaded");
     set("qaVisual",true,value("v5HeroUrl")?"Approved hero loaded":"Service hero loaded");
     set("qaCopy",!!value("v5Headline"),"Message generated");
     set("qaApproval",state.approved,state.approved?"Creative approved":"Approval pending");
@@ -296,7 +293,7 @@
       <div class="v5-topbar">
         <div>
           <div class="v5-kicker">Creative Conversion Engine</div>
-          <h1>Campaign Studio <span>V5.3</span></h1>
+          <h1>Campaign Studio <span>V5.3.1</span></h1>
           <p>Convierte una oportunidad validada en una campaña con estrategia, diseño, copy, secuencia y aprobación creativa.</p>
         </div>
         <div class="v5-top-actions">
@@ -345,8 +342,8 @@
             </div>
             <div class="v5-strategy-grid v5-asset-controls" style="margin-top:12px">
               <div class="v5-field"><label>CTA Intent</label><select id="v5CtaIntent" class="v5-input">${ctaOptions()}</select></div>
-              <div class="v5-field v5-asset-field"><label>Hero Asset</label><div class="v5-asset-selector"><div class="v5-asset-preview" id="v5HeroAssetPreview"><img src="assets/creative/ftl-53-dry-van.svg" alt="Selected FTL hero"></div><div><strong>Service-aware library</strong><span>Automatically matches the selected freight service.</span></div></div><input id="v5HeroUrl" class="v5-input" placeholder="Or paste an approved asset path / URL"></div>
-              <div class="v5-field v5-asset-field"><label>Official Logo</label><div class="v5-asset-selector neutral"><div class="v5-logo-placeholder">OFFICIAL<br>ASSET</div><div><strong>Approved logo only</strong><span>Neutral fallback active. No simulated logo.</span></div></div><input id="v5LogoUrl" class="v5-input" placeholder="Configure approved official logo path"></div>
+              <div class="v5-field v5-asset-field"><label>Hero Asset</label><div class="v5-asset-selector"><div class="v5-asset-preview" id="v5HeroAssetPreview"><img src="${DEFAULT_HERO}" alt="Selected DGL FTL photographic hero"></div><div><strong>DGL photographic library</strong><span>Automatically matches approved photography to the selected service.</span></div></div><input id="v5HeroUrl" class="v5-input" placeholder="Or paste an approved asset path / URL"></div>
+              <div class="v5-field v5-asset-field"><label>Official Logo</label><div class="v5-asset-selector neutral"><div class="v5-logo-preview"><img src="${OFFICIAL_LOGO}" alt="Official DGL white logo"></div><div><strong>Official DGL white logo</strong><span>Displayed on the navy campaign masthead.</span></div></div><input id="v5LogoUrl" class="v5-input" value="${OFFICIAL_LOGO}" aria-label="Official DGL logo asset path"></div>
               <div class="v5-field v5-token-field"><label>Personalization Tokens</label><div class="v5-token-note"><strong>Recipient-safe merge fields</strong><span>Preview uses fictional samples only.</span></div><div class="v5-personalization">
                 <label class="v5-toggle"><input id="v5PFirst" type="checkbox" checked> First name</label>
                 <label class="v5-toggle"><input id="v5PCompany" type="checkbox" checked> Company</label>
