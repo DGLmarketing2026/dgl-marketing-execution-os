@@ -65,20 +65,20 @@
   }
 
   function generate(s){
-    const lg=language(s), service=svc(s);
+    const lg=language(s), service=svc(s), serviceName=(service && service.name) ? service.name : (s.service || "DGL");
     let x;
-    if(s.objective==="Quoted Not Booked") x=qnb(s,lg,service.name);
+    if(s.objective==="Quoted Not Booked") x=qnb(s,lg,serviceName);
     else if(s.objective==="Retention"){
       x=lg==="en"?{
         subjectA:"{{firstName}}, staying close to {{company}}'s next move",
-        subjectB:`{{firstName}}, planning your next ${service.name} requirements`,
+        subjectB:`{{firstName}}, planning your next ${serviceName} requirements`,
         preheader:"DGL remains available for upcoming routes, volume changes and requirements.",
         headline:"STAYING CLOSE TO YOUR NEXT MOVE.",
         body:"We want to stay close to {{company}}'s transportation needs and remain available for upcoming {{service}} requirements.",
         body2:"If you have new lanes, volume changes or upcoming moves, we can review them with your team."
       }:{
         subjectA:"{{firstName}}, seguimos cerca de los próximos movimientos de {{company}}",
-        subjectB:`{{firstName}}, ¿revisamos sus próximos requerimientos ${service.name}?`,
+        subjectB:`{{firstName}}, ¿revisamos sus próximos requerimientos ${serviceName}?`,
         preheader:"DGL sigue disponible para nuevas rutas, cambios de volumen y próximos movimientos.",
         headline:"CERCA DE SU PRÓXIMO MOVIMIENTO.",
         body:"Queremos mantenernos cerca de las necesidades de {{company}} y disponibles para sus próximos requerimientos {{service}}.",
@@ -88,14 +88,14 @@
     else if(s.objective==="Cross-Sell"){
       x=lg==="en"?{
         subjectA:"{{firstName}}, another option for {{company}}",
-        subjectB:`{{company}} + DGL | ${service.name} capacity`,
+        subjectB:`{{company}} + DGL | ${serviceName} capacity`,
         preheader:"An additional DGL ground service for upcoming requirements.",
         headline:service.headlineEN,
         body:"In addition to the services {{company}} already works with, we want to make DGL's {{service}} capacity available to your team.",
         body2:"If you have a movement where this option could fit, send us the details and we will review it."
       }:{
         subjectA:"{{firstName}}, una opción adicional para {{company}}",
-        subjectB:`{{company}} + DGL | capacidad ${service.name}`,
+        subjectB:`{{company}} + DGL | capacidad ${serviceName}`,
         preheader:"Una capacidad terrestre adicional para sus próximos requerimientos.",
         headline:service.headlineES,
         body:"Además de los servicios que {{company}} ya trabaja con DGL, queremos poner a su disposición nuestra capacidad {{service}}.",
@@ -121,15 +121,15 @@
     }
     else if(s.objective==="Service Campaign"){
       x=lg==="en"?{
-        subjectA:`{{firstName}}, ${service.name} capacity for upcoming moves`,
-        subjectB:`DGL | ${service.name} support for {{company}}`,
+        subjectA:`{{firstName}}, ${serviceName} capacity for upcoming moves`,
+        subjectB:`DGL | ${serviceName} support for {{company}}`,
         preheader:"DGL ground capacity available for your upcoming requirements.",
         headline:service.headlineEN,
         body:"DGL is available to support {{company}} with upcoming {{service}} requirements and coordinated ground capacity.",
         body2:"Send us the movement details and we will review the best available option."
       }:{
-        subjectA:`{{firstName}}, capacidad ${service.name} para sus próximos movimientos`,
-        subjectB:`DGL | apoyo ${service.name} para {{company}}`,
+        subjectA:`{{firstName}}, capacidad ${serviceName} para sus próximos movimientos`,
+        subjectB:`DGL | apoyo ${serviceName} para {{company}}`,
         preheader:"Capacidad terrestre DGL disponible para sus próximos requerimientos.",
         headline:service.headlineES,
         body:"DGL está disponible para apoyar a {{company}} con sus próximos requerimientos {{service}} y capacidad terrestre coordinada.",
@@ -138,15 +138,15 @@
     }
     else{
       x=lg==="en"?{
-        subjectA:`{{firstName}}, any ${service.name} moves coming up?`,
-        subjectB:`{{firstName}}, DGL is ready for your next ${service.name} move`,
+        subjectA:`{{firstName}}, any ${serviceName} moves coming up?`,
+        subjectB:`{{firstName}}, DGL is ready for your next ${serviceName} move`,
         preheader:"We are available to review your next ground transportation requirements.",
         headline:"LET'S MOVE AGAIN.",
         body:"We previously had the opportunity to support {{company}} and wanted to put DGL back at your disposal for upcoming {{service}} moves.",
         body2:"If you have anything to quote or schedule, send it over and we will review capacity and pricing."
       }:{
-        subjectA:`{{firstName}}, ¿tienen movimientos ${service.name} próximos?`,
-        subjectB:`{{firstName}}, DGL está disponible para su próximo movimiento ${service.name}`,
+        subjectA:`{{firstName}}, ¿tienen movimientos ${serviceName} próximos?`,
+        subjectB:`{{firstName}}, DGL está disponible para su próximo movimiento ${serviceName}`,
         preheader:"Estamos disponibles para revisar sus próximos requerimientos terrestres.",
         headline:"VOLVAMOS A MOVER CARGA.",
         body:"Hace un tiempo tuvimos la oportunidad de apoyar a {{company}} y quería volver a poner a DGL a su disposición para sus próximos movimientos {{service}}.",

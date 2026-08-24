@@ -77,42 +77,49 @@
 
   const SERVICES={
     "FTL":{
+      name:"FTL",
       descriptor:"Full Truckload",proof:["53' Dry Van","Nationwide Capacity","Bilingual Support"],
       label:"FTL · U.S. GROUND CAPACITY",
       headlineES:"CAPACIDAD FTL PARA SU PRÓXIMO MOVIMIENTO.",
       headlineEN:"FTL CAPACITY FOR YOUR NEXT MOVE."
     },
     "LTL":{
+      name:"LTL",
       descriptor:"Less Than Truckload",proof:["LTL Coverage","Shipment Visibility","Operational Support"],
       label:"LTL · FLEXIBLE GROUND CAPACITY",
       headlineES:"LTL QUE TRABAJA DE FORMA MÁS INTELIGENTE.",
       headlineEN:"LTL THAT WORKS SMARTER."
     },
     "Drayage":{
+      name:"Drayage",
       descriptor:"Port & Inland",proof:["Port-to-Inland","Container Drayage","Major U.S. Ports"],
       label:"DRAYAGE · PORT TO INLAND",
       headlineES:"DEL PUERTO AL SIGUIENTE MOVIMIENTO.",
       headlineEN:"FROM PORT TO NEXT MOVE."
     },
     "Cross Border":{
+      name:"Cross Border",
       descriptor:"Mexico · USA · Canada",proof:["Cross-Border Coordination","Inland Capacity","Bilingual Support"],
       label:"MEXICO · USA · CANADA",
       headlineES:"PRECISIÓN SIN FRONTERAS.",
       headlineEN:"PRECISION WITHOUT BORDERS."
     },
     "Reefer":{
+      name:"Reefer",
       descriptor:"Temperature Controlled",proof:["Reefer Capacity","Produce & Food","Operational Visibility"],
       label:"TEMPERATURE CONTROLLED",
       headlineES:"TEMPERATURA CONTROLADA. EJECUCIÓN CONTROLADA.",
       headlineEN:"CONTROLLED TEMPERATURE. CONTROLLED EXECUTION."
     },
     "Intermodal":{
+      name:"Intermodal",
       descriptor:"Rail & Inland",proof:["Intermodal Options","Rail & Inland","Network Coverage"],
       label:"RAIL · RAMP · INLAND",
       headlineES:"MÁS FORMAS DE MOVER SU CARGA.",
       headlineEN:"MORE WAYS TO MOVE YOUR FREIGHT."
     },
     "Multiservicio":{
+      name:"Multiservicio",
       descriptor:"DGL Ground Solutions",proof:["FTL","LTL","Drayage"],
       label:"DGL GROUND SOLUTIONS",
       headlineES:"UNA RELACIÓN. MÁS OPCIONES.",
