@@ -10,12 +10,13 @@
   const OFFICIAL_LOGO="assets/brand/dgl-logo-white.png";
   const DEFAULT_HERO="assets/creative/dgl-ftl-truck.webp";
 
-  const state={device:"desktop",approved:false,generated:null,incoming:null};
+  const state={device:"desktop",approved:false,generated:null,incoming:null,campaignNameManual:false};
 
   function audiences(){
     try{return global.DGL_MARKETING_CAMPAIGN_OS.buildAudiences()}catch(_){return[]}
   }
   function value(id){const e=document.getElementById(id);return e?clean(e.value):""}
+  function rawValue(id){const e=document.getElementById(id);return e?String(e.value||"").replace(/\bundefined\b/gi,"").trim():""}
   function checked(id){const e=document.getElementById(id);return !!(e&&e.checked)}
 
   function readIncoming(){
@@ -39,7 +40,7 @@
       creativeSystem:systemId(),
       ctaIntent:value("v5CtaIntent")||"Generate Quote",
       qnbWindow:value("v5QnbWindow")||"0-14",
-      lane:value("v5Lane"),
+      lane:rawValue("v5Lane"),
       heroUrl:value("v5HeroUrl"),
       logoUrl:value("v5LogoUrl")||OFFICIAL_LOGO,
       personalizeFirstName:checked("v5PFirst"),
@@ -48,6 +49,24 @@
       personalizeLastQuote:checked("v5PLastQuote"),
       personalizeLane:checked("v5PLane")
     };
+  }
+
+  function deriveCampaignName(s){
+    const service=clean(s.service)||"FTL",angle=clean(s.angle),lane=String(s.lane||"").trim();
+    if(s.objective==="Quoted Not Booked"){
+      const windowLabel={"0-14":"0–14 Days","15-30":"15–30 Days","30+":"30+ Days"}[s.qnbWindow]||clean(s.qnbWindow);
+      return `QNB ${service}  ${windowLabel}`.trim();
+    }
+    if(s.objective==="Cross-Sell")return `Cross-Sell ${service}${angle?`  ${angle}`:""}`;
+    if(s.objective==="Retention")return `Retention${angle?`  ${angle}`:""}`;
+    if(s.objective==="Service Campaign")return `${service} Campaign${angle?`  ${angle}`:""}`;
+    if(s.objective==="Lane Campaign")return `${service} Lane Campaign${lane?`  ${lane}`:""}`;
+    return `Reactivation ${service}`;
+  }
+
+  function syncCampaignName(force=false){
+    const e=document.getElementById("v5CampaignName");
+    if(e&&(force||!state.campaignNameManual))e.value=deriveCampaignName(strategy());
   }
 
   function objectiveOptions(){
@@ -77,7 +96,7 @@
     const x=state.incoming||readIncoming();
     if(!x)return;
     const set=(id,v)=>{const e=document.getElementById(id);if(e&&v!=null&&v!=="")e.value=v};
-    set("v5CampaignName",x.campaignName);
+    if(x.campaignName){set("v5CampaignName",x.campaignName);state.campaignNameManual=true}
     set("v5Objective",x.objective);
     set("v5Service",x.service);
     set("v5Audience",x.audienceId);
@@ -98,11 +117,12 @@
 
   function generate(){
     const s=strategy();
+    syncCampaignName();
     state.generated=Copy().generate(s);state.approved=false;
     const c=state.generated||{},set=(id,v)=>{const e=document.getElementById(id);if(e)e.value=clean(v)};
     set("v5SubjectA",c.subjectA);set("v5SubjectB",c.subjectB);set("v5Preheader",c.preheader);
     set("v5Headline",c.headline);set("v5Body",c.body);set("v5Body2",c.body2);set("v5Cta",c.cta);
-    renderSequence();updatePreview();updateQA();
+    renderSequence();renderThumbnails();updatePreview();updateQA();
   }
 
   function brandHeader(s){
@@ -121,16 +141,28 @@
     </div>`;
   }
 
-  function thumbnail(s){
+  function thumbnail(system,s){
+    const asset=Lib().resolveAsset({objective:s.objective,service:s.service,angle:s.angle});
+    const photo=asset?`style="background-image:url('${esc(asset)}')"`:"";
+    const contextPhoto=(overlay)=>asset?`style="background-image:${overlay},url('${esc(asset)}')"`:"";
     const composition={
-      editorial:`<div class="mini-copy"><b>MOVE FREIGHT.</b><i></i><small>Capacity that responds.</small><em>START A MOVE</em></div><div class="mini-photo"></div>`,
-      split:`<div class="mini-dark"><small>GROUND CAPACITY</small><b>READY<br>TO MOVE.</b><em>GET CAPACITY</em></div><div class="mini-photo"></div>`,
-      route:`<small>ROUTE INTELLIGENCE</small><b>PORT → INLAND</b><div class="mini-route"><i></i><i></i><i></i></div>`,
-      service:`<small>SERVICE ARCHITECTURE</small><b>ONE PARTNER.<br>MORE OPTIONS.</b><div class="mini-modules"><i>FTL</i><i>LTL</i><i>PORT</i></div>`,
-      case:`<small>CASE / PROOF</small><b>CONTINUITY<br>IN MOTION.</b><div class="mini-proof"><i>PROBLEM</i><i>SOLUTION</i><i>RESULT</i></div>`,
+      editorial:`<div class="mini-copy"><b>MOVE FREIGHT.</b><i></i><small>Capacity that responds.</small><em>START A MOVE</em></div><div class="mini-photo" ${photo}></div>`,
+      split:`<div class="mini-dark"><small>GROUND CAPACITY</small><b>READY<br>TO MOVE.</b><em>GET CAPACITY</em></div><div class="mini-photo" ${photo}></div>`,
+      route:`<div class="mini-context-photo" ${contextPhoto("linear-gradient(rgba(7,17,46,.62),rgba(7,17,46,.78))")}></div><small>ROUTE INTELLIGENCE</small><b>PORT → INLAND</b><div class="mini-route"><i></i><i></i><i></i></div>`,
+      service:`<div class="mini-context-photo" ${contextPhoto("linear-gradient(90deg,rgba(255,255,255,.96) 0 63%,rgba(255,255,255,.12) 63%)")}></div><small>SERVICE ARCHITECTURE</small><b>ONE PARTNER.<br>MORE OPTIONS.</b><div class="mini-modules"><i>FTL</i><i>LTL</i><i>PORT</i></div>`,
+      case:`<div class="mini-context-photo" ${contextPhoto("linear-gradient(90deg,rgba(7,17,46,.96),rgba(7,17,46,.42))")}></div><small>CASE / PROOF</small><b>CONTINUITY<br>IN MOTION.</b><div class="mini-proof"><i>PROBLEM</i><i>SOLUTION</i><i>RESULT</i></div>`,
       minimal:`<small>DIRECT COMMERCIAL NOTE</small><b>IS THIS MOVE<br>STILL ACTIVE?</b><p>A short response keeps the quote moving.</p><em>REPLY</em>`
     };
-    return composition[s.thumb]||composition.editorial;
+    return composition[system.thumb]||composition.editorial;
+  }
+
+  function renderThumbnails(){
+    const s=strategy();
+    document.querySelectorAll(".v5-creative-card").forEach(card=>{
+      const system=Lib().CREATIVE_SYSTEMS[card.dataset.system];
+      const mount=card.querySelector(".v5-thumb");
+      if(system&&mount)mount.innerHTML=thumbnail(system,s);
+    });
   }
 
   function emailHtml(){
@@ -280,6 +312,19 @@
       asset.onerror=()=>{asset.hidden=true};
       asset.hidden=!resolved;
     }
+    const assetTitle=document.getElementById("v5HeroAssetTitle"),assetNote=document.getElementById("v5HeroAssetNote");
+    const label=heroAssetLabel(s);
+    if(assetTitle)assetTitle.textContent=label.title;
+    if(assetNote)assetNote.textContent=label.note;
+  }
+
+  function heroAssetLabel(s){
+    if(s.objective==="Quoted Not Booked")return {title:`${s.service} recovery: No promotional hero`,note:"Executive Minimal stays white and response-oriented."};
+    if(s.objective==="Cross-Sell")return {title:"Cross-Sell capability photography",note:`${s.service} · ${s.angle}`};
+    if(s.objective==="Retention")return {title:"Retention relationship photography",note:s.angle};
+    if(s.objective==="Reactivation")return {title:`${s.service} reactivation photography`,note:s.angle};
+    if(s.objective==="Lane Campaign")return {title:`${s.service} lane photography`,note:s.lane||s.angle};
+    return {title:`${s.service} campaign photography`,note:s.angle};
   }
 
   function updateQA(){
@@ -292,13 +337,14 @@
   }
 
   function render(container){
+    state.campaignNameManual=false;
     state.incoming=readIncoming();
     const systems=Object.values(Lib().CREATIVE_SYSTEMS), aud=audiences();
     container.innerHTML=`<div class="v5-workspace">
       <div class="v5-topbar">
         <div>
           <div class="v5-kicker">Creative Conversion Engine</div>
-          <h1>Campaign Studio <span>V5.3.1</span></h1>
+          <h1>Campaign Studio <span>V5.3.3</span></h1>
           <p>Convierte una oportunidad validada en una campaña con estrategia, diseño, copy, secuencia y aprobación creativa.</p>
         </div>
         <div class="v5-top-actions">
@@ -341,13 +387,13 @@
             <div class="v5-section-head"><div><h3>Creative Direction</h3><p>Basado en el lenguaje visual histórico de DGL, sin copiar piezas anteriores.</p></div><span class="v5-badge green">6 SYSTEMS</span></div>
             <div class="v5-creative-grid">
               ${systems.map(s=>`<div class="v5-creative-card" data-system="${esc(s.id)}">
-                <div class="v5-thumb ${esc(s.thumb)}">${thumbnail(s)}</div>
+                <div class="v5-thumb ${esc(s.thumb)}">${thumbnail(s,{objective:"Reactivation",service:"FTL",angle:"Previous Relationship"})}</div>
                 <div class="v5-creative-copy"><strong>${esc(s.name)}</strong><span>${esc(s.use)}</span><small>${esc(s.desc)}</small></div>
               </div>`).join("")}
             </div>
             <div class="v5-strategy-grid v5-asset-controls" style="margin-top:12px">
               <div class="v5-field"><label>CTA Intent</label><select id="v5CtaIntent" class="v5-input">${ctaOptions()}</select></div>
-              <div class="v5-field v5-asset-field"><label>Hero Asset</label><div class="v5-asset-selector"><div class="v5-asset-preview" id="v5HeroAssetPreview"><img src="${DEFAULT_HERO}" alt="Selected DGL FTL photographic hero"></div><div><strong>DGL photographic library</strong><span>Automatically matches approved photography to the selected service.</span></div></div><input id="v5HeroUrl" class="v5-input" placeholder="Or paste an approved asset path / URL"></div>
+              <div class="v5-field v5-asset-field"><label>Hero Asset</label><div class="v5-asset-selector"><div class="v5-asset-preview" id="v5HeroAssetPreview"><img src="${DEFAULT_HERO}" alt="Selected DGL FTL photographic hero"></div><div><strong id="v5HeroAssetTitle">FTL reactivation photography</strong><span id="v5HeroAssetNote">Previous Relationship</span></div></div><input id="v5HeroUrl" class="v5-input" placeholder="Or paste an approved asset path / URL"></div>
               <div class="v5-field v5-asset-field"><label>Official Logo</label><div class="v5-asset-selector neutral"><div class="v5-logo-preview"><img src="${OFFICIAL_LOGO}" alt="Official DGL white logo"></div><div><strong>Official DGL white logo</strong><span>Displayed on the navy campaign masthead.</span></div></div><input id="v5LogoUrl" class="v5-input" value="${OFFICIAL_LOGO}" aria-label="Official DGL logo asset path"></div>
               <div class="v5-field v5-token-field"><label>Personalization Tokens</label><div class="v5-token-note"><strong>Recipient-safe merge fields</strong><span>Preview uses fictional samples only.</span></div><div class="v5-personalization">
                 <label class="v5-toggle"><input id="v5PFirst" type="checkbox" checked> First name</label>
@@ -436,10 +482,18 @@
   });
   document.addEventListener("input",e=>{
     if(!e.target||!String(e.target.id||"").startsWith("v5"))return;
+    if(e.target.id==="v5CampaignName"){
+      state.campaignNameManual=!!clean(e.target.value);
+      if(!state.campaignNameManual)syncCampaignName(true);
+      return;
+    }
+    if(e.target.id==="v5Lane"){
+      syncCampaignName();renderThumbnails();updatePreview();updateQA();return;
+    }
     if(["v5SubjectA","v5SubjectB","v5Preheader","v5Headline","v5Body","v5Body2","v5Cta","v5HeroUrl","v5LogoUrl","v5Lane"].includes(e.target.id)){updatePreview();updateQA()}
   });
 
   global.DGL_MODULE_RENDERERS=global.DGL_MODULE_RENDERERS||{};
   global.DGL_MODULE_RENDERERS["campaign-studio"]=render;
-  global.DGL_CAMPAIGN_STUDIO_V5={render,emailHtml,strategy};
+  global.DGL_CAMPAIGN_STUDIO_V5={render,emailHtml,strategy,deriveCampaignName};
 })(window);
