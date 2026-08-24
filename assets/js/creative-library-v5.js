@@ -1,7 +1,7 @@
 
 (function(global){
   "use strict";
-  const VERSION="5.3.1";
+  const VERSION="5.3.2";
 
   const CREATIVE_SYSTEMS={
     "editorial-white":{
@@ -127,6 +127,45 @@
     }
   };
 
+  const ASSETS={
+    truck:"assets/creative/dgl-ftl-truck.webp",
+    ltl:"assets/creative/dgl-ltl-terminal.png",
+    container:"assets/creative/dgl-container-transload.jpg"
+  };
+
+  function serviceAsset(service){
+    return (SERVICES[service]||SERVICES.Multiservicio).asset;
+  }
+
+  function resolveAsset({objective="Reactivation",service="FTL",angle=""}={}){
+    if(objective==="Quoted Not Booked")return "";
+
+    if(objective==="Cross-Sell"){
+      const capabilityMatrix={
+        "Additional Capability":{FTL:ASSETS.container,LTL:ASSETS.truck,Drayage:ASSETS.ltl},
+        "One Partner":{FTL:ASSETS.ltl,LTL:ASSETS.container,Drayage:ASSETS.truck}
+      };
+      if(angle==="Service Expansion")return serviceAsset(service);
+      return capabilityMatrix[angle]?.[service]||serviceAsset(service);
+    }
+
+    if(objective==="Retention"){
+      const retentionMatrix={
+        "Stay Close":ASSETS.ltl,
+        "Planning Ahead":ASSETS.truck,
+        "Relationship Continuity":ASSETS.container
+      };
+      return retentionMatrix[angle]||serviceAsset(service);
+    }
+
+    if(objective==="Lane Campaign"){
+      if(["Drayage","Intermodal"].includes(service))return ASSETS.container;
+      if(["FTL","Cross Border"].includes(service))return ASSETS.truck;
+    }
+
+    return serviceAsset(service);
+  }
+
   const CTA={
     "Generate Quote":{es:"ENVIAR MOVIMIENTO",en:"SEND A SHIPMENT"},
     "Recover Quote":{es:"ACTUALIZAR COTIZACIÓN",en:"UPDATE QUOTE"},
@@ -135,5 +174,5 @@
     "Review Service":{es:"REVISAR SERVICIO",en:"REVIEW SERVICE"}
   };
 
-  global.DGL_CREATIVE_LIBRARY_V5={VERSION,CREATIVE_SYSTEMS,OBJECTIVES,SERVICES,CTA};
+  global.DGL_CREATIVE_LIBRARY_V5={VERSION,CREATIVE_SYSTEMS,OBJECTIVES,SERVICES,CTA,resolveAsset};
 })(window);

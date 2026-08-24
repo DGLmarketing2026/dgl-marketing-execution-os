@@ -110,8 +110,7 @@
   }
 
   function assetPath(s){
-    const svc=Lib().SERVICES[s.service]||Lib().SERVICES.Multiservicio;
-    return s.heroUrl||svc.asset||DEFAULT_HERO;
+    return s.heroUrl||Lib().resolveAsset({objective:s.objective,service:s.service,angle:s.angle});
   }
 
   function heroAsset(s,height=250){
@@ -274,7 +273,13 @@
     const objective=document.getElementById("v5ObjectiveValue");
     if(objective)objective.textContent=s.objective;
     const asset=document.querySelector("#v5HeroAssetPreview img"),svc=Lib().SERVICES[s.service]||Lib().SERVICES.Multiservicio;
-    if(asset){asset.src=assetPath(s);asset.alt=svc.visual||`${svc.name} hero asset`;asset.onerror=()=>{asset.hidden=true};asset.hidden=false}
+    if(asset){
+      const resolved=assetPath(s);
+      asset.src=resolved;
+      asset.alt=resolved?(svc.visual||`${svc.name} hero asset`):"No promotional hero for Executive Minimal";
+      asset.onerror=()=>{asset.hidden=true};
+      asset.hidden=!resolved;
+    }
   }
 
   function updateQA(){
