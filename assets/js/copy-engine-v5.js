@@ -2,6 +2,7 @@
 (function(global){
   "use strict";
   const L=()=>global.DGL_CREATIVE_LIBRARY_V5;
+  const clean=v=>String(v==null?"":v).replace(/\bundefined\b/gi,"").replace(/\s{2,}/g," ").replace(/\s+([,.;:!?])/g,"$1").trim();
 
   function language(s){return s.language==="English"?"en":"es"}
   function svc(s){return L().SERVICES[s.service]||L().SERVICES.Multiservicio}
@@ -153,7 +154,7 @@
         body2:"Si tienen algo por cotizar o programar, envíemelo y revisamos capacidad y tarifa."
       };
     }
-    return {...x,cta:cta(s,lg),serviceProof:service.proof,serviceLabel:service.label};
+    return Object.fromEntries(Object.entries({...x,cta:cta(s,lg),serviceProof:service.proof,serviceLabel:service.label}).map(([k,v])=>[k,Array.isArray(v)?v.map(clean):clean(v)]));
   }
 
   global.DGL_COPY_ENGINE_V5={generate};

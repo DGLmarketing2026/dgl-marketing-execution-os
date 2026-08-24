@@ -1,7 +1,8 @@
 
 (function(global){
   "use strict";
-  const esc=v=>String(v==null?"":v).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+  const clean=v=>String(v==null?"":v).replace(/\bundefined\b/gi,"").replace(/\s{2,}/g," ").replace(/\s+([,.;:!?])/g,"$1").trim();
+  const esc=v=>clean(v).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
   const Lib=()=>global.DGL_CREATIVE_LIBRARY_V5;
   const Copy=()=>global.DGL_COPY_ENGINE_V5;
   const Seq=()=>global.DGL_CAMPAIGN_SEQUENCES_V4;
@@ -12,7 +13,7 @@
   function audiences(){
     try{return global.DGL_MARKETING_CAMPAIGN_OS.buildAudiences()}catch(_){return[]}
   }
-  function value(id){const e=document.getElementById(id);return e?String(e.value||"").trim():""}
+  function value(id){const e=document.getElementById(id);return e?clean(e.value):""}
   function checked(id){const e=document.getElementById(id);return !!(e&&e.checked)}
 
   function readIncoming(){
@@ -96,7 +97,7 @@
   function generate(){
     const s=strategy();
     state.generated=Copy().generate(s);state.approved=false;
-    const c=state.generated,set=(id,v)=>{const e=document.getElementById(id);if(e)e.value=v||""};
+    const c=state.generated||{},set=(id,v)=>{const e=document.getElementById(id);if(e)e.value=clean(v)};
     set("v5SubjectA",c.subjectA);set("v5SubjectB",c.subjectB);set("v5Preheader",c.preheader);
     set("v5Headline",c.headline);set("v5Body",c.body);set("v5Body2",c.body2);set("v5Cta",c.cta);
     renderSequence();updatePreview();updateQA();
@@ -106,20 +107,20 @@
     if(s.logoUrl){
       return `<img src="${esc(s.logoUrl)}" alt="DGL Freight Broker" style="display:block;max-width:190px;max-height:68px;border:0">`;
     }
-    return `<div style="height:42px;display:flex;align-items:center">
-      <div style="width:10px;height:10px;background:#77B82A;transform:rotate(45deg);margin-right:11px"></div>
-      <div style="font-family:Arial,sans-serif;font-size:11px;font-weight:900;letter-spacing:1.5px;color:${isDark?"#fff":"#05035C"}">OFFICIAL DGL LOGO ASSET</div>
+    return `<div style="height:42px;display:flex;align-items:center;border-left:4px solid #77B82A;padding-left:13px">
+      <div style="font-family:Arial,sans-serif;font-size:11px;font-weight:900;letter-spacing:1.8px;color:${isDark?"#fff":"#05035C"}">DEDICATED GROUND LOGISTICS</div>
     </div>`;
   }
 
   function heroAsset(s,height=250){
     if(s.heroUrl) return `<img src="${esc(s.heroUrl)}" alt="" style="display:block;width:100%;height:${height}px;object-fit:cover;border:0">`;
     const svc=Lib().SERVICES[s.service]||Lib().SERVICES.Multiservicio;
-    return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="height:${height}px;background:#E9EEF2">
-      <tr><td style="padding:28px;font-family:Arial,sans-serif;vertical-align:bottom">
-        <div style="font-size:10px;font-weight:900;letter-spacing:1.6px;color:#77B82A">APPROVED HERO ASSET</div>
-        <div style="font-size:29px;line-height:1.02;font-weight:900;color:#05035C;margin-top:8px">${esc(svc.label)}</div>
-        <div style="font-size:11px;color:#667085;margin-top:7px">Add an approved DGL logistics photograph in Campaign Studio.</div>
+    return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="height:${height}px;background:linear-gradient(145deg,#05035C 0%,#111B4A 58%,#77B82A 180%);background-color:#05035C">
+      <tr><td style="padding:30px;font-family:Arial,sans-serif;vertical-align:bottom">
+        <div style="width:38px;height:4px;background:#77B82A;margin-bottom:14px"></div>
+        <div style="font-size:9px;font-weight:900;letter-spacing:1.8px;color:#A8D879">DGL GROUND NETWORK</div>
+        <div style="font-size:27px;line-height:1.05;font-weight:900;color:#FFFFFF;margin-top:8px">${esc(svc.label)}</div>
+        <div style="font-size:10px;line-height:1.5;color:#CAD2E5;margin-top:9px">Capacity · coordination · visibility</div>
       </td></tr></table>`;
   }
 
@@ -127,7 +128,7 @@
     const s=strategy(),c=currentCopy(),sys=Lib().CREATIVE_SYSTEMS[s.creativeSystem]||Lib().CREATIVE_SYSTEMS["editorial-white"];
     const service=Lib().SERVICES[s.service]||Lib().SERVICES.Multiservicio;
     const h=sample(c.headline,s),b=sample(c.body,s),b2=sample(c.body2,s),cta=sample(c.cta,s),pre=sample(c.preheader,s);
-    const proof=service.proof.map(x=>`<td style="padding:0 12px 0 0;font-family:Arial,sans-serif;font-size:10px;font-weight:800;color:#667085">${esc(x)}</td>`).join("");
+    const proof=service.proof.map(x=>`<td style="padding:0 16px 0 0;font-family:Arial,sans-serif"><div style="width:18px;height:2px;background:#77B82A;margin-bottom:7px"></div><div style="font-size:9px;font-weight:800;line-height:1.35;color:#526071">${esc(x)}</div></td>`).join("");
     const button=`<table role="presentation" cellspacing="0" cellpadding="0"><tr><td bgcolor="#77B82A" style="border-radius:7px"><a href="#" style="display:inline-block;padding:14px 21px;font-family:Arial,sans-serif;font-size:12px;font-weight:900;color:#071005;text-decoration:none">${esc(cta)} →</a></td></tr></table>`;
 
     if(sys.layout==="minimal"){
@@ -137,7 +138,7 @@
       <table role="presentation" width="620" style="width:100%;max-width:620px;background:#fff;border:1px solid #E5E7EB;border-radius:14px">
         <tr><td style="padding:25px 34px">${brandHeader(s)}</td></tr>
         <tr><td style="padding:18px 34px 38px;font-family:Arial,sans-serif">
-          <div style="font-size:9px;color:#77B82A;font-weight:900;letter-spacing:1.4px">QUOTE RECOVERY</div>
+          <div style="font-size:9px;color:#77B82A;font-weight:900;letter-spacing:1.4px">DIRECT COMMERCIAL NOTE</div>
           <div style="font-size:32px;line-height:1.08;font-weight:900;color:#05035C;margin-top:13px">${esc(h)}</div>
           <p style="font-size:15px;line-height:1.7;color:#4F5868;margin:23px 0 0">${esc(b)}</p>
           <p style="font-size:15px;line-height:1.7;color:#4F5868;margin:8px 0 24px">${esc(b2)}</p>${button}
@@ -280,7 +281,7 @@
       <div class="v5-topbar">
         <div>
           <div class="v5-kicker">Creative Conversion Engine</div>
-          <h1>DGL Campaign Studio V5</h1>
+          <h1>Campaign Studio <span>V5.2</span></h1>
           <p>Convierte una oportunidad validada en una campaña con estrategia, diseño, copy, secuencia y aprobación creativa.</p>
         </div>
         <div class="v5-top-actions">
@@ -297,10 +298,10 @@
       </div>
 
       <div class="v5-stepper">
-        <div class="v5-step active"><span class="num">1</span>Brief</div><div class="v5-step-line"></div>
-        <div class="v5-step active"><span class="num">2</span>Creative</div><div class="v5-step-line"></div>
-        <div class="v5-step active"><span class="num">3</span>Preview</div><div class="v5-step-line"></div>
-        <div class="v5-step"><span class="num">4</span>Approval</div>
+        <div class="v5-step active"><span class="num">01</span>Brief</div><div class="v5-step-line"></div>
+        <div class="v5-step active"><span class="num">02</span>Creative system</div><div class="v5-step-line"></div>
+        <div class="v5-step active"><span class="num">03</span>Live preview</div><div class="v5-step-line"></div>
+        <div class="v5-step"><span class="num">04</span>Approval</div>
       </div>
 
       <div class="v5-studio-grid">
@@ -324,7 +325,7 @@
             <div class="v5-creative-grid">
               ${systems.map(s=>`<div class="v5-creative-card" data-system="${esc(s.id)}">
                 <div class="v5-thumb ${esc(s.thumb)}"><span class="accent"></span></div>
-                <div class="v5-creative-copy"><strong>${esc(s.name)}</strong><span>${esc(s.use)}</span></div>
+                <div class="v5-creative-copy"><strong>${esc(s.name)}</strong><span>${esc(s.use)}</span><small>${esc(s.desc)}</small></div>
               </div>`).join("")}
             </div>
             <div class="v5-strategy-grid" style="margin-top:12px">
@@ -339,7 +340,7 @@
                 <label class="v5-toggle"><input id="v5PLane" type="checkbox"> Lane</label>
               </div></div>
             </div>
-            <button class="v5-generate" data-v5-generate style="margin-top:13px">GENERATE CAMPAIGN</button>
+            <button class="v5-generate" data-v5-generate style="margin-top:13px"><span>GENERATE CAMPAIGN</span><i data-lucide="arrow-up-right"></i></button>
           </div>
 
           <div class="v5-section">
@@ -363,11 +364,11 @@
 
         <div class="v5-preview-panel">
           <div class="v5-preview-head">
-            <div><div class="v5-kicker" style="color:#9BD54F">Live Preview</div><div class="subject" id="v5PreviewSubject">Generate campaign to preview.</div></div>
+            <div><div class="v5-kicker" style="color:#9BD54F">DGL Email Preview</div><div class="subject" id="v5PreviewSubject">Generate campaign to preview.</div><div class="v5-preview-meta">Inbox rendering · 680px master</div></div>
             <div class="v5-device-toggle"><button class="active" data-v5-device="desktop"><i data-lucide="monitor"></i></button><button data-v5-device="mobile"><i data-lucide="smartphone"></i></button></div>
           </div>
           <div class="v5-email-stage" id="v5EmailStage"><iframe id="v5Preview"></iframe></div>
-          <div class="v5-qa">
+          <div class="v5-qa-title"><span>CREATIVE QA</span><em>4 checks</em></div><div class="v5-qa">
             <div class="v5-qa-item" id="qaBrand"></div>
             <div class="v5-qa-item" id="qaVisual"></div>
             <div class="v5-qa-item" id="qaCopy"></div>

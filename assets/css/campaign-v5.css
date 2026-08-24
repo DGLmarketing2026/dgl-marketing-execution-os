@@ -257,3 +257,36 @@ textarea.v5-input{resize:vertical;min-height:88px;line-height:1.5}
   .v5-strategy-grid,.v5-message-grid,.v5-form-grid{grid-template-columns:1fr}
   .v5-creative-grid{grid-template-columns:1fr 1fr}
 }
+
+/* Campaign Studio V5.2 — premium editorial layer */
+.v5-workspace{background:
+  radial-gradient(circle at 92% 3%,rgba(119,184,42,.08),transparent 25%),
+  linear-gradient(180deg,#f8f9fb 0,#f2f4f7 100%);padding:34px 36px 52px}
+.v5-topbar{padding:4px 2px 8px}.v5-topbar h1{font-size:36px;font-weight:780;letter-spacing:-.045em}
+.v5-topbar h1 span{display:inline-block;margin-left:8px;padding:5px 9px;border-radius:999px;background:var(--v5-navy);color:#fff;font-size:10px;letter-spacing:.08em;vertical-align:middle}
+.v5-briefbar{box-shadow:0 12px 35px rgba(5,3,92,.055);border:0;background:#e7eaf0}
+.v5-briefcell{padding:16px 18px}.v5-briefcell:first-child{border-left:4px solid var(--v5-green)}
+.v5-stepper{padding:8px 2px 10px}.v5-step{letter-spacing:.025em}.v5-step .num{width:28px;height:28px;font-size:8px;font-weight:900}
+.v5-section{padding:22px;border-color:#e8ebf0;border-radius:19px;box-shadow:0 12px 34px rgba(5,3,92,.045)}
+.v5-section-head{margin-bottom:18px}.v5-section-head h3{font-size:16px;letter-spacing:-.025em}.v5-section-index{margin-bottom:6px;color:var(--v5-green-dark);font-size:8px;font-weight:900;letter-spacing:.13em}
+.v5-input{min-height:42px;border-color:#dfe3ea;border-radius:9px;background:#fbfcfd;transition:border .15s,box-shadow .15s,background .15s}
+.v5-input:hover{background:#fff;border-color:#cbd1db}.v5-input:focus{background:#fff}
+.v5-creative-grid{gap:12px}.v5-creative-card{border-radius:15px;border-color:#e2e6ec;box-shadow:0 5px 16px rgba(5,3,92,.035)}
+.v5-creative-card.active{transform:translateY(-2px);box-shadow:0 12px 28px rgba(5,3,92,.10),0 0 0 3px rgba(119,184,42,.12)}
+.v5-thumb{height:104px}.v5-thumb:after,.v5-thumb:before{transition:transform .2s}.v5-creative-card:hover .v5-thumb:after{transform:scale(1.06)}
+.v5-thumb.editorial{background:linear-gradient(90deg,#fff 0 57%,#05035c 57%)}
+.v5-thumb.editorial:before{content:"MOVE";position:absolute;left:14px;top:35px;color:#05035c;font-size:15px;font-weight:950;letter-spacing:-1px}
+.v5-thumb.editorial:after{right:8px;bottom:0;width:35%;height:80%;background:linear-gradient(160deg,#24336b,#77b82a);clip-path:polygon(35% 0,100% 12%,100% 100%,0 100%)}
+.v5-thumb.split:before{content:"CAPACITY";position:absolute;left:14px;top:37px;color:#fff;font-size:10px;font-weight:900;letter-spacing:.08em}
+.v5-thumb.service:before{content:"01  /  02  /  03";position:absolute;left:14px;bottom:17px;color:#fff;font-size:8px;font-weight:900;letter-spacing:.08em}
+.v5-thumb.case:before{content:"PROOF";position:absolute;right:13px;bottom:14px;color:#fff;font-size:13px;font-weight:950}
+.v5-creative-copy{padding:12px 13px 14px;min-height:112px}.v5-creative-copy strong{font-size:11px}.v5-creative-copy span{color:var(--v5-green-dark);font-weight:850;text-transform:uppercase;letter-spacing:.035em}
+.v5-creative-copy small{display:block;margin-top:7px;color:#7a8495;font-size:8px;line-height:1.45}
+.v5-generate{display:flex;align-items:center;justify-content:space-between;padding:0 18px;min-height:50px;background:linear-gradient(110deg,#05035c,#111b73);letter-spacing:.06em}
+.v5-generate i{width:17px}.v5-preview-panel{padding:18px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(160deg,#080b20,#101630);box-shadow:0 24px 65px rgba(3,5,20,.28)}
+.v5-preview-meta{margin-top:5px;color:#79839b;font-size:8px;letter-spacing:.05em}.v5-email-stage{padding:16px;background:#dfe3e9;box-shadow:inset 0 1px 2px rgba(5,3,92,.10)}
+.v5-email-stage iframe{box-shadow:0 12px 36px rgba(5,3,92,.13)}
+.v5-qa-title{display:flex;justify-content:space-between;margin:16px 2px 8px;color:#fff;font-size:8px;font-weight:900;letter-spacing:.12em}.v5-qa-title em{color:#7f899f;font-style:normal;font-weight:700;letter-spacing:0}
+.v5-qa{margin-top:0}.v5-qa-item{background:rgba(255,255,255,.025)}
+.v5-approval-actions{margin-top:14px}.v5-approval-actions .v5-btn{border-color:#343b58;background:#151b35;color:#e5e7ed}.v5-approval-actions .v5-btn.primary{border-color:var(--v5-green);background:var(--v5-green);color:#071005}
+@media(max-width:760px){.v5-workspace{padding:20px 16px 36px}.v5-topbar h1{font-size:29px}.v5-creative-copy{min-height:104px}.v5-thumb{height:92px}}
