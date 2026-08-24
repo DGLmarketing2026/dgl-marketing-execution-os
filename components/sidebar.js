@@ -31,7 +31,7 @@
         <div class="mark">DG</div>
         <div class="brand-text">
           <div class="name">DGL Marketing OS</div>
-          <div class="sub">Execution Platform</div>
+          <div class="sub">V5.4 · Agent-Ready</div>
         </div>
       </div>
       <nav class="sidebar-nav">${groupsHtml}</nav>

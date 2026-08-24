@@ -1,4 +1,6 @@
-# DGL Marketing Execution OS
+# DGL Marketing Execution OS V5.4
+
+V5.4 structures the frontend around **AM → Marketing → governed agent preparation → automated campaign → account response → handoff to AM**. Claude is not connected; the current agent contract is a safe local adapter for a future authenticated private backend. See [Claude Marketing Agent Architecture](docs/CLAUDE_MARKETING_AGENT_ARCHITECTURE.md).
 
 Plataforma interna de ejecución comercial para el área de Marketing de **Dedicated Ground Logistics (DGL)**. No es un dashboard informativo: cada módulo termina en una acción — campaña, email, script o cuenta a trabajar — orientada a convertir, reactivar, retener y crecer la cartera existente de clientes.
 

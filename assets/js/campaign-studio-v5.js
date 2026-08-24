@@ -103,6 +103,10 @@
     set("v5QnbWindow",x.qnbWindow);
     set("v5Lane",x.lane);
     syncAngles();recommendSystem();
+    set("v5Angle",x.messageAngle||x.angle);
+    set("v5Language",x.language);
+    set("v5CtaIntent",x.ctaIntent);
+    if(x.creativeSystem){document.querySelectorAll(".v5-creative-card").forEach(c=>c.classList.toggle("active",c.dataset.system===x.creativeSystem))}
     if(x.objective==="Quoted Not Booked"){const e=document.getElementById("v5PLastQuote");if(e)e.checked=true}
     if(x.lane){const e=document.getElementById("v5PLane");if(e)e.checked=true}
   }
@@ -297,7 +301,7 @@
     if(frame)frame.srcdoc=emailHtml();
     if(sub)sub.textContent=sample(c.subjectA,s)||"Generate campaign to preview.";
     const source=document.getElementById("v5SourceValue");
-    if(source)source.textContent=state.incoming?`${state.incoming.sourceType} · ${state.incoming.sourceLabel}`:"Manual / Campaign Studio";
+    if(source)source.textContent=state.incoming?`${state.incoming.sourceType} · ${state.incoming.sourceLabel}`:"Manual / Marketing";
     const audience=document.getElementById("v5AudienceValue");
     if(audience)audience.textContent=value("v5Audience")||"Not selected";
     const service=document.getElementById("v5ServiceValue");
@@ -340,22 +344,26 @@
     state.campaignNameManual=false;
     state.incoming=readIncoming();
     const systems=Object.values(Lib().CREATIVE_SYSTEMS), aud=audiences();
+    const agentBadge=state.incoming?`<span class="v5-badge green">${esc(state.incoming.agentStatus||"AM REQUEST")}</span>`:`<span class="v5-badge">Manual Marketing</span>`;
     container.innerHTML=`<div class="v5-workspace">
       <div class="v5-topbar">
         <div>
           <div class="v5-kicker">Creative Conversion Engine</div>
-          <h1>Campaign Studio <span>V5.3.4</span></h1>
-          <p>Convierte una oportunidad validada en una campaña con estrategia, diseño, copy, secuencia y aprobación creativa.</p>
+          <h1>Campaign Studio <span>V5.4</span></h1>
+          <p>Convierte un AM Request en estrategia, diseño, copy, secuencia, QA y aprobación de Marketing.</p>
         </div>
         <div class="v5-top-actions">
-          ${state.incoming?`<span class="v5-badge green">${esc(state.incoming.area||"")}&nbsp; OPPORTUNITY</span>`:""}
-          <a class="v5-btn" href="#/campaign-opportunities"><i data-lucide="arrow-left"></i>Opportunity Center</a>
+          ${agentBadge}
+          <a class="v5-btn" href="#/campaign-opportunities"><i data-lucide="arrow-left"></i>AM Requests</a>
         </div>
       </div>
 
       <div class="v5-briefbar">
-        <div class="v5-briefcell"><span>Source</span><strong id="v5SourceValue">Manual / Campaign Studio</strong></div>
-        <div class="v5-briefcell"><span>Audience</span><strong id="v5AudienceValue">Not selected</strong></div>
+        <div class="v5-briefcell"><span>Source</span><strong id="v5SourceValue">Manual / Marketing</strong></div>
+        <div class="v5-briefcell"><span>AM Owner</span><strong>${esc(state.incoming?.amOwner||"—")}</strong></div>
+        <div class="v5-briefcell"><span>Portfolio</span><strong>${esc(state.incoming?.portfolioName||"Manual campaign")}</strong></div>
+        <div class="v5-briefcell"><span>Accounts</span><strong>${Number(state.incoming?.accountCount||0)}</strong></div>
+        <div class="v5-briefcell"><span>Campaign Audience</span><strong id="v5AudienceValue">Not selected</strong></div>
         <div class="v5-briefcell"><span>Service</span><strong id="v5ServiceValue">FTL</strong></div>
         <div class="v5-briefcell"><span>Objective</span><strong id="v5ObjectiveValue">Reactivation</strong></div>
       </div>
@@ -374,7 +382,7 @@
             <div class="v5-strategy-grid">
               <div class="v5-field"><label>Campaign Name</label><input id="v5CampaignName" class="v5-input" value="Reactivation FTL"></div>
               <div class="v5-field"><label>Objective</label><select id="v5Objective" class="v5-input">${objectiveOptions()}</select></div>
-              <div class="v5-field"><label>NOVA Audience</label><select id="v5Audience" class="v5-input"><option value="">Select audience</option>${aud.map(a=>`<option value="${esc(a.id)}">${esc(a.name)} · ${a.count}</option>`).join("")}</select></div>
+              <div class="v5-field"><label>Campaign Audience</label><select id="v5Audience" class="v5-input"><option value="">Select audience</option>${aud.map(a=>`<option value="${esc(a.id)}">${esc(a.name)} · ${a.count}</option>`).join("")}</select></div>
               <div class="v5-field"><label>Service</label><select id="v5Service" class="v5-input">${serviceOptions()}</select></div>
               <div class="v5-field"><label>Language</label><select id="v5Language" class="v5-input"><option>Spanish</option><option>English</option></select></div>
               <div class="v5-field"><label>Message Angle</label><select id="v5Angle" class="v5-input"></select></div>
@@ -495,5 +503,9 @@
 
   global.DGL_MODULE_RENDERERS=global.DGL_MODULE_RENDERERS||{};
   global.DGL_MODULE_RENDERERS["campaign-studio"]=render;
-  global.DGL_CAMPAIGN_STUDIO_V5={render,emailHtml,strategy,deriveCampaignName};
+  function loadStrategy(patch){
+    if(!document.getElementById("v5Objective"))return {status:"BLOCKED",message:"Campaign Studio must be rendered before loading a strategy."};
+    state.incoming={...(state.incoming||{}),...(patch||{})};applyIncoming();generate();return {status:"READY",strategy:strategy()};
+  }
+  global.DGL_CAMPAIGN_STUDIO_V5={render,emailHtml,strategy,getStrategy:strategy,loadStrategy,generate,getPreview:()=>({html:emailHtml(),copy:currentCopy(),strategy:strategy()}),deriveCampaignName};
 })(window);

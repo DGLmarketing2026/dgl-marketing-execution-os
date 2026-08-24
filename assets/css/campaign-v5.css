@@ -1,7 +1,7 @@
 
 /* ================================================================
    DGL MARKETING OS — V5 VISUAL SYSTEM
-   Campaign Opportunity Center + Campaign Studio
+   AM Campaign Requests + Campaign Studio + Agent Control
    Direction: Editorial white / navy structure / DGL green accents
    ================================================================ */
 
@@ -257,6 +257,10 @@ textarea.v5-input{resize:vertical;min-height:88px;line-height:1.5}
   .v5-strategy-grid,.v5-message-grid,.v5-form-grid{grid-template-columns:1fr}
   .v5-creative-grid{grid-template-columns:1fr 1fr}
 }
+
+/* Agent-ready V5.4 operational surfaces */
+.agent-disconnected{display:flex;gap:12px;align-items:center;margin:0 0 18px;padding:14px 16px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);border-radius:12px;color:#fff}.agent-disconnected svg{width:20px;color:#f59e0b}.agent-disconnected strong,.agent-disconnected span{display:block}.agent-disconnected span{margin-top:3px;color:#aab3c5;font-size:11px}.agent-table{overflow-x:auto}.agent-row{display:grid;grid-template-columns:1.05fr 1.4fr 1fr .9fr 1fr .85fr 1.25fr;gap:12px;align-items:center;min-width:980px;padding:12px 8px;border-top:1px solid rgba(255,255,255,.08);font-size:10px;color:#aab3c5}.agent-row.head{border-top:0;color:#6b7280;text-transform:uppercase;letter-spacing:.08em;font-weight:800}.agent-row strong{color:#fff}.permission{display:inline-flex;width:max-content;padding:5px 8px;border-radius:999px;font-size:8px;line-height:1;font-weight:900;letter-spacing:.06em}.permission.auto{color:#9bd54f;background:rgba(119,184,42,.12);border:1px solid rgba(119,184,42,.28)}.permission.approval{color:#fbbf24;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3)}.permission.never{color:#ff8e8e;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3)}.permission-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.permission-grid article{padding:16px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.025)}.permission-grid h3{margin:13px 0 6px;font-size:13px}.permission-grid p{margin:0;color:#aab3c5;font-size:11px;line-height:1.55}.response-rule{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px;padding:14px;border-left:3px solid #77b82a;background:rgba(119,184,42,.07);font-size:11px}.response-rule strong{color:#fff}.response-rule span{color:#77b82a;font-weight:900}.response-rule small{width:100%;color:#aab3c5}.v5-opportunity{width:100%;text-align:left}.v5-btn:disabled{opacity:.55;cursor:not-allowed}.v5-briefbar{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}
+@media(max-width:900px){.permission-grid{grid-template-columns:1fr}.agent-row{min-width:900px}}
 
 /* Campaign Studio V5.3.3 — context-coherent photographic system */
 .v5-workspace{background:

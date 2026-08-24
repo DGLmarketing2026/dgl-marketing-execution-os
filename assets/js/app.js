@@ -6,15 +6,15 @@
 
   const MODULE_GROUPS = [
     {
-      label: "Comando Ejecutivo",
+      label: "COMMAND",
       items: [
         { id: "command-center", label: "Marketing Campaign Command Center", icon: "layout-dashboard", group: "Comando Ejecutivo" }
       ]
     },
     {
-      label: "Campaigns",
+      label: "CAMPAIGNS",
       items: [
-        { id: "campaign-opportunities", label: "Campaign Opportunity Center", icon: "radar", group: "Campaigns" },
+        { id: "campaign-opportunities", label: "AM Campaign Requests", icon: "clipboard-list", group: "Campaigns" },
         { id: "campaign-execution", label: "Campaign Control", icon: "megaphone", group: "Campaigns" },
         { id: "campaign-studio", label: "Campaign Studio", icon: "palette", group: "Campaigns" },
         { id: "reactivation", label: "Reactivation Campaigns", icon: "refresh-cw", group: "Campaigns" },
@@ -24,22 +24,22 @@
       ]
     },
     {
-      label: "NOVA Audiences",
+      label: "AGENT",
       items: [
-        { id: "nova-audiences", label: "NOVA Audience Engine", icon: "database", group: "NOVA Audiences" }
+        { id: "agent-control", label: "Agent Control", icon: "bot", group: "Agent" }
       ]
     },
     {
-      label: "Service Marketing",
+      label: "CAMPAIGNS BY SERVICE",
       items: [
         { id: "service-marketing", label: "Service Campaign Overview", icon: "layers-3", group: "Service Marketing" },
-        { id: "ftl-marketing", label: "FTL Marketing", icon: "truck", group: "Service Marketing" },
-        { id: "ltl-marketing", label: "LTL Marketing", icon: "package-open", group: "Service Marketing" },
-        { id: "drayage-marketing", label: "Drayage Marketing", icon: "container", group: "Service Marketing" }
+        { id: "ftl-marketing", label: "FTL Campaigns", icon: "truck", group: "Campaigns by Service" },
+        { id: "ltl-marketing", label: "LTL Campaigns", icon: "package-open", group: "Campaigns by Service" },
+        { id: "drayage-marketing", label: "Drayage Campaigns", icon: "container", group: "Campaigns by Service" }
       ]
     },
     {
-      label: "Channels",
+      label: "CHANNELS",
       items: [
         { id: "email-marketing", label: "Email Marketing", icon: "mail", group: "Channels" },
         { id: "channel-orchestration", label: "Paid / Retargeting / LinkedIn", icon: "radio", group: "Channels" },
@@ -48,22 +48,22 @@
       ]
     },
     {
-      label: "Accounts",
+      label: "ACCOUNTS",
       items: [
         { id: "priority-queue", label: "Account Priority Queue", icon: "list-filter", group: "Accounts" },
         { id: "account-360", label: "Account 360", icon: "contact-round", group: "Accounts" }
       ]
     },
     {
-      label: "Analytics",
+      label: "ANALYTICS",
       items: [
         { id: "campaign-attribution", label: "Campaign Revenue Attribution", icon: "circle-dollar-sign", group: "Analytics" },
         { id: "analytics", label: "Marketing Analytics", icon: "bar-chart-3", group: "Analytics" },
-        { id: "nova-insights", label: "NOVA & Salesforce Reports", icon: "file-bar-chart", group: "Analytics" }
+        { id: "account-campaign-reports", label: "Account & Campaign Reports", icon: "file-bar-chart", group: "Analytics" }
       ]
     },
     {
-      label: "Admin",
+      label: "ADMIN",
       items: [
         { id: "governance", label: "Governance & Approvals", icon: "check-square", group: "Admin" }
       ]
@@ -91,13 +91,13 @@
         </div>
       </div>
       <div class="quick-actions-fab" id="quickFab" style="display:none;position:fixed;bottom:20px;right:20px;z-index:150">
-        <a href="#/campaign-opportunities" class="btn btn-primary" title="Campaign Opportunity Center" style="border-radius:999px;width:54px;height:54px;padding:0;box-shadow:0 10px 26px rgba(119,184,42,0.4);display:flex;align-items:center;justify-content:center">
+        <a href="#/campaign-opportunities" class="btn btn-primary" title="AM Campaign Requests" style="border-radius:999px;width:54px;height:54px;padding:0;box-shadow:0 10px 26px rgba(119,184,42,0.4);display:flex;align-items:center;justify-content:center">
           <i data-lucide="radar"></i>
         </a>
       </div>
       <nav class="bottom-nav" id="bottomNav" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#0a0c1e;border-top:1px solid var(--border);padding:8px 6px;justify-content:space-around;z-index:140">
         <a href="#/command-center" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="layout-dashboard"></i>Home</a>
-        <a href="#/campaign-opportunities" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="radar"></i>Opportunities</a>
+        <a href="#/campaign-opportunities" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="clipboard-list"></i>AM Requests</a>
         <a href="#/campaign-studio" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="palette"></i>Studio</a>
         <a href="#/service-marketing" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="layers-3"></i>Services</a>
         <a href="#/campaign-attribution" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="circle-dollar-sign"></i>Revenue</a>
