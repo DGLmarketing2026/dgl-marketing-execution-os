@@ -55,12 +55,12 @@
     const service=clean(s.service)||"FTL",angle=clean(s.angle),lane=String(s.lane||"").trim();
     if(s.objective==="Quoted Not Booked"){
       const windowLabel={"0-14":"0–14 Days","15-30":"15–30 Days","30+":"30+ Days"}[s.qnbWindow]||clean(s.qnbWindow);
-      return `QNB ${service}  ${windowLabel}`.trim();
+      return `QNB ${service} · ${windowLabel}`;
     }
-    if(s.objective==="Cross-Sell")return `Cross-Sell ${service}${angle?`  ${angle}`:""}`;
-    if(s.objective==="Retention")return `Retention${angle?`  ${angle}`:""}`;
-    if(s.objective==="Service Campaign")return `${service} Campaign${angle?`  ${angle}`:""}`;
-    if(s.objective==="Lane Campaign")return `${service} Lane Campaign${lane?`  ${lane}`:""}`;
+    if(s.objective==="Cross-Sell")return `Cross-Sell ${service}${angle?` · ${angle}`:""}`;
+    if(s.objective==="Retention")return `Retention${angle?` · ${angle}`:""}`;
+    if(s.objective==="Service Campaign")return `${service} Campaign${angle?` · ${angle}`:""}`;
+    if(s.objective==="Lane Campaign")return `${service} Lane Campaign${lane?` · ${clean(lane)}`:""}`;
     return `Reactivation ${service}`;
   }
 
@@ -344,7 +344,7 @@
       <div class="v5-topbar">
         <div>
           <div class="v5-kicker">Creative Conversion Engine</div>
-          <h1>Campaign Studio <span>V5.3.3</span></h1>
+          <h1>Campaign Studio <span>V5.3.4</span></h1>
           <p>Convierte una oportunidad validada en una campaña con estrategia, diseño, copy, secuencia y aprobación creativa.</p>
         </div>
         <div class="v5-top-actions">

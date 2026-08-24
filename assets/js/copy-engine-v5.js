@@ -1,161 +1,67 @@
-
 (function(global){
   "use strict";
   const L=()=>global.DGL_CREATIVE_LIBRARY_V5;
   const clean=v=>String(v==null?"":v).replace(/\bundefined\b/gi,"").replace(/\s{2,}/g," ").replace(/\s+([,.;:!?])/g,"$1").trim();
-
   function language(s){return s.language==="English"?"en":"es"}
   function svc(s){return L().SERVICES[s.service]||L().SERVICES.Multiservicio}
   function cta(s,lg){
+    if(s.objective==="Cross-Sell"){
+      const byAngle={"Additional Capability":{es:"REVISAR CAPACIDAD",en:"REVIEW CAPACITY"},"One Partner":{es:"VER OPCIONES",en:"SEE OPTIONS"},"Service Expansion":{es:"ENVIAR MOVIMIENTO",en:"SEND A SHIPMENT"}};
+      if(byAngle[s.angle])return byAngle[s.angle][lg];
+    }
     const c=L().CTA[s.ctaIntent]||L().CTA["Generate Quote"];
     return lg==="en"?c.en:c.es;
   }
 
+  /* QNB window messaging is intentionally preserved as a non-promotional recovery flow. */
   function qnb(s,lg,service){
     const w=s.qnbWindow||"0-14";
     if(lg==="en"){
-      if(w==="30+") return {
-        subjectA:`{{firstName}}, should we reopen this ${service} requirement?`,
-        subjectB:"{{firstName}}, any update on this previous quote?",
-        preheader:"If the requirement changed, we can build a fresh quote around the current movement.",
-        headline:"SHOULD WE REOPEN IT?",
-        body:`We quoted a {{service}} movement for {{company}} some time ago and wanted to check whether a similar requirement is still on your radar.`,
-        body2:"If the dates, lane or conditions changed, send the current details and we can start from there."
-      };
-      if(w==="15-30") return {
-        subjectA:`{{firstName}}, is this ${service} requirement still moving?`,
-        subjectB:"{{firstName}}, should we update this quote?",
-        preheader:"We can review the quote again if dates or requirements changed.",
-        headline:"DOES THIS STILL NEED COVERAGE?",
-        body:"I wanted to check whether the {{service}} movement we quoted for {{company}} is still in process.",
-        body2:"If the date, lane or any requirement changed, send the update and we will review it again."
-      };
-      return {
-        subjectA:`{{firstName}}, is this ${service} move still active?`,
-        subjectB:"{{firstName}}, should we revisit this quote?",
-        preheader:"We can review the movement again if dates or requirements changed.",
-        headline:"STILL ACTIVE?",
-        body:"I wanted to confirm whether the {{service}} movement we quoted for {{company}} is still in process.",
-        body2:"If the date, origin, destination or any requirement changed, send the update and we can review it again."
-      };
+      if(w==="30+")return {subjectA:`{{firstName}}, should we reopen this ${service} requirement?`,subjectB:"{{firstName}}, any update on this previous quote?",preheader:"If the requirement changed, we can build a fresh quote around the current movement.",headline:"SHOULD WE REOPEN IT?",body:"We quoted a {{service}} movement for {{company}} some time ago and wanted to check whether a similar requirement is still on your radar.",body2:"If the dates, lane or conditions changed, send the current details and we can start from there."};
+      if(w==="15-30")return {subjectA:`{{firstName}}, is this ${service} requirement still moving?`,subjectB:"{{firstName}}, should we update this quote?",preheader:"We can review the quote again if dates or requirements changed.",headline:"DOES THIS STILL NEED COVERAGE?",body:"I wanted to check whether the {{service}} movement we quoted for {{company}} is still in process.",body2:"If the date, lane or any requirement changed, send the update and we will review it again."};
+      return {subjectA:`{{firstName}}, is this ${service} move still active?`,subjectB:"{{firstName}}, should we revisit this quote?",preheader:"We can review the movement again if dates or requirements changed.",headline:"STILL ACTIVE?",body:"I wanted to confirm whether the {{service}} movement we quoted for {{company}} is still in process.",body2:"If the date, origin, destination or any requirement changed, send the update and we can review it again."};
     }
-    if(w==="30+") return {
-      subjectA:`{{firstName}}, ¿retomamos este requerimiento ${service}?`,
-      subjectB:"{{firstName}}, ¿hay alguna actualización sobre esta cotización?",
-      preheader:"Si el requerimiento cambió, podemos preparar una nueva cotización con la información actual.",
-      headline:"¿LO RETOMAMOS?",
-      body:"Hace un tiempo cotizamos un movimiento {{service}} para {{company}} y quería validar si todavía tienen una necesidad similar en curso.",
-      body2:"Si cambiaron las fechas, la ruta o las condiciones, envíeme la información actual y lo revisamos desde ahí."
-    };
-    if(w==="15-30") return {
-      subjectA:`{{firstName}}, ¿este requerimiento ${service} sigue en movimiento?`,
-      subjectB:"{{firstName}}, ¿actualizamos esta cotización?",
-      preheader:"Podemos revisar nuevamente la tarifa si cambió la fecha o el requerimiento.",
-      headline:"¿TODAVÍA NECESITAN COBERTURA?",
-      body:"Quería validar si el movimiento {{service}} que cotizamos para {{company}} todavía sigue en proceso.",
-      body2:"Si cambió la fecha, la ruta o alguna condición, envíeme la actualización y lo revisamos nuevamente."
-    };
-    return {
-      subjectA:`{{firstName}}, ¿sigue activo este movimiento ${service}?`,
-      subjectB:"{{firstName}}, ¿revisamos nuevamente esta cotización?",
-      preheader:"Podemos revisar el movimiento nuevamente si cambió la fecha o el requerimiento.",
-      headline:"¿SIGUE ACTIVO?",
-      body:"Quería confirmar si el movimiento {{service}} que cotizamos para {{company}} todavía sigue en proceso.",
-      body2:"Si cambió la fecha, origen, destino o alguna condición, envíemela y lo revisamos nuevamente."
-    };
+    if(w==="30+")return {subjectA:`{{firstName}}, ¿retomamos este requerimiento ${service}?`,subjectB:"{{firstName}}, ¿hay alguna actualización sobre esta cotización?",preheader:"Si el requerimiento cambió, podemos preparar una nueva cotización con la información actual.",headline:"¿LO RETOMAMOS?",body:"Hace un tiempo cotizamos un movimiento {{service}} para {{company}} y quería validar si todavía tienen una necesidad similar en curso.",body2:"Si cambiaron las fechas, la ruta o las condiciones, envíeme la información actual y lo revisamos desde ahí."};
+    if(w==="15-30")return {subjectA:`{{firstName}}, ¿este requerimiento ${service} sigue en movimiento?`,subjectB:"{{firstName}}, ¿actualizamos esta cotización?",preheader:"Podemos revisar nuevamente la tarifa si cambió la fecha o el requerimiento.",headline:"¿TODAVÍA NECESITAN COBERTURA?",body:"Quería validar si el movimiento {{service}} que cotizamos para {{company}} todavía sigue en proceso.",body2:"Si cambió la fecha, la ruta o alguna condición, envíeme la actualización y lo revisamos nuevamente."};
+    return {subjectA:`{{firstName}}, ¿sigue activo este movimiento ${service}?`,subjectB:"{{firstName}}, ¿revisamos nuevamente esta cotización?",preheader:"Podemos revisar el movimiento nuevamente si cambió la fecha o el requerimiento.",headline:"¿SIGUE ACTIVO?",body:"Quería confirmar si el movimiento {{service}} que cotizamos para {{company}} todavía sigue en proceso.",body2:"Si cambió la fecha, origen, destino o alguna condición, envíemela y lo revisamos nuevamente."};
   }
+
+  const RETENTION={
+    "Stay Close":{en:{subjectA:"{{firstName}}, staying close to {{company}}'s operation",subjectB:"{{firstName}}, DGL remains available for {{service}}",preheader:"DGL remains close and available for upcoming transportation needs.",headline:"STAYING CLOSE TO YOUR OPERATION.",body:"We want to stay close to {{company}}'s transportation needs and remain available for upcoming {{service}} requirements.",body2:"If a new lane, volume change or movement comes up, our team is ready to review it with you."},es:{subjectA:"{{firstName}}, seguimos cerca de la operación de {{company}}",subjectB:"{{firstName}}, DGL sigue disponible para {{service}}",preheader:"DGL sigue cerca y disponible para sus próximos requerimientos de transporte.",headline:"SEGUIMOS CERCA DE SU OPERACIÓN.",body:"Queremos mantenernos cerca de las necesidades de transporte de {{company}} y disponibles para sus próximos requerimientos {{service}}.",body2:"Si surge una nueva ruta, un cambio de volumen o un próximo movimiento, nuestro equipo está listo para revisarlo con ustedes."}},
+    "Planning Ahead":{en:{subjectA:"{{firstName}}, let's plan {{company}}'s next move",subjectB:"Planning ahead for your next {{service}} requirement",preheader:"A quick planning conversation can help prepare capacity for what is next.",headline:"LET'S PLAN THE NEXT MOVE.",body:"Planning ahead gives {{company}} more time to align requirements, timing and {{service}} capacity.",body2:"Share what is coming up and we can review the lane, schedule and operating details together."},es:{subjectA:"{{firstName}}, planifiquemos el próximo movimiento de {{company}}",subjectB:"Planificación para su próximo requerimiento {{service}}",preheader:"Una conversación anticipada ayuda a preparar capacidad para lo que sigue.",headline:"PLANIFIQUEMOS EL PRÓXIMO MOVIMIENTO.",body:"Planificar con anticipación le da a {{company}} más tiempo para alinear requerimientos, fechas y capacidad {{service}}.",body2:"Compártanos lo que viene y revisamos juntos la ruta, el calendario y los detalles operativos."}},
+    "Relationship Continuity":{en:{subjectA:"{{firstName}}, continuity for what comes next",subjectB:"{{company}} | keeping the operation moving",preheader:"DGL remains ready to support continuity across upcoming ground movements.",headline:"CONTINUITY FOR WHAT COMES NEXT.",body:"Our relationship with {{company}} gives us a strong foundation to support continuity across upcoming {{service}} movements.",body2:"When the next requirement is ready, send the details and we will help keep the operation moving."},es:{subjectA:"{{firstName}}, continuidad para lo que sigue",subjectB:"{{company}} | mantengamos la operación en movimiento",preheader:"DGL sigue disponible para dar continuidad a sus próximos movimientos terrestres.",headline:"CONTINUIDAD PARA LO QUE SIGUE.",body:"Nuestra relación con {{company}} nos da una base sólida para apoyar la continuidad de sus próximos movimientos {{service}}.",body2:"Cuando esté listo el siguiente requerimiento, envíenos los detalles y ayudamos a mantener la operación en movimiento."}}
+  };
+
+  const CROSS_SELL={
+    "Additional Capability":{en:{subjectA:"{{firstName}}, an additional capability for {{company}}",subjectB:"{{company}} | expand your options with {{service}}",preheader:"An additional DGL option to complement your current operation.",headline:"ONE MORE OPTION FOR YOUR OPERATION.",body:"In addition to the services {{company}} already uses with DGL, we want to make our {{service}} capacity available when your team needs another option.",body2:"If you have an upcoming lane or requirement where it could fit, send us the details and we will review capacity."},es:{subjectA:"{{firstName}}, una capacidad adicional para {{company}}",subjectB:"{{company}} | ampliemos sus opciones con {{service}}",preheader:"Una alternativa adicional de DGL para complementar su operación actual.",headline:"UNA CAPACIDAD MÁS PARA SU OPERACIÓN.",body:"Además de los servicios que {{company}} ya trabaja con DGL, queremos poner a su disposición nuestra capacidad {{service}} para movimientos donde necesiten una alternativa adicional.",body2:"Si tienen una ruta o requerimiento próximo donde pueda encajar, compártanos los detalles y revisamos capacidad."}},
+    "One Partner":{en:{subjectA:"{{firstName}}, more ground options through one DGL relationship",subjectB:"{{company}} | one partner, more options",preheader:"Access another DGL ground service through the commercial relationship you already know.",headline:"MORE OPTIONS. ONE PARTNER.",body:"DGL can give {{company}} one commercial point of access to an additional {{service}} option while complementing the transportation resources you already use.",body2:"If you would like to review where this capability could support your operation, we can walk through the available options."},es:{subjectA:"{{firstName}}, más opciones desde una sola relación con DGL",subjectB:"{{company}} | un solo partner, más opciones",preheader:"Acceda a un servicio terrestre adicional desde la relación comercial que ya tiene con DGL.",headline:"MÁS OPCIONES. UN SOLO PARTNER.",body:"DGL puede ofrecerle a {{company}} un solo punto de acceso comercial a una opción adicional de {{service}}, complementando los recursos de transporte que ya utiliza.",body2:"Si desea revisar dónde puede apoyar esta capacidad a su operación, podemos conversar sobre las opciones disponibles."}},
+    "Service Expansion":{en:{subjectA:"{{firstName}}, let's expand what DGL moves with {{company}}",subjectB:"{{company}} | add {{service}} to our work together",preheader:"Build on the DGL relationship already supporting your operation.",headline:"LET'S EXPAND WHAT WE ALREADY MOVE TOGETHER.",body:"The work DGL already does with {{company}} gives us a practical starting point to introduce our {{service}} capability.",body2:"Send us an upcoming movement and we will review how this service can fit into the operation we already support together."},es:{subjectA:"{{firstName}}, ampliemos lo que DGL mueve con {{company}}",subjectB:"{{company}} | sumemos {{service}} a nuestro trabajo conjunto",preheader:"Aprovechemos la relación con DGL que ya apoya su operación.",headline:"AMPLIEMOS LO QUE YA MOVEMOS JUNTOS.",body:"El trabajo que DGL ya realiza con {{company}} nos da un punto de partida práctico para presentar nuestra capacidad {{service}}.",body2:"Envíenos un próximo movimiento y revisamos cómo puede integrarse este servicio a la operación que ya apoyamos juntos."}}
+  };
+
+  const SERVICE_CAMPAIGN={
+    "Capacity Available":{en:{subjectA:"{{firstName}}, {{service}} capacity for upcoming moves",subjectB:"DGL | {{service}} support for {{company}}",preheader:"DGL ground capacity is available for upcoming requirements.",headline:null,body:"DGL has {{service}} capacity available to support upcoming requirements for {{company}}.",body2:"Send us the movement details and we will review timing, coverage and the best available option."},es:{subjectA:"{{firstName}}, capacidad {{service}} para sus próximos movimientos",subjectB:"DGL | apoyo {{service}} para {{company}}",preheader:"Capacidad terrestre DGL disponible para sus próximos requerimientos.",headline:null,body:"DGL tiene capacidad {{service}} disponible para apoyar los próximos requerimientos de {{company}}.",body2:"Envíenos los detalles del movimiento y revisamos fechas, cobertura y la mejor alternativa disponible."}},
+    "Lane Opportunity":{en:{subjectA:"{{firstName}}, a {{service}} lane opportunity for {{company}}",subjectB:"DGL | let's review an upcoming lane",preheader:"Bring us an upcoming lane and we will review the operating fit.",headline:"A STRONGER OPTION FOR YOUR NEXT LANE.",body:"DGL is looking to support relevant {{service}} lanes for {{company}} with coordinated ground capacity.",body2:"Share an origin, destination and timing, and we will review the opportunity with our operations team."},es:{subjectA:"{{firstName}}, una oportunidad de ruta {{service}} para {{company}}",subjectB:"DGL | revisemos una próxima ruta",preheader:"Compártanos una próxima ruta y revisamos el encaje operativo.",headline:"UNA MEJOR OPCIÓN PARA SU PRÓXIMA RUTA.",body:"DGL busca apoyar rutas relevantes de {{service}} para {{company}} con capacidad terrestre coordinada.",body2:"Compártanos origen, destino y fechas, y revisamos la oportunidad con nuestro equipo operativo."}},
+    "Seasonal Window":{en:{subjectA:"{{firstName}}, plan {{service}} capacity for the seasonal window",subjectB:"{{company}} | prepare capacity for the next demand window",preheader:"Plan ground capacity before seasonal demand tightens the schedule.",headline:"PLAN CAPACITY FOR THE SEASON AHEAD.",body:"Upcoming seasonal demand can put pressure on timing and {{service}} capacity for {{company}}.",body2:"Share your expected lanes and volume window so we can review options before the schedule tightens."},es:{subjectA:"{{firstName}}, planifiquemos capacidad {{service}} para la temporada",subjectB:"{{company}} | preparemos capacidad para la próxima ventana de demanda",preheader:"Planifique capacidad terrestre antes de que la demanda estacional ajuste el calendario.",headline:"PLANIFIQUEMOS CAPACIDAD PARA LA PRÓXIMA TEMPORADA.",body:"La próxima demanda estacional puede aumentar la presión sobre fechas y capacidad {{service}} para {{company}}.",body2:"Compártanos las rutas y la ventana de volumen esperada para revisar opciones antes de que se ajuste el calendario."}}
+  };
+
+  const REACTIVATION={
+    "Previous Relationship":{en:{subjectA:"{{firstName}}, any {{service}} moves coming up?",subjectB:"{{firstName}}, DGL is ready for your next {{service}} move",preheader:"We are available to review your next ground transportation requirements.",headline:"LET'S MOVE AGAIN.",body:"We previously had the opportunity to support {{company}} and wanted to put DGL back at your disposal for upcoming {{service}} moves.",body2:"If you have anything to quote or schedule, send it over and we will review capacity and pricing."},es:{subjectA:"{{firstName}}, ¿tienen movimientos {{service}} próximos?",subjectB:"{{firstName}}, DGL está disponible para su próximo movimiento {{service}}",preheader:"Estamos disponibles para revisar sus próximos requerimientos terrestres.",headline:"VOLVAMOS A MOVER CARGA.",body:"Hace un tiempo tuvimos la oportunidad de apoyar a {{company}} y quería volver a poner a DGL a su disposición para sus próximos movimientos {{service}}.",body2:"Si tienen algo por cotizar o programar, envíemelo y revisamos capacidad y tarifa."}},
+    "Ready to Quote":{en:{subjectA:"{{firstName}}, have a {{service}} shipment coming up?",subjectB:"{{firstName}}, send DGL your next movement",preheader:"Send the next requirement and we will review capacity and pricing.",headline:"HAVE A SHIPMENT COMING UP?",body:"DGL is available to review the next {{service}} movement for {{company}} and coordinate the right ground option.",body2:"Send the lane, dates and equipment requirements and we will prepare the next step."},es:{subjectA:"{{firstName}}, ¿tiene un movimiento {{service}} en puerta?",subjectB:"{{firstName}}, envíe a DGL su próximo movimiento",preheader:"Envíenos el próximo requerimiento y revisamos capacidad y tarifa.",headline:"¿TIENE UN MOVIMIENTO EN PUERTA?",body:"DGL está disponible para revisar el próximo movimiento {{service}} de {{company}} y coordinar la alternativa terrestre adecuada.",body2:"Envíenos la ruta, las fechas y los requerimientos de equipo para preparar el siguiente paso."}},
+    "Service Reminder":{en:{subjectA:"{{firstName}}, DGL remains available for {{service}}",subjectB:"{{company}} | {{service}} support from DGL",preheader:"DGL remains available for upcoming {{service}} requirements.",headline:"DGL IS STILL AVAILABLE FOR YOUR {{service}} MOVES.",body:"DGL remains available to support {{company}} with upcoming {{service}} movements and coordinated ground capacity.",body2:"When a requirement comes up, send the details and we will review coverage, timing and pricing."},es:{subjectA:"{{firstName}}, DGL sigue disponible para {{service}}",subjectB:"{{company}} | apoyo {{service}} de DGL",preheader:"DGL sigue disponible para sus próximos requerimientos {{service}}.",headline:"DGL SIGUE DISPONIBLE PARA SUS MOVIMIENTOS {{service}}.",body:"DGL sigue disponible para apoyar a {{company}} con próximos movimientos {{service}} y capacidad terrestre coordinada.",body2:"Cuando surja un requerimiento, envíenos los detalles y revisamos cobertura, fechas y tarifa."}}
+  };
 
   function generate(s){
-    const lg=language(s), service=svc(s), serviceName=(service && service.name) ? service.name : (s.service || "DGL");
+    const lg=language(s),service=svc(s),serviceName=service?.name||s.service||"DGL";
     let x;
-    if(s.objective==="Quoted Not Booked") x=qnb(s,lg,serviceName);
-    else if(s.objective==="Retention"){
-      x=lg==="en"?{
-        subjectA:"{{firstName}}, staying close to {{company}}'s next move",
-        subjectB:`{{firstName}}, planning your next ${serviceName} requirements`,
-        preheader:"DGL remains available for upcoming routes, volume changes and requirements.",
-        headline:"STAYING CLOSE TO YOUR NEXT MOVE.",
-        body:"We want to stay close to {{company}}'s transportation needs and remain available for upcoming {{service}} requirements.",
-        body2:"If you have new lanes, volume changes or upcoming moves, we can review them with your team."
-      }:{
-        subjectA:"{{firstName}}, seguimos cerca de los próximos movimientos de {{company}}",
-        subjectB:`{{firstName}}, ¿revisamos sus próximos requerimientos ${serviceName}?`,
-        preheader:"DGL sigue disponible para nuevas rutas, cambios de volumen y próximos movimientos.",
-        headline:"CERCA DE SU PRÓXIMO MOVIMIENTO.",
-        body:"Queremos mantenernos cerca de las necesidades de {{company}} y disponibles para sus próximos requerimientos {{service}}.",
-        body2:"Si tienen nuevas rutas, cambios de volumen o movimientos próximos, podemos revisarlos con ustedes."
-      };
-    }
-    else if(s.objective==="Cross-Sell"){
-      x=lg==="en"?{
-        subjectA:"{{firstName}}, another option for {{company}}",
-        subjectB:`{{company}} + DGL | ${serviceName} capacity`,
-        preheader:"An additional DGL ground service for upcoming requirements.",
-        headline:service.headlineEN,
-        body:"In addition to the services {{company}} already works with, we want to make DGL's {{service}} capacity available to your team.",
-        body2:"If you have a movement where this option could fit, send us the details and we will review it."
-      }:{
-        subjectA:"{{firstName}}, una opción adicional para {{company}}",
-        subjectB:`{{company}} + DGL | capacidad ${serviceName}`,
-        preheader:"Una capacidad terrestre adicional para sus próximos requerimientos.",
-        headline:service.headlineES,
-        body:"Además de los servicios que {{company}} ya trabaja con DGL, queremos poner a su disposición nuestra capacidad {{service}}.",
-        body2:"Si tienen un movimiento donde esta alternativa pueda encajar, compártanos los detalles y lo revisamos."
-      };
-    }
-    else if(s.objective==="Lane Campaign"){
-      x=lg==="en"?{
-        subjectA:`{{firstName}}, capacity around ${s.lane||"this lane"}`,
-        subjectB:"{{company}} | DGL lane opportunity",
-        preheader:"A relevant DGL corridor for upcoming ground movements.",
-        headline:"A STRONGER ROUTE FOR THE NEXT MOVE.",
-        body:`DGL has a commercial opportunity around ${s.lane||"a relevant corridor"} and we wanted to make it available to {{company}}.`,
-        body2:"If you have a current or upcoming movement on this lane, send us the details and we will review capacity."
-      }:{
-        subjectA:`{{firstName}}, capacidad para ${s.lane||"esta ruta"}`,
-        subjectB:"{{company}} | oportunidad de corredor DGL",
-        preheader:"Un corredor relevante de DGL para sus próximos movimientos terrestres.",
-        headline:"UNA MEJOR RUTA PARA EL PRÓXIMO MOVIMIENTO.",
-        body:`DGL tiene una oportunidad comercial alrededor de ${s.lane||"un corredor relevante"} y queremos ponerla a disposición de {{company}}.`,
-        body2:"Si tienen un movimiento actual o próximo en esta ruta, envíenos los detalles y revisamos capacidad."
-      };
-    }
+    if(s.objective==="Quoted Not Booked")x=qnb(s,lg,serviceName);
+    else if(s.objective==="Retention")x=(RETENTION[s.angle]||RETENTION["Stay Close"])[lg];
+    else if(s.objective==="Cross-Sell")x=(CROSS_SELL[s.angle]||CROSS_SELL["Additional Capability"])[lg];
+    else if(s.objective==="Lane Campaign")x=lg==="en"?{subjectA:`{{firstName}}, capacity around ${s.lane||"this lane"}`,subjectB:"{{company}} | DGL lane opportunity",preheader:"A relevant DGL corridor for upcoming ground movements.",headline:"A STRONGER ROUTE FOR THE NEXT MOVE.",body:`DGL has a commercial opportunity around ${s.lane||"a relevant corridor"} and we wanted to make it available to {{company}}.`,body2:"If you have a current or upcoming movement on this lane, send us the details and we will review capacity."}:{subjectA:`{{firstName}}, capacidad para ${s.lane||"esta ruta"}`,subjectB:"{{company}} | oportunidad de corredor DGL",preheader:"Un corredor relevante de DGL para sus próximos movimientos terrestres.",headline:"UNA MEJOR RUTA PARA EL PRÓXIMO MOVIMIENTO.",body:`DGL tiene una oportunidad comercial alrededor de ${s.lane||"un corredor relevante"} y queremos ponerla a disposición de {{company}}.`,body2:"Si tienen un movimiento actual o próximo en esta ruta, envíenos los detalles y revisamos capacidad."};
     else if(s.objective==="Service Campaign"){
-      x=lg==="en"?{
-        subjectA:`{{firstName}}, ${serviceName} capacity for upcoming moves`,
-        subjectB:`DGL | ${serviceName} support for {{company}}`,
-        preheader:"DGL ground capacity available for your upcoming requirements.",
-        headline:service.headlineEN,
-        body:"DGL is available to support {{company}} with upcoming {{service}} requirements and coordinated ground capacity.",
-        body2:"Send us the movement details and we will review the best available option."
-      }:{
-        subjectA:`{{firstName}}, capacidad ${serviceName} para sus próximos movimientos`,
-        subjectB:`DGL | apoyo ${serviceName} para {{company}}`,
-        preheader:"Capacidad terrestre DGL disponible para sus próximos requerimientos.",
-        headline:service.headlineES,
-        body:"DGL está disponible para apoyar a {{company}} con sus próximos requerimientos {{service}} y capacidad terrestre coordinada.",
-        body2:"Envíenos los detalles del movimiento y revisamos la mejor alternativa disponible."
-      };
-    }
-    else{
-      x=lg==="en"?{
-        subjectA:`{{firstName}}, any ${serviceName} moves coming up?`,
-        subjectB:`{{firstName}}, DGL is ready for your next ${serviceName} move`,
-        preheader:"We are available to review your next ground transportation requirements.",
-        headline:"LET'S MOVE AGAIN.",
-        body:"We previously had the opportunity to support {{company}} and wanted to put DGL back at your disposal for upcoming {{service}} moves.",
-        body2:"If you have anything to quote or schedule, send it over and we will review capacity and pricing."
-      }:{
-        subjectA:`{{firstName}}, ¿tienen movimientos ${serviceName} próximos?`,
-        subjectB:`{{firstName}}, DGL está disponible para su próximo movimiento ${serviceName}`,
-        preheader:"Estamos disponibles para revisar sus próximos requerimientos terrestres.",
-        headline:"VOLVAMOS A MOVER CARGA.",
-        body:"Hace un tiempo tuvimos la oportunidad de apoyar a {{company}} y quería volver a poner a DGL a su disposición para sus próximos movimientos {{service}}.",
-        body2:"Si tienen algo por cotizar o programar, envíemelo y revisamos capacidad y tarifa."
-      };
-    }
+      x={...(SERVICE_CAMPAIGN[s.angle]||SERVICE_CAMPAIGN["Capacity Available"])[lg]};
+      if(!x.headline)x.headline=lg==="en"?service.headlineEN:service.headlineES;
+    }else x=(REACTIVATION[s.angle]||REACTIVATION["Previous Relationship"])[lg];
     return Object.fromEntries(Object.entries({...x,cta:cta(s,lg),serviceProof:service.proof,serviceLabel:service.label}).map(([k,v])=>[k,Array.isArray(v)?v.map(clean):clean(v)]));
   }
-
   global.DGL_COPY_ENGINE_V5={generate};
 })(window);

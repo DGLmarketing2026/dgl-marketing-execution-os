@@ -1,7 +1,7 @@
 
 (function(global){
   "use strict";
-  const VERSION="5.3.3";
+  const VERSION="5.3.4";
 
   const CREATIVE_SYSTEMS={
     "editorial-white":{
