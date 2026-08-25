@@ -72,6 +72,16 @@
       recommendedSystem:"route-intelligence",
       angles:["Lane Opportunity","Port Capacity","Cross-Border Corridor"],
       defaultAngle:"Lane Opportunity",defaultCta:"Generate Quote"
+    },
+    "Nurture":{
+      recommendedSystem:"editorial-white",
+      angles:["Stay Close","Planning Ahead","Relationship Continuity"],
+      defaultAngle:"Stay Close",defaultCta:"Reply"
+    },
+    "Relationship Renewal":{
+      recommendedSystem:"case-proof",
+      angles:["Planning Ahead","Renew Current Activity","Keep Capacity Aligned"],
+      defaultAngle:"Planning Ahead",defaultCta:"Reply"
     }
   };
 

@@ -289,11 +289,8 @@
 
   function renderSequence(){
     const mount=document.getElementById("v5Sequence");if(!mount)return;
-    const s=strategy(),rows=Seq().getSequence(s.objective,s.service,s.language);
-    mount.innerHTML=rows.map(x=>`<div style="display:grid;grid-template-columns:44px 1fr;gap:10px;padding:10px 0;border-bottom:1px solid #ECEFF3">
-      <div style="font-size:9px;font-weight:900;color:#77B82A">DAY ${x.day}</div>
-      <div><strong style="display:block;font-size:10px;color:#05035C">${esc(x.type)}</strong><span style="display:block;font-size:9px;color:#667085;margin-top:3px">${esc(x.purpose)}</span></div>
-    </div>`).join("");
+    const s=strategy(),request={...(state.incoming||{}),...s},resolved=global.DGL_MARKETING_PLAYBOOKS?.resolveStrategy(request),rows=resolved?.strategy?.sequence||Seq().getSequence(s.objective,s.service,s.language),playbook=resolved?.strategy?.playbookId||state.incoming?.playbookId||"CUSTOM";
+    mount.innerHTML=`<div style="display:grid;grid-template-columns:1.2fr .5fr .7fr 2fr .8fr;gap:8px;padding:8px 0;border-bottom:1px solid #DDE2E8;font-size:8px;font-weight:900;color:#667085"><span>PLAYBOOK</span><span>TOUCH</span><span>DAY</span><span>CHANNEL / PURPOSE</span><span>STATUS</span></div>`+rows.map((x,i)=>`<div style="display:grid;grid-template-columns:1.2fr .5fr .7fr 2fr .8fr;gap:8px;padding:10px 0;border-bottom:1px solid #ECEFF3;font-size:9px"><strong style="color:#05035C">${esc(playbook)}</strong><span>${x.touch||i+1}</span><strong style="color:#77B82A">DAY ${x.day}</strong><span>${esc(x.channel||x.type||"Email")} · ${esc(x.purpose)}</span><span class="v5-state-pill ${i===0?"ready":""}">${esc(x.status||(i===0?"READY":"SCHEDULED"))}</span></div>`).join("");
   }
 
   function updatePreview(){
@@ -344,12 +341,13 @@
     state.campaignNameManual=false;
     state.incoming=readIncoming();
     const systems=Object.values(Lib().CREATIVE_SYSTEMS), aud=audiences();
-    const agentBadge=state.incoming?`<span class="v5-badge green">${esc(state.incoming.agentStatus||"AM REQUEST")}</span>`:`<span class="v5-badge">Manual Marketing</span>`;
+    if(state.incoming){const resolved=global.DGL_MARKETING_PLAYBOOKS?.resolveStrategy(state.incoming);if(resolved?.strategy)state.incoming={...state.incoming,...resolved.strategy};}
+    const agentBadge=state.incoming?`<span class="v5-badge green">${esc(state.incoming.marketingStatus||"IN PREPARATION")}</span>`:`<span class="v5-badge">Manual Marketing</span>`;
     container.innerHTML=`<div class="v5-workspace">
       <div class="v5-topbar">
         <div>
           <div class="v5-kicker">Creative Conversion Engine</div>
-          <h1>Campaign Studio <span>V5.4</span></h1>
+          <h1>Campaign Studio <span>V5.5</span></h1>
           <p>Convierte un AM Request en estrategia, diseño, copy, secuencia, QA y aprobación de Marketing.</p>
         </div>
         <div class="v5-top-actions">
@@ -446,7 +444,7 @@
             <div class="v5-qa-item" id="qaApproval"></div>
           </div>
           <div class="v5-approval-actions">
-            <button class="v5-btn" data-v5-test><i data-lucide="mail"></i>Test Draft</button>
+            <button class="v5-btn" data-v5-test><i data-lucide="mail"></i>CREATE TEST DRAFT</button>
             <button class="v5-btn" data-v5-approve><i data-lucide="check-circle"></i>Approve Creative</button>
             <button class="v5-btn primary" data-v5-audience><i data-lucide="send"></i>Create Audience Drafts</button>
           </div>

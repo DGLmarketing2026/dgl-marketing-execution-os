@@ -24,9 +24,9 @@
       ]
     },
     {
-      label: "AGENT",
+      label: "FUTURE ARCHITECTURE",
       items: [
-        { id: "agent-control", label: "Agent Control", icon: "bot", group: "Agent" }
+        { id: "agent-control", label: "Agent Control · Future", icon: "bot", group: "Future Architecture" }
       ]
     },
     {

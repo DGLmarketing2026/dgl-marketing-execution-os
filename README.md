@@ -1,6 +1,10 @@
-# DGL Marketing Execution OS V5.4
+# DGL Marketing Execution OS V5.5 · AM → Marketing Automation
 
-V5.4 structures the frontend around **AM → Marketing → governed agent preparation → automated campaign → account response → handoff to AM**. Claude is not connected; the current agent contract is a safe local adapter for a future authenticated private backend. See [Claude Marketing Agent Architecture](docs/CLAUDE_MARKETING_AGENT_ARCHITECTURE.md).
+V5.5 structures the active frontend around **AM Request → Marketing Preparation → Marketing Approval → Campaign Active → Customer Response → Handoff to AM**.
+
+**AM decides WHAT. Marketing executes HOW.** Deterministic playbooks and governed workflow logic prepare campaigns without Claude or any AI dependency. Agent Control remains isolated future architecture and is explicitly not connected. See [AM → Marketing Automation V5.5](docs/AM_MARKETING_AUTOMATION_V55.md).
+
+GitHub Pages is presentation-only. Demo data is fictional and contains no customer email addresses, secrets, pricing, credit information, or sensitive profitability values. Real execution and PII require a private authenticated backend.
 
 Plataforma interna de ejecución comercial para el área de Marketing de **Dedicated Ground Logistics (DGL)**. No es un dashboard informativo: cada módulo termina en una acción — campaña, email, script o cuenta a trabajar — orientada a convertir, reactivar, retener y crecer la cartera existente de clientes.
 
