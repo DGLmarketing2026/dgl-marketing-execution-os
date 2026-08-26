@@ -61,7 +61,7 @@ function v6BuildQnbOpportunities_(nowIso){
     if(v6Text_(r.Agente).toLowerCase()==='house account')reason='OWNER REQUIRED';
     else if(v6Text_(r.Area).toLowerCase()==='sin area')reason='SERVICE UNRESOLVED';
     return {
-      opportunityId:v6OppId_('QNB',key),accountId:'',accountName:v6Text_(r.Cliente),amOwner:v6Text_(r.Agente),
+      opportunityId:v6OppId_('QNB',key),accountId:'ACC-'+v6HashKey_(key),accountName:v6Text_(r.Cliente),amOwner:v6Text_(r.Agente),
       opportunityType:'Quoted Not Booked',service:v6ServiceName_(r.Area),signalDate:v6IsoDate_(r['Fecha creacion']),
       qnbWindow:v6Text_(r.Bucket),lane:'',sourceReport:'LQS_SIN_RESPUESTA',sourceRecordId:v6Text_(r.LQ),
       priorityRank:1,eligibilityStatus:reason?'SUPPRESSED':'DETECTED',suppressionReason:reason,campaignId:'',detectedAt:nowIso,updatedAt:nowIso
@@ -74,7 +74,7 @@ function v6BuildRetentionOpportunities_(nowIso,ficha){
     var key=v6NormAccount_(r.Cuenta),reason='';
     if(v6Yes_(r['Sin dueno'])||v6Text_(r['Sales Rep']).toLowerCase()==='house account')reason='OWNER REQUIRED';
     return {
-      opportunityId:v6OppId_('RETENTION',key),accountId:'',accountName:v6Text_(r.Cuenta),amOwner:v6Text_(r['Sales Rep']),
+      opportunityId:v6OppId_('RETENTION',key),accountId:'ACC-'+v6HashKey_(key),accountName:v6Text_(r.Cuenta),amOwner:v6Text_(r['Sales Rep']),
       opportunityType:'Retention',service:v6ServiceFromFicha_(ficha[key]),signalDate:v6IsoDate_(r['Ultimo load']),qnbWindow:'',lane:'',
       sourceReport:'MIGRACION_CAIDAS',sourceRecordId:v6Text_(r['Tier origen'])+'>'+v6Text_(r['Tier destino']),priorityRank:2,
       eligibilityStatus:reason?'SUPPRESSED':'DETECTED',suppressionReason:reason,campaignId:'',detectedAt:nowIso,updatedAt:nowIso
@@ -89,7 +89,7 @@ function v6BuildReactivationOpportunities_(nowIso,ficha){
     else if(v6Yes_(r['Solo cobranza']))reason='COLLECTIONS';
     else if(v6Text_(r.Bucket)==='1. SIN DUENO'||v6Text_(r['Sales Rep']).toLowerCase()==='house account')reason='OWNER REQUIRED';
     return {
-      opportunityId:v6OppId_('REACTIVATION',key),accountId:'',accountName:v6Text_(r.Cuenta),amOwner:v6Text_(r['Sales Rep']),
+      opportunityId:v6OppId_('REACTIVATION',key),accountId:'ACC-'+v6HashKey_(key),accountName:v6Text_(r.Cuenta),amOwner:v6Text_(r['Sales Rep']),
       opportunityType:'Reactivation',service:v6ServiceFromFicha_(ficha[key]),signalDate:v6IsoDate_(r['Ultima quote']),qnbWindow:'',lane:'',
       sourceReport:'CUENTAS',sourceRecordId:v6Text_(r.Bucket),priorityRank:3,eligibilityStatus:reason?'SUPPRESSED':'DETECTED',
       suppressionReason:reason,campaignId:'',detectedAt:nowIso,updatedAt:nowIso
@@ -105,7 +105,7 @@ function v6BuildCrossSellOpportunities_(nowIso){
     var variation=Number(r['Variacion %']||0),reason=variation<-20?'RETENTION PRIORITY':'';
     var key=v6NormAccount_(r.Cliente);
     out.push({
-      opportunityId:v6OppId_('CROSSSELL',key),accountId:'',accountName:v6Text_(r.Cliente),amOwner:v6Text_(r['Dispatcher principal']),
+      opportunityId:v6OppId_('CROSSSELL',key),accountId:'ACC-'+v6HashKey_(key),accountName:v6Text_(r.Cliente),amOwner:v6Text_(r['Dispatcher principal']),
       opportunityType:'Cross-Sell',service:'Multiservicio',signalDate:'',qnbWindow:'',lane:'',sourceReport:'FICHA_CLIENTES',
       sourceRecordId:'ONLY_'+used[0],priorityRank:4,eligibilityStatus:reason?'SUPPRESSED':'DETECTED',suppressionReason:reason,
       campaignId:'',detectedAt:nowIso,updatedAt:nowIso
@@ -119,7 +119,7 @@ function v6BuildNurtureOpportunities_(nowIso,ficha){
     var key=v6NormAccount_(r.Cuenta),reason='';
     if(v6Yes_(r['Sin dueno'])||v6Text_(r['Sales Rep']).toLowerCase()==='house account')reason='OWNER REQUIRED';
     return {
-      opportunityId:v6OppId_('NURTURE',key),accountId:'',accountName:v6Text_(r.Cuenta),amOwner:v6Text_(r['Sales Rep']),
+      opportunityId:v6OppId_('NURTURE',key),accountId:'ACC-'+v6HashKey_(key),accountName:v6Text_(r.Cuenta),amOwner:v6Text_(r['Sales Rep']),
       opportunityType:'Nurture',service:v6ServiceFromFicha_(ficha[key]),signalDate:v6IsoDate_(r['Ultimo load']),qnbWindow:'',lane:'',
       sourceReport:'MIGRACION_RECUPERADAS',sourceRecordId:v6Text_(r['Tier origen'])+'>'+v6Text_(r['Tier destino']),priorityRank:5,
       eligibilityStatus:reason?'SUPPRESSED':'DETECTED',suppressionReason:reason,campaignId:'',detectedAt:nowIso,updatedAt:nowIso

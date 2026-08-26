@@ -1,6 +1,17 @@
 # Marketing OS V6 Apps Script source pack
 
-Copy these `.gs` files into the existing private V5.5 Apps Script project, then route authenticated `v6*` actions through `routeMarketingV6_`. Keep the existing token validation and JSONP response wrapper ahead of this router.
+Deployment order:
+
+1. Copy every V6 source file into the existing private Apps Script project.
+2. Route V6 from `MarketingV55Backend` (already done manually in the production project).
+3. Save the project.
+4. Run `v6RefreshOpportunitiesFromReports_()` once.
+5. Optionally run `v6InstallOpportunityRefreshTrigger_()` once.
+6. Deploy a **new version of the same existing web app deployment**.
+7. Do not create a new deployment.
+8. Keep bulk production sending blocked until a provider is configured.
+
+Keep the existing token validation and JSONP response wrapper ahead of the V6 router.
 
 The pack uses `DGL_MARKETING_DATA_HUB` and the prepared `MARKETING_CAMPAIGN_ARCHIVE` folders. It contains no credentials, contact data, or provider secrets. `MKT_V6_PROVIDER_READY` intentionally defaults to `false`; Gmail remains test-draft QA only and is never used for bulk send.
 
