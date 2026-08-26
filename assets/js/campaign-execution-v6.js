@@ -1,0 +1,8 @@
+(function(global){
+  "use strict";
+  const PROVIDER={configured:false,name:"",status:"BULK PROVIDER NOT CONFIGURED"};
+  function readiness(campaign){const c=campaign||{},gates={validScope:!!c.audienceId,recipientResolution:c.audienceResolved===true,frequencyGuard:c.frequencyStatus==="CLEAR",exclusionsCleared:c.exclusionsCleared===true,copyQA:c.copyQualityStatus==="APPROVED",creativeQA:c.creativeQualityStatus==="APPROVED",marketingApproval:String(c.approvalStatus||c.status).toUpperCase()==="APPROVED",executionId:!!c.executionId,archiveConfigured:c.archiveConfigured===true,bulkProviderReady:c.bulkProviderReady===true};return {ready:Object.values(gates).every(Boolean),gates,status:Object.values(gates).every(Boolean)?"EXECUTION READY":PROVIDER.status};}
+  function canComplete(execution){return !!(execution&&execution.executionId&&execution.csvArchiveReady===true);}
+  async function call(name,payload){const api=global.DGL_MARKETING_BACKEND_ADAPTER_V55;if(!api?.isConnected?.())return {status:"PRIVATE BACKEND REQUIRED"};if((name==="v6QueueExecution"||name==="v6StartExecution")&&!payload.bulkProviderReady)return {status:PROVIDER.status};try{return await api[name](payload);}catch(_){return {status:"BACKEND FEATURE NOT DEPLOYED"};}}
+  global.DGL_CAMPAIGN_EXECUTION_V6={version:"6.0",provider:PROVIDER,providerStatus:PROVIDER.status,readiness,canComplete,queueExecution:p=>call("v6QueueExecution",p),startExecution:p=>call("v6StartExecution",p),getExecutionStatus:p=>call("v6ExecutionStatus",p),cancelExecution:()=>({status:"BULK PROVIDER NOT CONFIGURED"}),createExecution:p=>call("v6CreateExecution",p)};
+})(window);

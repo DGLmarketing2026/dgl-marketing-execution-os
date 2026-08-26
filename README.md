@@ -1,4 +1,10 @@
-# DGL Marketing Execution OS V5.5 · AM → Marketing Automation
+# DGL Marketing Execution OS V6 · Data → Marketing Orchestration
+
+V6 makes existing report/data the primary campaign input; AM users do not enter Marketing OS and manual request intake is exception-only. Salesforce remains the commercial source of truth. GitHub Pages is the presentation layer, while authenticated Apps Script and `DGL_MARKETING_DATA_HUB` provide private persistence and execution services.
+
+The V5.5 private-backend connection, recipient resolution, real Gmail test draft, Marketing approval, activation gate, account-only stop, handoff and attribution remain intact. V6 adds opportunity grouping, campaign pressure/frequency rules, an account campaign pipeline, copy/creative usage controls, provider-neutral execution gates and automatic Drive archive source code under `backend/apps-script-v6/`.
+
+Production bulk execution is intentionally blocked until a provider is configured. Gmail is QA-only. Claude is **NOT CONNECTED / FUTURE LAYER**. See [V6 architecture](docs/MARKETING_OS_V6.md).
 
 V5.5 structures the active frontend around **AM Request → Marketing Preparation → Marketing Approval → Campaign Active → Customer Response → Handoff to AM**.
 

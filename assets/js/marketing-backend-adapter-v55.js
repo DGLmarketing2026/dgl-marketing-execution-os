@@ -70,7 +70,11 @@
     getRequests:()=>clone(requests),createRequest,updateRequest,getCampaigns:()=>clone(campaigns),createCampaign,updateCampaign,
     requestApproval:(id,data)=>campaignAction("v55RequestApproval",id,data),recordApproval:(id,data)=>campaignAction("v55RecordApproval",id,data),activateCampaign:(id,data)=>campaignAction("v55ActivateCampaign",id,data),pauseCampaign:(id,data)=>campaignAction("v55PauseCampaign",id,data),
     createTestDraft,resolveRecipients:id=>mutate("v55ResolveRecipients",{campaignId:id},false),getAudienceStatus:id=>mutate("v55AudienceStatus",{campaignId:id},false),
-    recordResponse:p=>mutate("v55RecordResponse",p),stopAccount:p=>mutate("v55StopAccount",p),handoffToAM:p=>mutate("v55Handoff",p),recordOutcome:p=>mutate("v55RecordOutcome",p),getActivity:()=>clone(activity),privateBackendAvailable:()=>state===STATES.PRIVATE_BACKEND
+    recordResponse:p=>mutate("v55RecordResponse",p),stopAccount:p=>mutate("v55StopAccount",p),handoffToAM:p=>mutate("v55Handoff",p),recordOutcome:p=>mutate("v55RecordOutcome",p),getActivity:()=>clone(activity),privateBackendAvailable:()=>state===STATES.PRIVATE_BACKEND,
+    v6Opportunities:()=>mutate("v6Opportunities",{},false),v6RunOpportunityEngine:data=>mutate("v6RunOpportunityEngine",data||{},false),v6OpportunitySummary:()=>mutate("v6OpportunitySummary",{},false),
+    v6FrequencyStatus:data=>mutate("v6FrequencyStatus",data||{},false),v6EvaluateCampaignPressure:data=>mutate("v6EvaluateCampaignPressure",data||{},false),v6AccountPipeline:()=>mutate("v6AccountPipeline",{},false),v6PipelineSummary:()=>mutate("v6PipelineSummary",{},false),
+    v6CreateExecution:data=>mutate("v6CreateExecution",data||{},false),v6QueueExecution:data=>mutate("v6QueueExecution",data||{},false),v6StartExecution:data=>mutate("v6StartExecution",data||{},false),v6ExecutionStatus:data=>mutate("v6ExecutionStatus",data||{},false),v6ExecutionArchiveStatus:data=>mutate("v6ExecutionArchiveStatus",data||{},false),
+    v6CopyUsage:data=>mutate("v6CopyUsage",data||{},false),v6RecordCopyUsage:data=>mutate("v6RecordCopyUsage",data||{},false),v6CreativeUsage:data=>mutate("v6CreativeUsage",data||{},false),v6RecordCreativeUsage:data=>mutate("v6RecordCreativeUsage",data||{},false)
   };
   Object.defineProperty(adapter,"mode",{enumerable:true,get:()=>state===STATES.PRIVATE_BACKEND?"PRIVATE_BACKEND":"LOCAL_DEMO"});
   global.DGL_MARKETING_BACKEND_ADAPTER_V55=adapter;

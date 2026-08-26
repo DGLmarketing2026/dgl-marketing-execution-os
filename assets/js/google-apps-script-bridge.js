@@ -534,7 +534,7 @@
     "command-center", "campaign-opportunities", "campaign-execution",
     "campaign-studio", "reactivation", "quoted-not-booked", "growth",
     "retention", "agent-control", "service-marketing", "ftl-marketing",
-    "ltl-marketing", "drayage-marketing"
+    "ltl-marketing", "drayage-marketing", "account-campaign-pipeline"
   ]);
 
   function currentRouteId() {

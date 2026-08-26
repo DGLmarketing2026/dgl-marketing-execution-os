@@ -31,7 +31,7 @@
         <div class="mark">DG</div>
         <div class="brand-text">
           <div class="name">DGL Marketing OS</div>
-          <div class="sub">V5.5 · AM → Marketing Automation</div>
+          <div class="sub">V6 · Data → Marketing Orchestration</div>
         </div>
       </div>
       <nav class="sidebar-nav">${groupsHtml}</nav>

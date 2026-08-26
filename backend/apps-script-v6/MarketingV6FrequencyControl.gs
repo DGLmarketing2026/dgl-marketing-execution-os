@@ -1,0 +1,2 @@
+function v6FrequencyStatus_(payload){var id=String((payload||{}).accountId||'');if(!id)return {status:'ACCOUNT SCOPE UNRESOLVED',eligible:false};var rows=v6Rows_('MKT_FREQUENCY_LEDGER').filter(function(x){return String(x.accountId)===id;});return {status:rows.length>=2?'FREQUENCY CAP':'CLEAR',eligible:rows.length<2,touches30d:rows.length};}
+function v6EvaluateCampaignPressure_(payload){return v6FrequencyStatus_(payload);}

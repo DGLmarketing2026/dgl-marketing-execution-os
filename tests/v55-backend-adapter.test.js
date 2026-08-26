@@ -25,5 +25,5 @@ assert(automation.includes('api.createCampaign({requestId:r.id,strategy:context}
 assert(automation.includes('await api.recordResponse(payload)'));
 assert(agent.includes("FUTURE AUTOMATION LAYER"));
 assert(index.includes('google-apps-script-bridge.js'));
-assert(index.includes('marketing-backend-adapter-v55.js?v=20260826-4'));
+assert(index.includes('marketing-backend-adapter-v55.js?v=20260826-5'));
 console.log("V5.5 private backend adapter contract: PASS");

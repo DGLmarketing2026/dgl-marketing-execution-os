@@ -1,0 +1,10 @@
+(function(global){
+  "use strict";
+  const banned=["hope you are well","we wanted to reach out","we remain available","volvamos a mover carga","una capacidad más para su operación","dgl sigue disponible","one more option for your operation"];
+  function hash(value){let h=2166136261;for(const ch of String(value||"")){h^=ch.charCodeAt(0);h=Math.imul(h,16777619);}return (h>>>0).toString(16).padStart(8,"0");}
+  function fingerprint(copy){return `CPY-${hash([copy.subject,copy.body,copy.cta].join("|"))}`;}
+  function quality(copy){const text=[copy.subject,copy.body,copy.cta].join(" ").toLowerCase(),violations=banned.filter(x=>text.includes(x));return {approved:violations.length===0,status:violations.length?"NEEDS REVISION":"APPROVED",violations};}
+  function generate(context){const c=context||{},service=c.service||"transportation",signal=c.businessSignal||c.opportunityType||"current requirements",english=String(c.language||"").toLowerCase().startsWith("en"),subjects=english?[`${service}: current requirements`,`${service} planning for ${signal}`,`Review upcoming ${service} needs`]:[`${service}: requerimientos actuales`,`Planificación de ${service}: ${signal}`,`Revisión de próximas necesidades de ${service}`],bodies=english?[`We identified ${signal}. Share the current lane, timing, and equipment requirements for a relevant review.`,`For upcoming ${service} activity, send the current requirement and we will align the next commercial step.`]:[`Identificamos ${signal}. Comparta ruta, fecha y requerimientos actuales para una revisión pertinente.`,`Para su próxima operación de ${service}, envíe el requerimiento vigente y alineamos el siguiente paso comercial.`],copy={subjectCandidates:subjects,bodyCandidates:bodies,subject:subjects[0],body:bodies[0],cta:english?"Send current requirement":"Enviar requerimiento actual"};return {...copy,fingerprint:fingerprint(copy),quality:quality(copy)};}
+  function reusable(fingerprintValue,usage){return !(usage||[]).some(x=>x.fingerprint===fingerprintValue&&Number(x.daysAgo||999)<90);}
+  global.DGL_COPY_ENGINE_V6={version:"6.0",generate,fingerprint,quality,reusable,bannedPhrases:banned.slice()};
+})(window);
