@@ -13,7 +13,7 @@ assert(!source.includes("fetch("));
 assert(!/localStorage\.(?:setItem|getItem).*token/i.test(source));
 assert(source.includes('params.set("payload",JSON.stringify(payload))'));
 assert(source.includes('mutate("v55CreateCampaign",{requestId:payload.requestId,strategy:'));
-for(const action of ["v55Requests","v55CreateRequest","v55UpdateRequest","v55Campaigns","v55CreateCampaign","v55RequestApproval","v55RecordApproval","v55ActivateCampaign","v55PauseCampaign","v55CreateTestDraft","v55RecordResponse","v55StopAccount","v55Handoff","v55RecordOutcome","v55Activity"])assert(source.includes(`"${action}"`),`Missing ${action}`);
+for(const action of ["v55Requests","v55CreateRequest","v55UpdateRequest","v55Campaigns","v55CreateCampaign","v55RequestApproval","v55RecordApproval","v55ActivateCampaign","v55PauseCampaign","v55CreateTestDraft","v55ResolveRecipients","v55AudienceStatus","v55RecordResponse","v55StopAccount","v55Handoff","v55RecordOutcome","v55Activity"])assert(source.includes(`"${action}"`),`Missing ${action}`);
 assert(source.includes('new CustomEvent("dgl:v55-backend-change"'));
 assert(source.includes('form.method="POST"'));assert(source.includes('action:"v55CreateTestDraft",token:token(),payload:JSON.stringify({campaignId,draft})'));assert(source.includes('TEST_DRAFT_CREATED'));
 assert(!/console\.(?:log|error|warn)/.test(source));
@@ -25,5 +25,5 @@ assert(automation.includes('api.createCampaign({requestId:r.id,strategy:context}
 assert(automation.includes('await api.recordResponse(payload)'));
 assert(agent.includes("FUTURE AUTOMATION LAYER"));
 assert(index.includes('google-apps-script-bridge.js'));
-assert(index.includes('marketing-backend-adapter-v55.js?v=20260826-3'));
+assert(index.includes('marketing-backend-adapter-v55.js?v=20260826-4'));
 console.log("V5.5 private backend adapter contract: PASS");

@@ -69,7 +69,7 @@
   const adapter={version:"5.5",mode:"LOCAL_DEMO",endpoint:ENDPOINT,health,connect,disconnect,refresh,isConnected:()=>state===STATES.PRIVATE_BACKEND,getConnectionState,
     getRequests:()=>clone(requests),createRequest,updateRequest,getCampaigns:()=>clone(campaigns),createCampaign,updateCampaign,
     requestApproval:(id,data)=>campaignAction("v55RequestApproval",id,data),recordApproval:(id,data)=>campaignAction("v55RecordApproval",id,data),activateCampaign:(id,data)=>campaignAction("v55ActivateCampaign",id,data),pauseCampaign:(id,data)=>campaignAction("v55PauseCampaign",id,data),
-    createTestDraft,
+    createTestDraft,resolveRecipients:id=>mutate("v55ResolveRecipients",{campaignId:id},false),getAudienceStatus:id=>mutate("v55AudienceStatus",{campaignId:id},false),
     recordResponse:p=>mutate("v55RecordResponse",p),stopAccount:p=>mutate("v55StopAccount",p),handoffToAM:p=>mutate("v55Handoff",p),recordOutcome:p=>mutate("v55RecordOutcome",p),getActivity:()=>clone(activity),privateBackendAvailable:()=>state===STATES.PRIVATE_BACKEND
   };
   Object.defineProperty(adapter,"mode",{enumerable:true,get:()=>state===STATES.PRIVATE_BACKEND?"PRIVATE_BACKEND":"LOCAL_DEMO"});

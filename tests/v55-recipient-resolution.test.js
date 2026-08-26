@@ -1,0 +1,6 @@
+const fs=require("fs"),assert=require("assert"),path=require("path");
+const adapter=fs.readFileSync(path.join(__dirname,"..","assets/js/marketing-backend-adapter-v55.js"),"utf8"),bridge=fs.readFileSync(path.join(__dirname,"..","assets/js/campaign-audience-bridge-v55.js"),"utf8"),automation=fs.readFileSync(path.join(__dirname,"..","assets/js/marketing-automation-v55.js"),"utf8"),studio=fs.readFileSync(path.join(__dirname,"..","assets/js/campaign-studio-v5.js"),"utf8");
+assert(adapter.includes('resolveRecipients:id=>mutate("v55ResolveRecipients",{campaignId:id},false)'));assert(adapter.includes('getAudienceStatus:id=>mutate("v55AudienceStatus",{campaignId:id},false)'));
+assert(bridge.includes("await adapter.resolveRecipients(campaignId)"));assert(bridge.includes("await adapter.getAudienceStatus(campaignId)"));assert(bridge.includes('event.stopImmediatePropagation()'));assert(bridge.includes("eligibleContactCount"));assert(bridge.includes("excludedContactCount"));assert(!bridge.includes("contact.email"));assert(!bridge.includes("contact.name"));assert(!bridge.includes("localStorage"));assert(!bridge.includes("console."));
+assert(automation.includes("scope&&!resolved"));assert(studio.includes('requestDraft("TEST_DRAFT")'));assert(studio.includes("v5-generate")||studio.includes("data-v5-generate"));
+console.log("V5.5 private recipient resolution UI: PASS");
