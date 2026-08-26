@@ -530,6 +530,25 @@
     document.body.appendChild(button);
   }
 
+  const V55_ROUTES = new Set([
+    "command-center", "campaign-opportunities", "campaign-execution",
+    "campaign-studio", "reactivation", "quoted-not-booked", "growth",
+    "retention", "agent-control", "service-marketing", "ftl-marketing",
+    "ltl-marketing", "drayage-marketing"
+  ]);
+
+  function currentRouteId() {
+    return window.location.hash.replace("#/", "").trim() || "command-center";
+  }
+
+  function syncLegacyBackendStatusVisibility() {
+    const element = document.getElementById("dglGasStatus");
+    if (!element) return;
+    const hidden = V55_ROUTES.has(currentRouteId());
+    element.style.display = hidden ? "none" : "";
+    element.setAttribute("aria-hidden", String(hidden));
+  }
+
   function setStatus(className, text) {
     const element = document.getElementById("dglGasStatus");
     if (!element) return;
@@ -720,6 +739,8 @@
     upsert,
     runAutomation: () => jsonp("runAutomation", {}, true),
     processEmailQueue: () => jsonp("processEmailQueue", {}, true),
+    currentRouteId,
+    syncLegacyBackendStatusVisibility,
     disconnect: () => {
       sessionStorage.removeItem(KEY_NAME);
       live = false;
@@ -729,6 +750,8 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     injectStatus();
+    syncLegacyBackendStatusVisibility();
+    window.addEventListener("hashchange", syncLegacyBackendStatusVisibility);
 
     jsonp("health", {}, false)
       .then(() => {
@@ -740,7 +763,7 @@
       })
       .catch(() => setStatus("error", "Backend no disponible"));
 
-    new MutationObserver(() => { if (live) markLive(); }).observe(document.body, {
+    new MutationObserver(() => { if (live) markLive(); syncLegacyBackendStatusVisibility(); }).observe(document.body, {
       childList: true,
       subtree: true
     });
