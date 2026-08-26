@@ -1,23 +1,66 @@
 (function(global){
   "use strict";
-  const REQUEST_KEY="dgl_v55_am_requests",CAMPAIGN_KEY="dgl_v55_campaigns",ACTIVITY_KEY="dgl_v55_activity";
-  const read=k=>{try{return JSON.parse(localStorage.getItem(k)||"[]")}catch(_){return[]}};
-  const write=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
-  const now=()=>new Date().toISOString();
-  function existingApi(){return global.DGL_API&&typeof global.DGL_API.upsert==="function"?global.DGL_API:null;}
-  function update(key,id,patch){const rows=read(key),i=rows.findIndex(x=>x.id===id);if(i<0)return null;rows[i]={...rows[i],...patch,updatedAt:now()};write(key,rows);return rows[i];}
-  function addActivity(action,entityId,data){const rows=read(ACTIVITY_KEY);rows.unshift({id:"ACT-"+Date.now(),timestamp:now(),action,entityId,data:data||null});write(ACTIVITY_KEY,rows);}
-  const adapter={
-    version:"5.5",mode:"LOCAL_DEMO",executionBoundary:"PRIVATE_BACKEND_REQUIRED",getRequests:()=>read(REQUEST_KEY),
-    createRequest:r=>{const row={...r,createdAt:r.createdAt||now()};write(REQUEST_KEY,[row,...read(REQUEST_KEY)]);addActivity("CREATE_REQUEST",row.id);return row;},
-    updateRequest:(id,p)=>update(REQUEST_KEY,id,p),getCampaigns:()=>read(CAMPAIGN_KEY),
-    createCampaign:p=>{const row={...p,createdAt:p.createdAt||now()};write(CAMPAIGN_KEY,[row,...read(CAMPAIGN_KEY)]);addActivity("CREATE_CAMPAIGN",row.id);return row;},
-    updateCampaign:(id,p)=>update(CAMPAIGN_KEY,id,p),requestApproval:id=>{addActivity("REQUEST_APPROVAL",id);return update(CAMPAIGN_KEY,id,{status:"WAITING APPROVAL",marketingStatus:"WAITING APPROVAL"});},
-    recordApproval:(id,data)=>{addActivity("RECORD_APPROVAL",id,data);return update(CAMPAIGN_KEY,id,{status:"APPROVED",marketingStatus:"APPROVED",approval:data});},
-    createTestDraft:id=>{addActivity("CREATE_TEST_DRAFT",id);return {id,status:"TEST DRAFT PREPARED",executionBoundary:"PRIVATE_BACKEND_REQUIRED"};},
-    activateCampaign:id=>{addActivity("ACTIVATE_CAMPAIGN",id);return update(CAMPAIGN_KEY,id,{status:"CAMPAIGN ACTIVE",marketingStatus:"CAMPAIGN ACTIVE"});},
-    pauseCampaign:id=>{addActivity("PAUSE_CAMPAIGN",id);return update(CAMPAIGN_KEY,id,{status:"CAMPAIGN READY",marketingStatus:"CAMPAIGN READY"});},
-    recordResponse:p=>{addActivity("RECORD_RESPONSE",p.campaignId,p);return p;},stopAccount:p=>{addActivity("STOP_ACCOUNT",p.accountId,p);return p;},handoffToAM:p=>{addActivity("HANDOFF_TO_AM",p.accountId,p);return p;},recordOutcome:p=>{addActivity("RECORD_OUTCOME",p.accountId,p);return p;},getActivity:()=>read(ACTIVITY_KEY),privateBackendAvailable:()=>!!existingApi()
+  const ENDPOINT="https://script.google.com/macros/s/AKfycbw1lzTl7iwqYNp_sp_y2So7rtTt-yUsTmb9DEtRy3tsrF9tUGxHy-exI6Vo8Qmy66GH/exec";
+  const TOKEN_KEY="dgl_mkt_v55_token_session";
+  const STATES={DISCONNECTED:"DISCONNECTED",CONNECTING:"CONNECTING",PRIVATE_BACKEND:"PRIVATE_BACKEND",ERROR:"ERROR"};
+  let state=STATES.DISCONNECTED,lastError="",requests=[],campaigns=[],activity=[],requestSequence=0;
+  const token=()=>sessionStorage.getItem(TOKEN_KEY)||"";
+  const clone=v=>JSON.parse(JSON.stringify(v==null?null:v));
+  function emit(){global.dispatchEvent(new CustomEvent("dgl:v55-backend-change",{detail:getConnectionState()}));}
+  function setState(next,error=""){state=next;lastError=error;emit();}
+  function safeError(error){const message=String(error&&error.message||error||"Backend request failed");if(/unauthoriz/i.test(message))return "Private backend authorization failed.";if(/timeout/i.test(message))return "Private backend connection timed out.";const secret=token();return secret?message.replaceAll(secret,"[redacted]"):message;}
+  function unwrap(result){
+    if(result&&result.ok===false)throw new Error(result.error||result.message||"Backend request failed");
+    if(result&&Object.prototype.hasOwnProperty.call(result,"data"))return result.data;
+    if(result&&Object.prototype.hasOwnProperty.call(result,"result"))return result.result;
+    return result;
+  }
+  function jsonp(action,payload,requiresToken=true){
+    return new Promise((resolve,reject)=>{
+      if(requiresToken&&!token()){reject(new Error("Private backend token required"));return;}
+      const callback=`__dglV55Jsonp_${Date.now()}_${++requestSequence}`,script=document.createElement("script"),timer=setTimeout(()=>finish(new Error("Private backend timeout")),20000);
+      function finish(error,value){clearTimeout(timer);try{delete global[callback]}catch(_){global[callback]=undefined}script.remove();error?reject(error):resolve(value);}
+      global[callback]=result=>{try{finish(null,unwrap(result))}catch(error){finish(error)}};
+      script.onerror=()=>finish(new Error("Private backend unavailable"));
+      const params=new URLSearchParams({action,callback});if(requiresToken)params.set("token",token());if(payload!==undefined)params.set("payload",JSON.stringify(payload));
+      script.src=`${ENDPOINT}?${params.toString()}`;script.async=true;document.head.appendChild(script);
+    });
+  }
+  function normalizeRequest(row){const r={...(row||{})};r.id=r.requestId||r.id;r.requestId=r.id;r.marketingStatus=r.marketingStatus||r.status||r.automationStatus||"READY FOR MARKETING";r.automationStatus=r.automationStatus||r.marketingStatus;r.status=r.status||r.marketingStatus;return r;}
+  function normalizeCampaign(row){const c={...(row||{})};c.id=c.campaignId||c.id;c.campaignId=c.id;c.name=c.campaignName||c.name;c.campaignName=c.name;c.objective=c.campaignType||c.objective;c.lastActivity=c.updatedAt||c.createdAt||c.lastActivity;c.marketingStatus=c.marketingStatus||c.status;c.accounts=Number(c.accounts||c.accountCount||c.audienceCount||0);return c;}
+  const arrayFrom=(value,keys)=>{if(Array.isArray(value))return value;for(const key of keys)if(Array.isArray(value&&value[key]))return value[key];return [];};
+  async function health(){return jsonp("v55Health",undefined,false);}
+  async function refresh(){
+    if(!token())throw new Error("Private backend token required");
+    try{
+      const [r,c,a]=await Promise.all([jsonp("v55Requests",{}),jsonp("v55Campaigns",{}),jsonp("v55Activity",{})]);
+      requests=arrayFrom(r,["requests","records"]).map(normalizeRequest);campaigns=arrayFrom(c,["campaigns","records"]).map(normalizeCampaign);activity=arrayFrom(a,["activity","records"]);setState(STATES.PRIVATE_BACKEND);return getConnectionState();
+    }catch(error){const message=safeError(error);if(message==="Private backend authorization failed.")sessionStorage.removeItem(TOKEN_KEY);setState(STATES.ERROR,message);throw new Error(message);}
+  }
+  async function connect(){
+    setState(STATES.CONNECTING);
+    try{
+      await health();let value=token();if(!value)value=global.prompt("Pega el token privado V5.5. Se guardará solo durante esta pestaña y nunca en GitHub.")||"";
+      value=value.trim();if(!value){setState(STATES.DISCONNECTED);return getConnectionState();}sessionStorage.setItem(TOKEN_KEY,value);return await refresh();
+    }catch(error){const message=safeError(error);if(message==="Private backend authorization failed.")sessionStorage.removeItem(TOKEN_KEY);setState(STATES.ERROR,message);throw new Error(message);}
+  }
+  function disconnect(){sessionStorage.removeItem(TOKEN_KEY);requests=[];campaigns=[];activity=[];setState(STATES.DISCONNECTED);return getConnectionState();}
+  function getConnectionState(){return {state,mode:state===STATES.PRIVATE_BACKEND?"PRIVATE_BACKEND":"LOCAL_DEMO",connected:state===STATES.PRIVATE_BACKEND,error:lastError,requestCount:requests.length,campaignCount:campaigns.length,activityCount:activity.length};}
+  async function mutate(action,payload,refreshAfter=true){
+    try{const result=await jsonp(action,payload);if(refreshAfter)await refresh();return result;}catch(error){const message=safeError(error);if(message==="Private backend authorization failed."){sessionStorage.removeItem(TOKEN_KEY);setState(STATES.ERROR,message);}throw new Error(message);}
+  }
+  async function createRequest(record){const result=await mutate("v55CreateRequest",{record},false),row=normalizeRequest(result&&result.request||result);if(!row.id)throw new Error("Private backend did not return a requestId.");requests=[row,...requests.filter(x=>x.id!==row.id)];emit();return row;}
+  async function updateRequest(requestId,patch){const result=await mutate("v55UpdateRequest",{requestId,patch},false),row=normalizeRequest(result&&result.request||result);requests=requests.map(x=>x.id===requestId?{...x,...row}:x);emit();return row;}
+  async function createCampaign(payload){const result=await mutate("v55CreateCampaign",{requestId:payload.requestId,strategy:payload.strategy||payload.context||payload},false),row=normalizeCampaign(result&&result.campaign||result);campaigns=[row,...campaigns.filter(x=>x.id!==row.id)];emit();return row;}
+  function updateCampaign(id,patch){const current=campaigns.find(x=>x.id===id);if(!current)return null;Object.assign(current,patch);emit();return clone(current);}
+  const campaignAction=(action,id,data)=>mutate(action,{campaignId:id,...(data||{})});
+  const adapter={version:"5.5",mode:"LOCAL_DEMO",endpoint:ENDPOINT,health,connect,disconnect,refresh,isConnected:()=>state===STATES.PRIVATE_BACKEND,getConnectionState,
+    getRequests:()=>clone(requests),createRequest,updateRequest,getCampaigns:()=>clone(campaigns),createCampaign,updateCampaign,
+    requestApproval:(id,data)=>campaignAction("v55RequestApproval",id,data),recordApproval:(id,data)=>campaignAction("v55RecordApproval",id,data),activateCampaign:(id,data)=>campaignAction("v55ActivateCampaign",id,data),pauseCampaign:(id,data)=>campaignAction("v55PauseCampaign",id,data),
+    createTestDraft:id=>Promise.resolve({campaignId:id,status:"TEST DRAFT PREPARED",executionBoundary:"PRIVATE_BACKEND_REQUIRED"}),
+    recordResponse:p=>mutate("v55RecordResponse",p),stopAccount:p=>mutate("v55StopAccount",p),handoffToAM:p=>mutate("v55Handoff",p),recordOutcome:p=>mutate("v55RecordOutcome",p),getActivity:()=>clone(activity),privateBackendAvailable:()=>state===STATES.PRIVATE_BACKEND
   };
+  Object.defineProperty(adapter,"mode",{enumerable:true,get:()=>state===STATES.PRIVATE_BACKEND?"PRIVATE_BACKEND":"LOCAL_DEMO"});
   global.DGL_MARKETING_BACKEND_ADAPTER_V55=adapter;
+  document.addEventListener("DOMContentLoaded",()=>{health().then(()=>{if(token())connect().catch(()=>{});else emit();}).catch(error=>setState(STATES.ERROR,safeError(error)));});
 })(window);

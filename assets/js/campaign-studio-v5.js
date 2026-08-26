@@ -6,7 +6,6 @@
   const Lib=()=>global.DGL_CREATIVE_LIBRARY_V5;
   const Copy=()=>global.DGL_COPY_ENGINE_V5;
   const Seq=()=>global.DGL_CAMPAIGN_SEQUENCES_V4;
-  const API=()=>global.DGL_API||{};
   const OFFICIAL_LOGO="assets/brand/dgl-logo-white.png";
   const DEFAULT_HERO="assets/creative/dgl-ftl-truck.webp";
 
@@ -342,7 +341,7 @@
     state.incoming=readIncoming();
     const systems=Object.values(Lib().CREATIVE_SYSTEMS), aud=audiences();
     if(state.incoming){const resolved=global.DGL_MARKETING_PLAYBOOKS?.resolveStrategy(state.incoming);if(resolved?.strategy)state.incoming={...state.incoming,...resolved.strategy};}
-    const agentBadge=state.incoming?`<span class="v5-badge green">${esc(state.incoming.marketingStatus||"IN PREPARATION")}</span>`:`<span class="v5-badge">Manual Marketing</span>`;
+    const agentBadge=state.incoming?`<span class="v5-badge green">${esc(state.incoming.marketingStatus||"IN PREPARATION")}</span>${state.incoming.sourceIndicator==="PRIVATE BACKEND"?'<span class="v5-badge">PRIVATE BACKEND</span>':''}`:`<span class="v5-badge">Manual Marketing</span>`;
     container.innerHTML=`<div class="v5-workspace">
       <div class="v5-topbar">
         <div>
@@ -458,15 +457,12 @@
   }
 
   async function requestDraft(kind){
-    const api=API();if(!api||typeof api.upsert!=="function")throw new Error("Backend privado todavía no está conectado.");
-    const p={...strategy(),...currentCopy(),source:state.incoming||null,status:state.approved?"Approved":"Draft"};
-    const id="MKT-"+Date.now().toString(36).toUpperCase();
-    await api.upsert("marketingCampaigns",{id,...p});
-    await api.upsert("marketingQueue",{id:"JOB-"+Date.now().toString(36).toUpperCase(),jobType:kind,status:"Pending",payload:JSON.stringify(p),createdAt:new Date().toISOString()});
-    if(typeof api.runAutomation==="function")await api.runAutomation();
+    const campaignId=state.incoming?.campaignId;if(!campaignId)throw new Error("Prepare a backend campaign before creating drafts.");
+    if(kind!=="TEST_DRAFT")throw new Error("Audience draft execution is not available in V5.5.");
+    return global.DGL_MARKETING_BACKEND_ADAPTER_V55.createTestDraft(campaignId);
   }
 
-  document.addEventListener("click",e=>{
+  document.addEventListener("click",async e=>{
     const sys=e.target.closest(".v5-creative-card");
     if(sys){document.querySelectorAll(".v5-creative-card").forEach(x=>x.classList.remove("active"));sys.classList.add("active");updatePreview();return}
     const dev=e.target.closest("[data-v5-device]");
@@ -475,8 +471,8 @@
       const stage=document.getElementById("v5EmailStage");if(stage)stage.classList.toggle("mobile",dev.dataset.v5Device==="mobile");return;
     }
     if(e.target.closest("[data-v5-generate]")){generate();if(global.DGL_INTERACTIONS?.toast)global.DGL_INTERACTIONS.toast("Campaign generated.");return}
-    if(e.target.closest("[data-v5-approve]")){state.approved=true;updateQA();if(global.DGL_INTERACTIONS?.toast)global.DGL_INTERACTIONS.toast("Creative approved.");return}
-    if(e.target.closest("[data-v5-test]")){requestDraft("TEST_DRAFT").then(()=>global.DGL_INTERACTIONS?.toast?.("Test draft requested.")).catch(err=>global.DGL_INTERACTIONS?.toast?.(err.message,"error"));return}
+    if(e.target.closest("[data-v5-approve]")){try{const campaignId=state.incoming?.campaignId;if(campaignId&&global.DGL_MARKETING_BACKEND_ADAPTER_V55?.isConnected()){await global.DGL_MARKETING_AUTOMATION_V55.requestApproval(campaignId,{requestedBy:"Marketing"});await global.DGL_MARKETING_AUTOMATION_V55.recordApproval(campaignId,{approved:true,approvedBy:"Marketing",approvedAt:new Date().toISOString()});}state.approved=true;updateQA();global.DGL_INTERACTIONS?.toast?.("Creative approved by Marketing.");}catch(error){global.DGL_INTERACTIONS?.toast?.(error.message,"error");}return}
+    if(e.target.closest("[data-v5-test]")){try{const result=await requestDraft("TEST_DRAFT");global.DGL_INTERACTIONS?.toast?.(`${result.status}. Gmail endpoint still required.`);}catch(error){global.DGL_INTERACTIONS?.toast?.(error.message,"error");}return}
     if(e.target.closest("[data-v5-audience]")){requestDraft("AUDIENCE_DRAFTS").then(()=>global.DGL_INTERACTIONS?.toast?.("Audience drafts requested.")).catch(err=>global.DGL_INTERACTIONS?.toast?.(err.message,"error"));return}
   });
 

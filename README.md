@@ -6,6 +6,10 @@ V5.5 structures the active frontend around **AM Request → Marketing Preparatio
 
 GitHub Pages is presentation-only. Demo data is fictional and contains no customer email addresses, secrets, pricing, credit information, or sensitive profitability values. Real execution and PII require a private authenticated backend.
 
+The V5.5 AM → Marketing workflow can connect to the deployed private Apps Script Data Hub using JSONP. The private token is requested in the browser and retained only for the current tab in `sessionStorage`; it is never committed or stored in `localStorage`. Disconnecting or receiving an unauthorized response clears it immediately. Disconnected mode uses safe fictional fallback records, while connected mode displays private backend records only.
+
+Architecture status: **CONNECTED VIA APPS SCRIPT JSONP**. The frontend is GitHub Pages, the private backend is Google Apps Script, private persistence is `DGL_MARKETING_DATA_HUB`, authentication is browser-session-token only, and Claude remains **NOT CONNECTED / FUTURE LAYER**.
+
 Plataforma interna de ejecución comercial para el área de Marketing de **Dedicated Ground Logistics (DGL)**. No es un dashboard informativo: cada módulo termina en una acción — campaña, email, script o cuenta a trabajar — orientada a convertir, reactivar, retener y crecer la cartera existente de clientes.
 
 ## Cómo abrir la plataforma

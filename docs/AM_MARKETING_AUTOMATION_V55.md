@@ -38,7 +38,19 @@ The executive funnel is AM Requests → Campaigns Active → Responses → RFQs 
 
 ## Backend boundary
 
-`assets/js/marketing-backend-adapter-v55.js` exposes the V5.5 backend interface in `LOCAL_DEMO` mode and declares `PRIVATE_BACKEND_REQUIRED` as the execution boundary. Local records contain fictional, non-PII data only. Existing private Apps Script hooks remain available for later authenticated execution. No backend URL, credential, token, customer email, pricing, credit, or sensitive profitability data is stored in the public frontend.
+**V5.5 private backend status: CONNECTED VIA APPS SCRIPT JSONP**
+
+- Frontend: GitHub Pages
+- Private backend: Google Apps Script
+- Private persistence: `DGL_MARKETING_DATA_HUB`
+- Authentication: browser session token only
+- Claude: NOT CONNECTED / FUTURE LAYER
+
+`assets/js/marketing-backend-adapter-v55.js` connects the V5.5 workflow to the private Apps Script Data Hub through JSONP. `v55Health` is public; requests, campaigns, approvals, activation, responses, account stops, AM handoffs, outcomes, and activity require the private V5.5 session token. The token is stored only under `sessionStorage[dgl_mkt_v55_token_session]`, is cleared on disconnect or unauthorized responses, and is never persisted in `localStorage` or source control.
+
+When connected, AM Requests and Campaign Control show only normalized private Data Hub records. When disconnected, the UI returns to fictional demo records without mixing the two data sets. The adapter dispatches `dgl:v55-backend-change` whenever connection or cached data changes.
+
+Test-draft preparation remains a boundary placeholder (`TEST DRAFT PREPARED / PRIVATE_BACKEND_REQUIRED`) and does not simulate Gmail execution. No customer email, credential, pricing, credit, or sensitive profitability data is stored in the public frontend.
 
 ## Future Claude boundary
 

@@ -1,12 +1,14 @@
 const fs=require("fs"),vm=require("vm"),assert=require("assert"),path=require("path");
 const store=new Map();
-const window={localStorage:{getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v)},sessionStorage:{getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v)}};
-window.window=window;const context=vm.createContext({window,localStorage:window.localStorage,sessionStorage:window.sessionStorage,console,Date,Map,JSON});
+const window={localStorage:{getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v),removeItem:k=>store.delete(k)},sessionStorage:{getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v),removeItem:k=>store.delete(k)},addEventListener(){},dispatchEvent(){}};
+const document={addEventListener(){},createElement(){return{remove(){}}},head:{appendChild(){}}};
+window.window=window;const context=vm.createContext({window,document,localStorage:window.localStorage,sessionStorage:window.sessionStorage,console,Date,Map,JSON,URLSearchParams,CustomEvent:function(type,init){this.type=type;this.detail=init&&init.detail},setTimeout,clearTimeout});
 const load=f=>vm.runInContext(fs.readFileSync(path.join(__dirname,"..",f),"utf8"),context,{filename:f});
 load("assets/js/marketing-playbooks-v55.js");load("assets/js/marketing-backend-adapter-v55.js");
 const base={id:"R1",amOwner:"AM Demo",portfolioName:"Demo Portfolio",accountName:"",accountCount:3,objective:"Quoted Not Booked",service:"FTL",messageAngle:"",priority:"HIGH",commercialContext:"Fictional",requestedOutcome:"RFQ",targetWindow:"30 days",lane:"",qnbWindow:"0-14",audienceId:"A1",audienceCount:3,exclusions:"DNC",status:"READY FOR MARKETING",campaignId:"",automationStatus:"READY FOR MARKETING",marketingStatus:"READY FOR MARKETING",campaignName:"Demo"};
 window.DGL_AM_REQUESTS={getRequests:()=>[base],getRequest:id=>id===base.id?base:null};load("assets/js/marketing-automation-v55.js");
 const p=window.DGL_MARKETING_PLAYBOOKS,a=window.DGL_MARKETING_AUTOMATION_V55;
+(async()=>{
 assert.equal(p.getPlaybookForRequest({...base,qnbWindow:"0-14"}).id,"QNB_0_14");
 assert.equal(p.getPlaybookForRequest({...base,qnbWindow:"15-30"}).id,"QNB_15_30");
 assert.equal(p.getPlaybookForRequest({...base,qnbWindow:"30+"}).id,"QNB_30_PLUS");
@@ -17,10 +19,11 @@ assert.equal(p.validateRequest({...base,objective:"Lane Campaign",qnbWindow:"",l
 assert.equal(p.validateRequest({...base,qnbWindow:""}).status,"NEEDS CLARIFICATION");
 assert.equal(p.resolveStrategy(base).strategy.creativeSystem,"DGL Executive Minimal");
 assert.equal(p.resolveStrategy({...base,objective:"Cross-Sell",qnbWindow:""}).strategy.creativeSystem,"DGL Service Architecture");
-const prepared=a.prepareCampaign("R1");assert.equal(prepared.context.sourceType,"AM Request");assert.equal(prepared.context.playbookId,"QNB_0_14");
-assert.equal(a.activateCampaign(prepared.campaign.id).status,"WAITING APPROVAL");
-a.recordApproval(prepared.campaign.id,{approved:true,approvedBy:"Marketing"});assert.equal(a.activateCampaign(prepared.campaign.id).status,"CAMPAIGN ACTIVE");
-const response=a.recordResponse(prepared.campaign.id,"ACCOUNT-DEMO-1",{responseType:"CUSTOMER_REPLIED",nextAction:"AM follow-up"});
+const prepared=await a.prepareCampaign("R1");assert.equal(prepared.context.sourceType,"AM Request");assert.equal(prepared.context.playbookId,"QNB_0_14");
+assert.equal((await a.activateCampaign(prepared.campaign.id)).status,"WAITING APPROVAL");
+await a.recordApproval(prepared.campaign.id,{approved:true,approvedBy:"Marketing"});assert.equal((await a.activateCampaign(prepared.campaign.id)).status,"CAMPAIGN ACTIVE");
+const response=await a.recordResponse(prepared.campaign.id,"ACCOUNT-DEMO-1",{responseType:"CUSTOMER_REPLIED",nextAction:"AM follow-up"});
 assert.equal(response.stop.scope,"ACCOUNT_ONLY");assert.equal(response.remainingCampaignAccountsContinue,true);assert.equal(response.handoff.amOwner,"AM Demo");
 assert.equal(a.getCampaign(prepared.campaign.id).stoppedAccounts.length,1);
 console.log("V5.5 deterministic validation: 16 assertions passed");
+})().catch(error=>{console.error(error);process.exitCode=1});
