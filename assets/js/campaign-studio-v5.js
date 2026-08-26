@@ -459,8 +459,10 @@
   async function requestDraft(kind){
     const campaignId=state.incoming?.campaignId;if(!campaignId)throw new Error("Prepare a backend campaign before creating drafts.");
     if(kind!=="TEST_DRAFT")throw new Error("Audience draft execution is not available in V5.5.");
-    return global.DGL_MARKETING_BACKEND_ADAPTER_V55.createTestDraft(campaignId);
+    const preview=global.DGL_CAMPAIGN_STUDIO_V5.getPreview(),s=preview.strategy||{},c=preview.copy||{},subject=clean(document.getElementById("v5PreviewSubject")?.textContent||c.subjectA),base="https://dglmarketing2026.github.io/dgl-marketing-execution-os/",htmlBody=String(preview.html||"").replace(/(["'(=])assets\//g,`$1${base}assets/`),textBody=[subject,c.preheader,c.headline,c.body,c.body2,c.cta].map(clean).filter(Boolean).join("\n\n"),campaignPatch={campaignName:s.campaignName||"",audienceId:s.audienceId||state.incoming?.audienceId||"",language:s.language||"",templateId:s.creativeSystem||"",subject,preheader:c.preheader||"",headline:c.headline||"",body:c.body||"",body2:c.body2||"",cta:c.cta||"",ctaUrl:s.ctaUrl||"",heroUrl:s.heroUrl||"",logoUrl:s.logoUrl||"",senderName:s.senderName||"",replyTo:s.replyTo||""};
+    return global.DGL_MARKETING_BACKEND_ADAPTER_V55.createTestDraft(campaignId,{subject,htmlBody,textBody,campaignPatch});
   }
+  function setTestDraftButton(label,busy){const button=document.querySelector("[data-v5-test]");if(!button)return;button.disabled=!!busy;button.innerHTML=`<i data-lucide="${label==="TEST DRAFT CREATED"?"check-circle-2":"mail"}"></i>${label}`;global.lucide?.createIcons();}
 
   document.addEventListener("click",async e=>{
     const sys=e.target.closest(".v5-creative-card");
@@ -472,7 +474,7 @@
     }
     if(e.target.closest("[data-v5-generate]")){generate();if(global.DGL_INTERACTIONS?.toast)global.DGL_INTERACTIONS.toast("Campaign generated.");return}
     if(e.target.closest("[data-v5-approve]")){try{const campaignId=state.incoming?.campaignId;if(campaignId&&global.DGL_MARKETING_BACKEND_ADAPTER_V55?.isConnected()){await global.DGL_MARKETING_AUTOMATION_V55.requestApproval(campaignId,{requestedBy:"Marketing"});await global.DGL_MARKETING_AUTOMATION_V55.recordApproval(campaignId,{approved:true,approvedBy:"Marketing",approvedAt:new Date().toISOString()});}state.approved=true;updateQA();global.DGL_INTERACTIONS?.toast?.("Creative approved by Marketing.");}catch(error){global.DGL_INTERACTIONS?.toast?.(error.message,"error");}return}
-    if(e.target.closest("[data-v5-test]")){try{const result=await requestDraft("TEST_DRAFT");global.DGL_INTERACTIONS?.toast?.(`${result.status}. Gmail endpoint still required.`);}catch(error){global.DGL_INTERACTIONS?.toast?.(error.message,"error");}return}
+    if(e.target.closest("[data-v5-test]")){setTestDraftButton("CREATING TEST DRAFT",true);try{await requestDraft("TEST_DRAFT");setTestDraftButton("TEST DRAFT CREATED",false);global.DGL_INTERACTIONS?.toast?.("Test draft created in Gmail. Open Drafts to review it.");}catch(error){setTestDraftButton("CREATE TEST DRAFT",false);global.DGL_INTERACTIONS?.toast?.(error.message,"error");}return}
     if(e.target.closest("[data-v5-audience]")){requestDraft("AUDIENCE_DRAFTS").then(()=>global.DGL_INTERACTIONS?.toast?.("Audience drafts requested.")).catch(err=>global.DGL_INTERACTIONS?.toast?.(err.message,"error"));return}
   });
 

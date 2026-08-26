@@ -54,10 +54,22 @@
   async function createCampaign(payload){const result=await mutate("v55CreateCampaign",{requestId:payload.requestId,strategy:payload.strategy||payload.context||payload},false),row=normalizeCampaign(result&&result.campaign||result);campaigns=[row,...campaigns.filter(x=>x.id!==row.id)];emit();return row;}
   function updateCampaign(id,patch){const current=campaigns.find(x=>x.id===id);if(!current)return null;Object.assign(current,patch);emit();return clone(current);}
   const campaignAction=(action,id,data)=>mutate(action,{campaignId:id,...(data||{})});
+  const activityKey=row=>String(row&&((row.id||row.activityId)||`${row.timestamp||row.createdAt||""}|${row.actionType||row.action||""}|${row.campaignId||""}`));
+  const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  function activityError(row){const value=row&&((row.error||row.message||row.result)||"Test draft creation failed."),raw=typeof value==="object"?JSON.stringify(value):String(value),secret=token();return secret?raw.replaceAll(secret,"[redacted]"):raw;}
+  function postTestDraft(campaignId,draft){
+    if(!token())return Promise.reject(new Error("Private backend token required"));
+    return new Promise((resolve,reject)=>{const suffix=`${Date.now()}_${++requestSequence}`,frame=document.createElement("iframe"),form=document.createElement("form");frame.name=`dglV55DraftFrame_${suffix}`;frame.hidden=true;form.hidden=true;form.method="POST";form.action=ENDPOINT;form.target=frame.name;const fields={action:"v55CreateTestDraft",token:token(),payload:JSON.stringify({campaignId,draft})};Object.entries(fields).forEach(([name,value])=>{const input=document.createElement("input");input.type="hidden";input.name=name;input.value=value;form.appendChild(input);});document.body.append(frame,form);try{form.submit();form.remove();resolve(frame);}catch(error){form.remove();frame.remove();reject(error);}});
+  }
+  async function createTestDraft(campaignId,draft){
+    if(state!==STATES.PRIVATE_BACKEND)throw new Error("Connect the private backend before creating a test draft.");if(!campaignId)throw new Error("A backend campaignId is required.");
+    const baseline=new Set(activity.map(activityKey)),frame=await postTestDraft(campaignId,draft);
+    try{for(let attempt=0;attempt<20;attempt++){await wait(attempt===0?900:1500);await refresh();const rows=activity.filter(row=>String(row.campaignId||row.entityId||"")===String(campaignId)&&!baseline.has(activityKey(row)));const failure=rows.find(row=>[row.actionType,row.action,row.status].some(value=>String(value||"").toUpperCase()==="API_ERROR"));if(failure)throw new Error(activityError(failure));const success=rows.find(row=>String(row.actionType||row.action||"").toUpperCase()==="TEST_DRAFT_CREATED");if(success)return {campaignId,status:"TEST DRAFT CREATED",activity:clone(success)};}throw new Error("Test draft confirmation timed out.");}finally{frame.remove();}
+  }
   const adapter={version:"5.5",mode:"LOCAL_DEMO",endpoint:ENDPOINT,health,connect,disconnect,refresh,isConnected:()=>state===STATES.PRIVATE_BACKEND,getConnectionState,
     getRequests:()=>clone(requests),createRequest,updateRequest,getCampaigns:()=>clone(campaigns),createCampaign,updateCampaign,
     requestApproval:(id,data)=>campaignAction("v55RequestApproval",id,data),recordApproval:(id,data)=>campaignAction("v55RecordApproval",id,data),activateCampaign:(id,data)=>campaignAction("v55ActivateCampaign",id,data),pauseCampaign:(id,data)=>campaignAction("v55PauseCampaign",id,data),
-    createTestDraft:id=>Promise.resolve({campaignId:id,status:"TEST DRAFT PREPARED",executionBoundary:"PRIVATE_BACKEND_REQUIRED"}),
+    createTestDraft,
     recordResponse:p=>mutate("v55RecordResponse",p),stopAccount:p=>mutate("v55StopAccount",p),handoffToAM:p=>mutate("v55Handoff",p),recordOutcome:p=>mutate("v55RecordOutcome",p),getActivity:()=>clone(activity),privateBackendAvailable:()=>state===STATES.PRIVATE_BACKEND
   };
   Object.defineProperty(adapter,"mode",{enumerable:true,get:()=>state===STATES.PRIVATE_BACKEND?"PRIVATE_BACKEND":"LOCAL_DEMO"});
