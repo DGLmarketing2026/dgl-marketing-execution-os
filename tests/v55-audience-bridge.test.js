@@ -1,0 +1,11 @@
+const fs=require("fs"),vm=require("vm"),assert=require("assert"),path=require("path");
+const source=fs.readFileSync(path.join(__dirname,"..","assets/js/campaign-audience-bridge-v55.js"),"utf8"),index=fs.readFileSync(path.join(__dirname,"..","index.html"),"utf8"),automation=fs.readFileSync(path.join(__dirname,"..","assets/js/marketing-automation-v55.js"),"utf8");
+const window={};window.window=window;vm.runInContext(source,vm.createContext({window,sessionStorage:{getItem:()=>null,setItem(){}},document:{},setTimeout}),{filename:"campaign-audience-bridge-v55.js"});
+const bridge=window.DGL_CAMPAIGN_AUDIENCE_BRIDGE_V55;
+const derived=bridge.normalizeContext({requestId:"AMR-226DF94E",accountCount:1,portfolioName:"Private Account"});
+assert.equal(derived.audienceId,"SCOPE-AMR-226DF94E");assert.equal(derived.audienceMode,"AM_REQUEST_SCOPE");assert.equal(derived.audienceResolved,false);assert.equal(derived.audienceStatus,"ACCOUNT SCOPE DEFINED · CONTACTS PENDING");assert.equal(bridge.audienceLabel(derived),"1 account · AM Request Scope");
+const existing=bridge.normalizeContext({requestId:"AMR-2",audienceId:"SCOPE-AMR-2",accountCount:3,portfolioName:"Portfolio"});assert.equal(existing.audienceId,"SCOPE-AMR-2");assert.equal(bridge.audienceLabel(existing,true),"Portfolio · 3 accounts · AM Request Scope");
+const resolvedAudience=bridge.normalizeContext({requestId:"AMR-3",audienceId:"AUD-RESOLVED",accountCount:3,audienceResolved:true});assert.equal(resolvedAudience.audienceMode,undefined);assert.equal(resolvedAudience.audienceResolved,true);
+assert(source.includes("Account scope received from AM. Recipient contacts are resolved privately before activation or any audience send."));assert(source.includes("RECIPIENT RESOLUTION PENDING"));assert(source.includes("Creative approval and test-draft preparation are allowed. Activation and audience sending stay blocked until recipient contacts are resolved in the private backend."));assert(!source.includes("@"));
+assert(index.indexOf("campaign-audience-bridge-v55.js")>index.indexOf("campaign-studio-v5.js"));assert(automation.includes('status:"RECIPIENT RESOLUTION PENDING"'));assert(automation.includes("scope&&!resolved"));
+console.log("V5.5 AM Request audience scope bridge: PASS");

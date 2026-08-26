@@ -19,6 +19,7 @@ assert.equal(p.validateRequest({...base,objective:"Lane Campaign",qnbWindow:"",l
 assert.equal(p.validateRequest({...base,qnbWindow:""}).status,"NEEDS CLARIFICATION");
 assert.equal(p.resolveStrategy(base).strategy.creativeSystem,"DGL Executive Minimal");
 assert.equal(p.resolveStrategy({...base,objective:"Cross-Sell",qnbWindow:""}).strategy.creativeSystem,"DGL Service Architecture");
+const scoped=a.buildCampaignContext({...base,id:"AMR-SCOPE-1",audienceId:"",audienceCount:0,accountCount:2});assert.equal(scoped.audienceId,"SCOPE-AMR-SCOPE-1");assert.equal(scoped.audienceMode,"AM_REQUEST_SCOPE");assert.equal(scoped.audienceResolved,false);assert.equal(scoped.audienceStatus,"ACCOUNT SCOPE DEFINED · CONTACTS PENDING");
 const prepared=await a.prepareCampaign("R1");assert.equal(prepared.context.sourceType,"AM Request");assert.equal(prepared.context.playbookId,"QNB_0_14");
 assert.equal((await a.activateCampaign(prepared.campaign.id)).status,"WAITING APPROVAL");
 await a.recordApproval(prepared.campaign.id,{approved:true,approvedBy:"Marketing"});assert.equal((await a.activateCampaign(prepared.campaign.id)).status,"CAMPAIGN ACTIVE");
