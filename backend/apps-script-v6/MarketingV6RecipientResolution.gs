@@ -3,8 +3,9 @@ function v6RecipientUpper_(value){return v6RecipientText_(value).toUpperCase();}
 function v6RecipientBool_(value){var x=v6RecipientUpper_(value);return value===true||x==='TRUE'||x==='YES'||x==='SI'||x==='SÍ'||x==='1'||x==='Y';}
 function v6RecipientEmailValid_(value){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v6RecipientText_(value).toLowerCase());}
 function v6RecipientRows_(name){try{return v6Rows_(name);}catch(_){return [];}}
+function v6RecipientExclusionReason_(row){return v6RecipientUpper_((row||{}).reasonCode||(row||{}).reason||'ACTIVE_EXCLUSION').replace(/[^A-Z0-9_ -]/g,'').substring(0,80)||'ACTIVE_EXCLUSION';}
 function v6RecipientActiveExclusion_(rows,accountId,contactId,now){return (rows||[]).filter(function(row){
-  var active=row.active===''||row.active==null?!['INACTIVE','EXPIRED','CLEARED'].includes(v6RecipientUpper_(row.status)):v6RecipientBool_(row.active),expires=row.expiresAt?new Date(row.expiresAt):null,notExpired=!expires||isNaN(expires.getTime())||expires>now,accountMatch=!v6RecipientText_(row.accountId)||v6RecipientText_(row.accountId)===accountId,contactMatch=!v6RecipientText_(row.contactId)||v6RecipientText_(row.contactId)===contactId;
+  var active=row.active===''||row.active==null?!['INACTIVE','EXPIRED','CLEARED'].includes(v6RecipientUpper_(row.status)):v6RecipientBool_(row.active),end=row.expiresAt||row.endDate,expires=end?new Date(end):null,notExpired=!expires||isNaN(expires.getTime())||expires>now,accountMatch=!v6RecipientText_(row.accountId)||v6RecipientText_(row.accountId)===accountId,contactMatch=!v6RecipientText_(row.contactId)||v6RecipientText_(row.contactId)===contactId;
   return active&&notExpired&&accountMatch&&contactMatch;
 })[0]||null;}
 function v6RecipientCampaignContext_(campaignId){
@@ -15,6 +16,7 @@ function v6RecipientSafeStatus_(status,eligible,excluded,reason,frequency,exclus
 function v6RecipientPersistStatus_(campaignId,scopeId,status){var now=new Date().toISOString(),record={audienceRecipientId:'STATUS:'+campaignId,recordType:'AUDIENCE_STATUS',campaignId:campaignId,scopeId:scopeId,audienceResolved:status.audienceResolved,audienceStatus:status.audienceStatus,eligibleContactCount:status.eligibleContactCount,excludedContactCount:status.excludedContactCount,reasonCode:status.reasonCode,frequencyStatus:status.frequencyStatus,exclusionStatus:status.exclusionStatus,exclusionsCleared:status.exclusionsCleared,resolvedAt:now,updatedAt:now};v6UpsertByKey_('MKT_AUDIENCES',['audienceRecipientId'],record);return status;}
 function v6ResolveRecipients_(payload){
   var p=payload||{},campaignId=v6RecipientText_(p.campaignId),now=new Date(),stamp=now.toISOString();if(!campaignId)throw new Error('campaignId REQUIRED');
+  ['MKT_CAMPAIGN_SCOPES','MKT_SCOPE_ACCOUNTS','MKT_CONTACTS_SECURE','MKT_EXCLUSIONS','MKT_AUDIENCES'].forEach(function(name){v6RequireContactRecipientHeaders_(name);});
   var ctx=v6RecipientCampaignContext_(campaignId),scopeAccounts=v6RecipientRows_('MKT_SCOPE_ACCOUNTS').filter(function(row){var same=v6RecipientText_(row.campaignId)===campaignId||ctx.scopeId&&v6RecipientText_(row.scopeId||row.audienceId)===ctx.scopeId,blocked=['SUPPRESSED','EXCLUDED','BLOCKED'].includes(v6RecipientUpper_(row.eligibilityStatus||row.status));return same&&!blocked;});
   if(!scopeAccounts.length)return v6RecipientPersistStatus_(campaignId,ctx.scopeId,v6RecipientSafeStatus_('ACCOUNT SCOPE UNRESOLVED',0,0,'NO_SCOPE_ACCOUNTS','NOT EVALUATED','NOT EVALUATED'));
   var accountIds={};scopeAccounts.forEach(function(row){var id=v6RecipientText_(row.accountId);if(id)accountIds[id]=true;});if(!Object.keys(accountIds).length)return v6RecipientPersistStatus_(campaignId,ctx.scopeId,v6RecipientSafeStatus_('ACCOUNT SCOPE UNRESOLVED',0,0,'ACCOUNT_ID_REQUIRED','NOT EVALUATED','NOT EVALUATED'));
@@ -26,7 +28,7 @@ function v6ResolveRecipients_(payload){
     if(v6RecipientBool_(contact.doNotContact||contact.dnc)){reason='DO_NOT_CONTACT';exclusionBlocked++;}
     else if(!email){reason='EMAIL_MISSING';exclusionBlocked++;}
     else if(!v6RecipientEmailValid_(email)||v6RecipientUpper_(contact.emailStatus)==='INVALID'){reason='EMAIL_INVALID';exclusionBlocked++;}
-    else if((exclusion=v6RecipientActiveExclusion_(exclusions,accountId,contactId,now))){reason='ACTIVE_EXCLUSION';exclusionBlocked++;}
+    else if((exclusion=v6RecipientActiveExclusion_(exclusions,accountId,contactId,now))){reason='EXCLUSION_'+v6RecipientExclusionReason_(exclusion).replace(/[^A-Z0-9]+/g,'_');exclusionBlocked++;}
     else{frequency=v6FrequencyStatus_({accountId:accountId,contactId:contactId,campaignId:campaignId,campaignType:ctx.campaignType});if(!frequency.eligible){reason='FREQUENCY_'+v6RecipientUpper_(frequency.status).replace(/[^A-Z0-9]+/g,'_');frequencyBlocked++;}}
     var ok=reason==='CLEAR';if(ok)eligible++;else excluded++;v6UpsertByKey_('MKT_AUDIENCES',['audienceRecipientId'],{audienceRecipientId:'AUD:'+campaignId+':'+contactId,recordType:'RECIPIENT',campaignId:campaignId,scopeId:ctx.scopeId,accountId:accountId,contactId:contactId,email:email,eligibilityStatus:ok?'ELIGIBLE':'EXCLUDED',exclusionReason:reason,frequencyStatus:v6RecipientUpper_(frequency.status||'NOT EVALUATED'),resolvedAt:stamp,updatedAt:stamp});
   });

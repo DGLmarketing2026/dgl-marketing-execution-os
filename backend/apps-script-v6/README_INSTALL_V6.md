@@ -40,4 +40,6 @@ Required private headers for this phase:
 
 All six tables are private. Only aggregate audience status fields may leave Apps Script. Validate existing headers before adding missing columns; do not overwrite or recreate populated sheets.
 
+Run `v6AuditContactRecipientSchema_()` first and inspect only its safe schema metrics. After approval, run `v6EnsureContactRecipientSchema_()`; it appends missing headers at the end and never deletes, renames, moves or recreates anything. It is idempotent. Ingestion preserves historical columns by merging existing rows before upsert, reads account ownership from `amOwner` or `accountManager`, and leaves fields such as `firstName`, `lastName`, `title`, `language` and `marketingStatus` untouched. Recipient exclusions accept `expiresAt` or historical `endDate`, `reasonCode` or historical `reason`, and both `active` and status-based semantics.
+
 Do not maintain recurring manual account/contact lists. Gmail remains Test Draft / QA only and `MKT_V6_PROVIDER_READY` remains `false`. Before production use, create/validate the private sheet schemas, configure the authorized source sync, run contract tests and a private dry run, then deploy a new version of the existing Web App deployment. Keep the same deployment and URL; do not create another Web App.
