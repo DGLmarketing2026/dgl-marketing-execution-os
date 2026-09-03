@@ -1,11 +1,11 @@
 /**
- * DGL Marketing OS — Canonical Runtime V6.6.5
+ * DGL Marketing OS — Canonical Runtime V6.6.6
  * Full-module hardening: automation-first, no sample/demo workflow.
  */
 (function (global) {
   "use strict";
 
-  const VERSION = "6.6.5";
+  const VERSION = "6.6.6";
   const BASE_URL = "https://dglmarketing2026.github.io/dgl-marketing-execution-os/";
   const OWNER_KEY = "dgl_v6_owner_filter";
   const CONTEXT_KEY = "dgl_v5_campaign_context";
@@ -58,6 +58,53 @@
   const FAMILY_ORDER = { QNB: 1, RETENTION: 2, REACTIVATION: 3, "CROSS-SELL": 4, NURTURE: 5 };
   const FAMILY_LABEL = { QNB: "Quoted Not Booked", RETENTION: "Retention", REACTIVATION: "Reactivation", "CROSS-SELL": "Cross-Sell", NURTURE: "Nurture / Relationship Renewal" };
   const PIPELINE_STAGES = ["OPPORTUNITY DETECTED","ELIGIBLE FOR CAMPAIGN","CAMPAIGN ACTIVE","RESPONDED","RFQ RECEIVED","QUOTED","LOAD / REACTIVATED","RETAINED / EXPANDED","COOLDOWN / NURTURE","CLOSED / SUPPRESSED"];
+
+  // V6.6.6 safe aggregate recovery snapshot.
+  // Contains owner-level opportunity/pipeline aggregates only; no account/contact PII.
+  const RECOVERY_SNAPSHOT_AT = "2026-09-03T13:52:00-05:00";
+  const RECOVERY_OWNERS = ["Alejandro Ochoa","Alex Cifuentes","Ali Pirela","Andres Bernal","Andy J. McNelly","Caroline Salamanca","Cindy Ave","Cristian Serna","DGL Accounts","Daniel Martin","David Cuestas","Fabian Lopez","German Cano","House Account","Juan Rodriguez","Juan Ruiz","Luis Simoes","Manuel Arias","Mateo Matallana","Nicolas Monroy","Santiago Villegas","Sebastian Crespo","Tatiana Lozano","Valentina Rico"];
+  const RECOVERY_TYPES = ["CROSS-SELL","NURTURE","QNB","REACTIVATION","RETENTION"];
+  const RECOVERY_SERVICES = ["Drayage","FTL","LTL","Multiservicio"];
+  const RECOVERY_WINDOWS = ["","0-14","15-30","30+"];
+  const RECOVERY_GROUPS_RAW = [[5,2,2,1,15,15,0],[2,2,2,2,14,14,0],[2,2,2,1,12,12,0],[16,2,0,3,12,12,0],[5,2,2,2,11,11,0],[2,2,2,3,10,10,0],[12,2,2,3,10,10,0],[16,2,2,1,8,8,0],[2,2,1,3,7,7,0],[17,2,2,3,6,6,0],[7,2,1,2,5,5,0],[11,2,0,3,5,5,0],[0,2,2,1,4,4,0],[2,2,1,1,4,4,0],[5,2,2,3,4,4,0],[11,2,1,3,4,4,0],[16,2,2,2,4,4,0],[20,2,2,1,4,4,0],[2,2,0,2,3,3,0],[5,2,1,2,3,3,0],[7,2,1,1,3,3,0],[7,2,1,3,3,3,0],[7,2,2,1,3,3,0],[12,2,2,2,3,3,0],[16,2,1,3,3,3,0],[16,2,1,1,3,3,0],[16,2,0,2,3,3,0],[20,2,2,3,3,3,0],[23,2,1,3,3,3,0],[23,2,1,1,3,3,0],[0,2,0,1,2,2,0],[2,2,1,2,2,2,0],[3,2,1,2,2,2,0],[5,2,0,1,2,2,0],[7,2,0,3,2,2,0],[7,2,2,3,2,2,0],[11,2,0,1,2,2,0],[11,2,2,3,2,2,0],[11,2,2,1,2,2,0],[12,2,1,3,2,2,0],[12,2,0,3,2,2,0],[16,2,0,1,2,2,0],[17,2,2,1,2,2,0],[17,2,1,3,2,2,0],[20,2,0,3,2,2,0],[23,2,2,1,2,2,0],[23,2,1,2,2,2,0],[0,2,2,3,1,1,0],[0,2,0,3,1,1,0],[0,2,1,3,1,1,0],[0,2,1,1,1,1,0],[1,2,0,3,1,1,0],[2,2,0,1,1,1,0],[3,2,1,3,1,1,0],[5,2,1,3,1,1,0],[5,2,0,2,1,1,0],[5,2,0,3,1,1,0],[5,2,1,1,1,1,0],[7,2,2,2,1,1,0],[11,2,1,1,1,1,0],[11,2,1,2,1,1,0],[11,2,2,2,1,1,0],[12,2,0,1,1,1,0],[12,2,1,1,1,1,0],[12,2,2,1,1,1,0],[14,2,2,2,1,1,0],[14,2,2,1,1,1,0],[15,2,0,1,1,1,0],[15,2,2,1,1,1,0],[16,2,1,2,1,1,0],[16,2,2,3,1,1,0],[17,2,0,1,1,1,0],[17,2,0,2,1,1,0],[17,2,0,3,1,1,0],[17,2,1,1,1,1,0],[20,2,1,3,1,1,0],[20,2,2,2,1,1,0],[20,2,1,1,1,1,0],[23,2,0,2,1,1,0],[23,2,2,2,1,1,0],[23,2,2,3,1,1,0],[13,2,2,3,14,0,14],[13,2,2,2,11,0,11],[13,2,2,1,4,0,4],[13,2,0,3,2,0,2],[7,2,3,3,1,0,1],[13,2,1,1,1,0,1],[13,2,0,1,1,0,1],[23,2,3,2,1,0,1],[12,4,3,0,8,4,4],[11,4,3,0,7,4,3],[2,4,3,0,12,3,9],[1,4,3,0,4,3,1],[5,4,3,0,9,2,7],[16,4,3,0,6,2,4],[20,4,3,0,5,2,3],[3,4,3,0,1,1,0],[9,4,3,0,1,1,0],[16,4,2,0,1,1,0],[16,4,1,0,1,1,0],[18,4,3,0,1,1,0],[20,4,0,0,1,1,0],[8,4,3,0,6,0,6],[0,4,3,0,2,0,2],[5,4,2,0,2,0,2],[13,4,3,0,2,0,2],[17,4,3,0,2,0,2],[5,4,1,0,1,0,1],[18,3,3,0,5,5,0],[5,3,3,0,10,4,6],[12,3,3,0,3,2,1],[17,3,3,0,3,2,1],[2,3,3,0,11,1,10],[16,3,3,0,7,1,6],[11,3,3,0,2,1,1],[23,3,3,0,2,1,1],[13,3,3,0,98,0,98],[8,3,3,0,28,0,28],[5,3,2,0,3,0,3],[16,3,2,0,3,0,3],[0,3,3,0,2,0,2],[3,3,3,0,2,0,2],[4,3,1,0,2,0,2],[0,3,2,0,1,0,1],[7,3,2,0,1,0,1],[11,3,2,0,1,0,1],[15,3,2,0,1,0,1],[16,3,1,0,1,0,1],[16,3,0,0,1,0,1],[20,3,3,0,1,0,1],[21,0,3,0,43,6,37],[10,0,3,0,6,2,4],[4,0,3,0,4,2,2],[14,0,3,0,4,2,2],[0,0,3,0,3,2,1],[1,0,3,0,3,2,1],[19,0,3,0,17,1,16],[6,0,3,0,4,1,3],[12,0,3,0,3,1,2],[20,0,3,0,3,1,2],[22,0,3,0,3,1,2],[3,0,3,0,6,0,6],[15,0,3,0,1,0,1],[5,1,3,0,4,1,3],[20,1,3,0,1,1,0],[5,1,2,0,3,0,3],[23,1,3,0,3,0,3],[2,1,3,0,2,0,2],[7,1,2,0,2,0,2],[11,1,0,0,2,0,2],[11,1,2,0,2,0,2],[0,1,1,0,1,0,1],[0,1,3,0,1,0,1],[0,1,2,0,1,0,1],[2,1,2,0,1,0,1],[12,1,3,0,1,0,1],[15,1,2,0,1,0,1],[16,1,3,0,1,0,1],[16,1,0,0,1,0,1],[16,1,2,0,1,0,1],[17,1,3,0,1,0,1],[20,1,1,0,1,0,1]];
+  const RECOVERY_PIPELINE_STAGES = ["CLOSED / SUPPRESSED","OPPORTUNITY DETECTED"];
+  const RECOVERY_PIPELINE_RAW = [[0,0,1],[0,1,12],[1,0,1],[1,1,6],[2,1,57],[3,0,1],[3,1,4],[4,0,2],[4,1,2],[5,1,46],[6,0,1],[6,1,1],[7,0,1],[7,1,19],[8,0,27],[9,1,1],[10,0,1],[10,1,2],[11,1,23],[12,1,27],[13,0,122],[14,1,4],[15,0,1],[15,1,2],[16,1,42],[17,1,16],[18,1,6],[19,0,1],[19,1,1],[20,1,17],[21,1,6],[22,1,1],[23,0,1],[23,1,14]];
+  const RECOVERY_SUMMARY = { totalSignals:668, eligibleAccounts:309, suppressedAccounts:359, groupCount:162, ownerCount:24 };
+
+  function recoveryGroups() {
+    return RECOVERY_GROUPS_RAW.map((r,i)=>({
+      groupId:`RECOVERY-GROUP-${i+1}`,
+      amOwner:RECOVERY_OWNERS[r[0]],
+      opportunityType:RECOVERY_TYPES[r[1]],
+      service:RECOVERY_SERVICES[r[2]],
+      window:RECOVERY_WINDOWS[r[3]],
+      qnbWindow:RECOVERY_WINDOWS[r[3]],
+      reasonCategory:"",
+      detectedAccounts:r[4],
+      eligibleAccounts:r[5],
+      suppressedAccounts:r[6],
+      priority:FAMILY_ORDER[family(RECOVERY_TYPES[r[1]])]||99,
+      source:"DGL_MARKETING_DATA_HUB · SAFE AGGREGATE",
+      campaignStatus:"OPPORTUNITY DETECTED",
+      lastEngineRun:"2026-08-26T23:17:07.869Z",
+      nextAction:"Evaluate campaign eligibility",
+      recoverySnapshot:true
+    }));
+  }
+
+  function recoveryPipeline() {
+    const out=[];
+    RECOVERY_PIPELINE_RAW.forEach(r=>{
+      const owner=RECOVERY_OWNERS[r[0]], stage=RECOVERY_PIPELINE_STAGES[r[1]];
+      for(let i=0;i<r[2];i++) out.push({amOwner:owner,currentStage:stage,recoveryAggregate:true});
+    });
+    return out;
+  }
+
+  function safeBackendError(error) {
+    const raw=clean(error?.message||error||"V6 endpoint error");
+    return raw.replace(/https?:\/\/\S+/gi,"").replace(/[A-Za-z0-9_-]{24,}/g,"[redacted]").slice(0,160);
+  }
 
   const A = () => global.DGL_MARKETING_BACKEND_ADAPTER_V55;
   const R = global.DGL_MODULE_RENDERERS = global.DGL_MODULE_RENDERERS || {};
@@ -120,7 +167,12 @@
   }
 
   function scopeId(row) {
-    return `SCOPE-${slug(row?.amOwner || "UNASSIGNED")}-${slug(family(row?.opportunityType))}-${slug(row?.service || "MULTISERVICIO")}-${slug(normalizeWindow(row?.window || row?.qnbWindow || ""))}-${slug(row?.reasonCategory || "")}`;
+    const parts=["SCOPE",slug(row?.amOwner||"UNASSIGNED"),slug(family(row?.opportunityType)),slug(row?.service||"MULTISERVICIO")];
+    const w=normalizeWindow(row?.window||row?.qnbWindow||"");
+    if(w) parts.push(w==="30+"?"30-PLUS":slug(w));
+    const reason=slug(row?.reasonCategory||"");
+    if(reason) parts.push(reason);
+    return parts.filter(Boolean).join("-");
   }
 
   function ownerList(groups) {
@@ -160,7 +212,7 @@
 
   function patchContracts() {
     const lib = global.DGL_CREATIVE_LIBRARY_V5;
-    if (lib && !lib.__canonical665) {
+    if (lib && !lib.__canonical666) {
       if (lib.OBJECTIVES?.["Quoted Not Booked"]) {
         lib.OBJECTIVES["Quoted Not Booked"].recommendedSystem = "editorial-white";
         lib.OBJECTIVES["Quoted Not Booked"].defaultCta = "Recover Quote";
@@ -173,11 +225,11 @@
           : originalResolve(x);
         return absoluteAsset(raw);
       };
-      lib.__canonical665 = true;
+      lib.__canonical666 = true;
     }
 
     const playbooks = global.DGL_MARKETING_PLAYBOOKS;
-    if (playbooks && !playbooks.__canonical665) {
+    if (playbooks && !playbooks.__canonical666) {
       const originalResolve = playbooks.resolveStrategy?.bind(playbooks);
       const originalGet = playbooks.getPlaybookForRequest?.bind(playbooks);
       const idMap = {
@@ -219,11 +271,11 @@
           return { ...result, strategy };
         };
       }
-      playbooks.__canonical665 = true;
+      playbooks.__canonical666 = true;
     }
 
     const seq = global.DGL_CAMPAIGN_SEQUENCES_V4;
-    if (seq && !seq.__canonical665) {
+    if (seq && !seq.__canonical666) {
       seq.getSequence = (objective, service, language, qnbWindow) => {
         const en = language === "English";
         const q = normalizeWindow(qnbWindow || readContext().qnbWindow || readContext().window || "0-14");
@@ -235,11 +287,11 @@
           : [[0,"Reactivation"],[12,"Capability Reminder"],[30,"Cooldown / Nurture"]];
         return rows.map(([day,purpose],i) => ({ touch:i+1, day, type:"Email", channel:"Email", purpose: en ? purpose : purpose, status:i===0?"READY":"SCHEDULED" }));
       };
-      seq.__canonical665 = true;
+      seq.__canonical666 = true;
     }
 
     const opp = global.DGL_MARKETING_OPPORTUNITY_ENGINE_V6;
-    if (opp && !opp.__canonical665) {
+    if (opp && !opp.__canonical666) {
       opp.groupOpportunities = rows => {
         const groups = new Map();
         (rows || []).forEach(row => {
@@ -256,20 +308,20 @@
         (rows || []).forEach(row => { const id=clean(row.accountId), p=FAMILY_ORDER[family(row.opportunityType)]||99; if(id && (!best.has(id)||p<best.get(id))) best.set(id,p); });
         return (rows || []).map(row => { const id=clean(row.accountId), p=FAMILY_ORDER[family(row.opportunityType)]||99, blocked=id&&best.has(id)&&p>best.get(id); return {...row,eligible:blocked?false:row.eligible!==false,suppressionStatus:blocked?"HIGHER PRIORITY":row.suppressionStatus||"CLEAR"}; }).sort((a,b)=>(FAMILY_ORDER[family(a.opportunityType)]||99)-(FAMILY_ORDER[family(b.opportunityType)]||99));
       };
-      opp.__canonical665 = true;
+      opp.__canonical666 = true;
     }
 
     const studio = global.DGL_CAMPAIGN_STUDIO_V5;
-    if (studio && !studio.__canonical665) {
+    if (studio && !studio.__canonical666) {
       const originalHtml = studio.emailHtml?.bind(studio);
       const originalPreview = studio.getPreview?.bind(studio);
       if (originalHtml) studio.emailHtml = () => absolutizeHtml(originalHtml());
       if (originalPreview) studio.getPreview = () => { const p=originalPreview()||{}, strategy={...(p.strategy||{})}; if(strategy.heroUrl)strategy.heroUrl=absoluteAsset(strategy.heroUrl); if(strategy.logoUrl)strategy.logoUrl=absoluteAsset(strategy.logoUrl); return {...p,strategy,html:absolutizeHtml(p.html||"")}; };
-      studio.__canonical665 = true;
+      studio.__canonical666 = true;
     }
 
     const adapter = A();
-    if (adapter && !adapter.__canonical665) {
+    if (adapter && !adapter.__canonical666) {
       const originalDraft = adapter.createTestDraft?.bind(adapter);
       const originalState = adapter.getConnectionState?.bind(adapter);
       const originalCreateRequest = adapter.createRequest?.bind(adapter);
@@ -287,7 +339,7 @@
         const existing=scope?(adapter.getCampaigns?.()||[]).find(c=>scopeKey(c)===scope):null;
         return existing?Promise.resolve(existing):originalCreateCampaign(payload);
       };
-      adapter.__canonical665 = true;
+      adapter.__canonical666 = true;
     }
 
     const ctx = normalizeCampaignContext(readContext());
@@ -304,7 +356,13 @@
 
   const badge = (text,tone) => `<span class="life-badge ${tone || statusTone(text)}">${E(text)}</span>`;
   const kpis = rows => `<div class="kpi-grid">${rows.map(([label,value,numeric=true])=>`<div class="kpi-card"><div class="kpi-content"><div class="kpi-label">${E(label)}</div><div class="kpi-value">${numeric?N(value):E(value)}</div></div></div>`).join("")}</div>`;
-  const header = (title,sub,eye="AUTOMATION LIFECYCLE · V6") => `<div class="page-head"><div><div class="eyebrow">${E(eye)}</div><h2>${E(title)}</h2><p class="lede">${E(sub)}</p></div><div class="page-head-actions">${connected()?badge("PRIVATE BACKEND / LIVE","live"):badge("PRIVATE BACKEND REQUIRED","warn")}${connected()?'<button class="btn btn-secondary" data-canonical-refresh>REFRESH VIEW</button>':'<button class="btn btn-primary" data-canonical-connect>CONNECT PRIVATE BACKEND</button>'}</div></div>`;
+  function backendBadge() {
+    if(!connected()) return badge("PRIVATE BACKEND REQUIRED","warn");
+    if(dataCache.runtime==="V6_LIVE") return badge("PRIVATE BACKEND / V6 LIVE","live");
+    if(dataCache.runtime==="RECOVERED"||dataCache.runtime==="PARTIAL_RECOVERY") return badge("PRIVATE BACKEND / RECOVERED","warn");
+    return badge("PRIVATE BACKEND / CONNECTED","info");
+  }
+  const header = (title,sub,eye="AUTOMATION LIFECYCLE · V6") => `<div class="page-head"><div><div class="eyebrow">${E(eye)}</div><h2>${E(title)}</h2><p class="lede">${E(sub)}</p></div><div class="page-head-actions">${backendBadge()}${connected()?'<button class="btn btn-secondary" data-canonical-refresh>REFRESH VIEW</button>':'<button class="btn btn-primary" data-canonical-connect>CONNECT PRIVATE BACKEND</button>'}</div></div>`;
 
   function currentScopeState() {
     const x = normalizeCampaignContext(readContext());
@@ -315,7 +373,7 @@
     const audienceResolved = x.audienceResolved === true || U(x.audienceStatus) === "RECIPIENTS RESOLVED";
     const frequencyClear = ["CLEAR","PASSED"].includes(frequency);
     const exclusionsClear = x.exclusionsCleared === true || ["CLEAR","CLEARED","PASSED"].includes(exclusions);
-    const policyApproved = approval.includes("APPROVED") || (approval.includes("AUTO BY POLICY") && !approval.includes("PENDING"));
+    const policyApproved = x.policyApproved===true || (/\bAPPROVED\b/.test(approval) && !/NOT APPROVED|REJECTED|REJECT/.test(approval));
     return {...x,contacts,audienceResolved,frequencyClear,exclusionsClear,policyApproved};
   }
 
@@ -330,23 +388,49 @@
   function contextFor(row) {
     const f=family(row?.opportunityType), w=normalizeWindow(row?.window||row?.qnbWindow||""), id=scopeId(row);
     const objective=objectiveFor(row);
-    return normalizeCampaignContext({source:"REPORT / DATA HUB",opportunitySource:"REPORT / DATA HUB",scopeId:id,audienceId:id,amOwner:row?.amOwner||"Unassigned",campaignFamily:f,objective,campaignName:`${FAMILY_LABEL[f]||f} · ${row?.service||"Multiservicio"}${w?` · ${w}`:""}`,service:row?.service||"Multiservicio",qnbWindow:w,window:w,reasonCategory:row?.reasonCategory||"",messageStrategy:f==="QNB"?qnbMessageStrategy(row):"PLAYBOOK DEFAULT",dataQualityStatus:f==="QNB"&&!row?.reasonCategory?"REASON SOURCE PENDING":"SOURCE SIGNAL AVAILABLE",coordinationStatus:["RETENTION","REACTIVATION"].includes(f)?"AM ACTIVITY EVENT NOT JOINED":"NOT REQUIRED",automationPolicy:"AUTOMATION-FIRST",detectedAccounts:Number(row?.detectedAccounts||0),eligibleAccounts:Number(row?.eligibleAccounts||0),suppressedAccounts:Number(row?.suppressedAccounts||0),accountCount:Number(row?.eligibleAccounts||0),contactsStatus:"CONTACTS PENDING",eligibleContactCount:0,frequencyStatus:"PENDING BACKEND EVALUATION",exclusionStatus:"PENDING BACKEND EVALUATION",policyApprovalStatus:"PENDING POLICY DECISION",requiresHumanReview:false,executionReadiness:"BLOCKED",priority:Number(row?.priority||FAMILY_ORDER[f]||99),lastEngineRun:row?.lastEngineRun||null});
+    return normalizeCampaignContext({source:"REPORT / DATA HUB",opportunitySource:"REPORT / DATA HUB",scopeId:id,audienceId:id,amOwner:row?.amOwner||"Unassigned",campaignFamily:f,objective,campaignName:`${FAMILY_LABEL[f]||f} · ${row?.service||"Multiservicio"}${w?` · ${w}`:""}`,service:row?.service||"Multiservicio",qnbWindow:w,window:w,reasonCategory:row?.reasonCategory||"",messageStrategy:f==="QNB"?qnbMessageStrategy(row):"PLAYBOOK DEFAULT",dataQualityStatus:f==="QNB"&&!row?.reasonCategory?"WINDOW SIGNAL AVAILABLE":"SOURCE SIGNAL AVAILABLE",coordinationStatus:["RETENTION","REACTIVATION"].includes(f)?"AM ACTIVITY EVENT NOT JOINED":"NOT REQUIRED",automationPolicy:"AUTOMATION-FIRST",detectedAccounts:Number(row?.detectedAccounts||0),eligibleAccounts:Number(row?.eligibleAccounts||0),suppressedAccounts:Number(row?.suppressedAccounts||0),accountCount:Number(row?.eligibleAccounts||0),contactsStatus:"CONTACTS PENDING",eligibleContactCount:0,frequencyStatus:"PENDING BACKEND EVALUATION",exclusionStatus:"PENDING BACKEND EVALUATION",policyApprovalStatus:"PENDING POLICY DECISION",requiresHumanReview:false,executionReadiness:"BLOCKED",priority:Number(row?.priority||FAMILY_ORDER[f]||99),lastEngineRun:row?.lastEngineRun||null});
   }
 
-  let dataCache={ts:0,groups:[],summary:null,pipeline:[],pipelineSummary:null};
+  let dataCache={ts:0,groups:[],summary:null,pipeline:[],pipelineSummary:null,runtime:null,errors:[]};
   function aggregatePipeline(records) {
     const by={}; PIPELINE_STAGES.forEach(s=>by[s]=0); (records||[]).forEach(r=>{const s=U(r.currentStage||r.stage||"OPPORTUNITY DETECTED");by[s]=(by[s]||0)+1;}); return {total:(records||[]).length,byCurrentStage:by};
   }
   async function loadData(force=false) {
-    if (!connected()) return {groups:[],summary:null,pipeline:[],pipelineSummary:null};
+    if (!connected()) return {groups:[],summary:null,pipeline:[],pipelineSummary:null,runtime:"DISCONNECTED",errors:[]};
     if (!force && Date.now()-dataCache.ts<10000) return dataCache;
-    const [opps,pipe] = await Promise.all([A().v6Opportunities().catch(()=>null),A().v6AccountPipeline().catch(()=>null)]);
-    const groups=Array.isArray(opps?.groups)?opps.groups:[];
-    const pipeline=Array.isArray(pipe?.records)?pipe.records:Array.isArray(pipe?.pipeline)?pipe.pipeline:[];
-    dataCache={ts:Date.now(),groups,summary:opps?.summary||null,pipeline,pipelineSummary:aggregatePipeline(pipeline)};
+
+    const results=await Promise.allSettled([
+      Promise.resolve().then(()=>A().v6Opportunities()),
+      Promise.resolve().then(()=>A().v6AccountPipeline())
+    ]);
+    const opps=results[0].status==="fulfilled"?results[0].value:null;
+    const pipe=results[1].status==="fulfilled"?results[1].value:null;
+    const errors=[];
+    if(results[0].status==="rejected") errors.push("Opportunities: "+safeBackendError(results[0].reason));
+    if(results[1].status==="rejected") errors.push("Pipeline: "+safeBackendError(results[1].reason));
+
+    const liveGroups=Array.isArray(opps?.groups)?opps.groups:null;
+    const livePipeline=Array.isArray(pipe?.records)?pipe.records:Array.isArray(pipe?.pipeline)?pipe.pipeline:null;
+    const oppRecovered=!liveGroups||liveGroups.length===0;
+    const pipeRecovered=!livePipeline;
+    const groups=oppRecovered?recoveryGroups():liveGroups;
+    const pipeline=pipeRecovered?recoveryPipeline():livePipeline;
+    const runtime=oppRecovered&&pipeRecovered?"RECOVERED":(oppRecovered||pipeRecovered?"PARTIAL_RECOVERY":"V6_LIVE");
+    if(oppRecovered&&!errors.some(x=>x.startsWith("Opportunities:"))) errors.push("Opportunities: empty/invalid V6 response; safe aggregate restored.");
+    if(pipeRecovered&&!errors.some(x=>x.startsWith("Pipeline:"))) errors.push("Pipeline: invalid V6 response; safe aggregate restored.");
+
+    dataCache={
+      ts:Date.now(),
+      groups,
+      summary:oppRecovered?{...RECOVERY_SUMMARY,recoverySnapshotAt:RECOVERY_SNAPSHOT_AT}:opps?.summary||null,
+      pipeline,
+      pipelineSummary:aggregatePipeline(pipeline),
+      runtime,
+      errors
+    };
     return dataCache;
   }
-  function invalidate(){dataCache={ts:0,groups:[],summary:null,pipeline:[],pipelineSummary:null};}
+  function invalidate(){dataCache={ts:0,groups:[],summary:null,pipeline:[],pipelineSummary:null,runtime:null,errors:[]};}
 
   function ownerToolbar(groups) {
     const owners=ownerList(groups), sel=selectedOwner();
@@ -368,7 +452,10 @@
     const visible=filterOwner(base).sort((a,b)=>(Number(a.priority)||99)-(Number(b.priority)||99)||Number(b.eligibleAccounts||0)-Number(a.eligibleAccounts||0));
     const det=visible.reduce((s,x)=>s+Number(x.detectedAccounts||0),0), pre=visible.reduce((s,x)=>s+Number(x.eligibleAccounts||0),0), sup=visible.reduce((s,x)=>s+Number(x.suppressedAccounts||0),0);
     global.__DGL_CANONICAL_GROUPS=Object.fromEntries(all.map(x=>[scopeId(x),x]));
-    container.innerHTML=header(title,sub,eye)+ownerToolbar(base)+kpis([["DETECTED SIGNALS",det],["PRE-GATE ELIGIBLE",pre],["SUPPRESSED",sup],["AUTOMATIC SCOPES",visible.length]])+`<div class="life-status-strip"><div><span>Operating rule</span><strong>AUTOMATIC SCOPE GENERATION</strong></div><p>Marketing does not maintain recurring manual account lists. Final recipient eligibility is evaluated after contact, exclusion and frequency gates.</p></div><div class="life-scope-stack">${visible.length?visible.map(scopeCard).join(""):`<div class="life-empty"><strong>No live scopes for ${E(selectedOwner())}</strong></div>`}</div>`;
+    const recoveryNotice=d.runtime==="RECOVERED"||d.runtime==="PARTIAL_RECOVERY"
+      ? `<div class="life-status-strip"><div><span>DATA SOURCE</span><strong>SAFE DATA HUB RECOVERY</strong></div><p>Live V6 routing is degraded; owner and opportunity aggregates are restored from the governed Data Hub snapshot (${E(RECOVERY_SNAPSHOT_AT)}). No customer/contact PII is embedded.</p></div>`
+      : "";
+    container.innerHTML=header(title,sub,eye)+ownerToolbar(base)+recoveryNotice+kpis([["DETECTED SIGNALS",det],["PRE-GATE ELIGIBLE",pre],["SUPPRESSED",sup],["AUTOMATIC SCOPES",visible.length]])+`<div class="life-status-strip"><div><span>Operating rule</span><strong>AUTOMATIC SCOPE GENERATION</strong></div><p>Marketing does not maintain recurring manual account lists. Final recipient eligibility is evaluated after contact, exclusion and frequency gates.</p></div><div class="life-scope-stack">${visible.length?visible.map(scopeCard).join(""):`<div class="life-empty"><strong>No live scopes for ${E(selectedOwner())}</strong></div>`}</div>`;
   }
 
   async function commandCenter(container){
@@ -488,14 +575,14 @@
   }
 
   function wrapStudioRenderer(){
-    const base=R["campaign-studio"]; if(!base||base.__canonical665)return;
+    const base=R["campaign-studio"]; if(!base||base.__canonical666)return;
     const wrapped=container=>{
       const current=normalizeCampaignContext(readContext()); if(Object.keys(current).length)writeContext(current);
       const result=base(container);
       Promise.resolve(result).finally(()=>{setTimeout(studioPolish,0);setTimeout(studioPolish,250);});
       return result;
     };
-    wrapped.__canonical665=true;R["campaign-studio"]=wrapped;
+    wrapped.__canonical666=true;R["campaign-studio"]=wrapped;
   }
 
   function installRenderers(){
@@ -608,5 +695,5 @@
   }
 
   document.addEventListener("DOMContentLoaded",init);
-  global.DGL_APP={VERSION,MODULE_GROUPS,ALL_MODULES,normalizeWindow,family,contextFor,audit,absoluteAsset,absolutizeHtml,renderRoute};
+  global.DGL_APP={VERSION,MODULE_GROUPS,ALL_MODULES,normalizeWindow,family,scopeId,contextFor,audit,absoluteAsset,absolutizeHtml,renderRoute,recoveryStatus:()=>({...RECOVERY_SUMMARY,snapshotAt:RECOVERY_SNAPSHOT_AT,runtime:dataCache.runtime,errors:[...(dataCache.errors||[])]})};
 })(window);
