@@ -136,7 +136,31 @@ function csvRows(csvText){
   assert.equal(result.recipientResolutionSuccess,0);
   assert.equal(result.recipientResolutionBlocked,2,'accountsScoped from the evaluate step (both DETECTED accounts, frequency-blocking is a report-time-only distinction)');
   assert(result.blockedReason.indexOf('NO CAMPAIGN ID ASSIGNED YET')===0);
+  assert.equal(result.suppressedTotal,4,'Review Co + Collections Co + No Context Co + False Positive Co (all 4 SUPPRESSED rows)');
   console.log('retention report test 2 (dry run category classification with synthetic data): PASS');
+})();
+
+// Regression: a Retention row suppressed by cross-family priority (HIGHER PRIORITY SIGNAL,
+// e.g. a QNB signal on the same account) falls outside all three named buckets
+// (AM activity / missing AM context / data quality). suppressedTotal must still count it,
+// so the run summary's total suppressed count is never silently under-reported.
+(function dryRunHigherPrioritySuppressionTest(){
+  var ctx=makeContext({},{});
+  var reportTables=baseReportTables({
+    MIGRACION_CAIDAS:[{Cuenta:'Contested Co','Sales Rep':'Jane','Sin dueno':'NO'}],
+    CUENTAS:[{Cuenta:'Contested Co',Bucket:'2. OPERA SIN GESTION','Tipo gestion':''}],
+    LQS_SIN_RESPUESTA:[{Cliente:'Contested Co',Agente:'Jane',Area:'FTL',Bucket:'0-14','Fecha creacion':'2026-08-01',LQ:'LQ-1'}]
+  });
+  ctx.v6ReportRows_=function(name){return reportTables[name]||[];};
+  var result=ctx.v6AuraRetentionDryRun_();
+  assert.equal(result.accountsEvaluated,1);
+  assert.equal(result.detected,0,'QNB (priority 1) outranks Retention (priority 2) for the same account');
+  assert.equal(result.suppressedByAmActivity,0);
+  assert.equal(result.suppressedByMissingAmContext,0);
+  assert.equal(result.suppressedByDataQuality,0);
+  assert.equal(result.reviewRequired,0);
+  assert.equal(result.suppressedTotal,1,'HIGHER PRIORITY SIGNAL is not any of the three named buckets but must still count as suppressed');
+  console.log('retention report test 2b (suppressedTotal counts HIGHER PRIORITY SIGNAL rows the 3 named buckets miss): PASS');
 })();
 
 // === Task 8A: v6AuraDecisionFor_ — one test per branch =======================
