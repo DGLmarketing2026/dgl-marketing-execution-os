@@ -15,8 +15,14 @@ function v6RegisterExclusion_(payload){
   });
 }
 
+// AURA event-type vocabulary aliases: external callers (AM Platform, mail/CRM webhooks)
+// may send the plain names below; they map onto the original internal event types
+// without changing stored pipeline semantics or introducing a second vocabulary.
+var MKT_V6_RESPONSE_EVENT_ALIASES_={QUOTE:'QUOTE_SIGNAL',LOAD:'LOAD_SIGNAL'};
+
 function v6ClassifyResponseEvent_(rawEvent){
   var e=rawEvent||{},eventType=String(e.eventType||'').toUpperCase(),accountId=e.accountId||'',action='IGNORED',result=null;
+  eventType=MKT_V6_RESPONSE_EVENT_ALIASES_[eventType]||eventType;
   if(eventType==='REPLY'){
     result=v6UpsertPipelineStage_({accountId:accountId,response:true,responseAt:e.occurredAt,campaignId:e.campaignId,executionId:e.executionId,amOwner:e.amOwner});
     action='PIPELINE_UPDATED';
@@ -27,7 +33,12 @@ function v6ClassifyResponseEvent_(rawEvent){
     result=v6UpsertPipelineStage_({accountId:accountId,quoteAt:e.occurredAt,campaignId:e.campaignId,executionId:e.executionId,amOwner:e.amOwner});
     action='PIPELINE_UPDATED';
   }else if(eventType==='LOAD_SIGNAL'){
-    result=v6UpsertPipelineStage_({accountId:accountId,loadAt:e.occurredAt,campaignId:e.campaignId,executionId:e.executionId,amOwner:e.amOwner});
+    // attributedRevenue is only set when the raw event explicitly carries an amount from
+    // the source system (real-time signal); it is never fabricated here. The authoritative
+    // batch cross-check against NOVA's own Monto field remains v6IngestCommercialOutcomes_.
+    var loadPayload={accountId:accountId,loadAt:e.occurredAt,campaignId:e.campaignId,executionId:e.executionId,amOwner:e.amOwner};
+    if(e.amount!=null&&e.amount!=='')loadPayload.attributedRevenue=Number(e.amount);
+    result=v6UpsertPipelineStage_(loadPayload);
     action='PIPELINE_UPDATED';
   }else if(eventType==='BOUNCE'){
     result=v6MarkContactEmailInvalid_({contactId:e.contactId,email:e.email});
