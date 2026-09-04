@@ -1,0 +1,101 @@
+{
+  "suite": "Retention V1",
+  "runner": "node <test-file>.test.js (no test framework/package.json in this repo; each *.test.js is a standalone Node script using assert + vm, matching the existing repo convention)",
+  "newTests": [
+    {
+      "file": "tests/v6-retention-am-activity.test.js",
+      "cases": [
+        {
+          "name": "base detection, no CUENTAS match, no contradictions -> DETECTED",
+          "guarantee": "normal-case automation: a Retention signal with no AM-activity red flags is never suppressed by default"
+        },
+        {
+          "name": "Sin dueno / house account -> SUPPRESSED / OWNER REQUIRED (regression), CUENTAS branch never touched",
+          "guarantee": "suppression: pre-existing owner-required rule still wins first and short-circuits before any new join logic runs"
+        },
+        {
+          "name": "cross-priority suppression (QNB beats Retention for the same account) -> HIGHER PRIORITY SIGNAL",
+          "guarantee": "suppression: shared v6ApplyPrioritySuppression_ still enforces one active family per account after adding the CUENTAS join"
+        },
+        {
+          "name": "bucket confirms genuine absence of management, no contradiction -> DETECTED",
+          "guarantee": "normal-case automation: AM-activity evidence that clearly confirms no management does not block automated retention outreach"
+        },
+        {
+          "name": "ambiguous bucket ('8. GESTIONADAS SIN OPERAR') -> SUPPRESSED / AM ACTIVITY REVIEW REQUIRED, and v6PipelineWinner_/v6PipelineSyncSignals_ route it to CLOSED / SUPPRESSED like any other suppressed row",
+          "guarantee": "suppression + duplicate prevention: an ambiguous AM-activity signal never leaks into the active pipeline through the idempotent bulk pipeline sync"
+        },
+        {
+          "name": "bucket says 'no management' but Tipo gestion says COMERCIAL (contradiction) -> SUPPRESSED / AM ACTIVITY REVIEW REQUIRED",
+          "guarantee": "suppression: contradictory AM-activity evidence is flagged for human review instead of silently auto-detected or auto-suppressed"
+        },
+        {
+          "name": "row with no CUENTAS match at all -> DETECTED, join coverage metric reflects partial match",
+          "guarantee": "no fail-closed behavior on missing/incomplete join data; join coverage is observability-only, never a gate"
+        }
+      ]
+    },
+    {
+      "file": "tests/v6-response-events.test.js",
+      "cases": [
+        {
+          "name": "REPLY -> pipeline RESPONDED, nextAction STOP ACCOUNT AUTOMATION / V5.5 HANDOFF, handoffStatus PENDING",
+          "guarantee": "stop + handoff: a real commercial reply stops account automation and creates an AM handoff via the existing pipeline stage machine"
+        },
+        {
+          "name": "RFQ -> pipeline RFQ RECEIVED with rfqAt set",
+          "guarantee": "response capture correctly advances pipeline stage for qualifying commercial activity"
+        },
+        {
+          "name": "BOUNCE -> MKT_CONTACTS_SECURE emailStatus INVALID via read-merge-upsert, historical fields preserved, pipeline untouched",
+          "guarantee": "duplicate prevention / idempotent UPSERT (merge-by-contactId, never blind overwrite) and isolation (a delivery failure does not affect account pipeline state)"
+        },
+        {
+          "name": "UNSUBSCRIBE -> MKT_EXCLUSIONS ACTIVE exclusion with deterministic exclusionId, pipeline untouched",
+          "guarantee": "suppression / DNC governance: an unsubscribe becomes a durable, idempotent exclusion (re-processing the same event does not duplicate the exclusion row) without altering pipeline stage"
+        },
+        {
+          "name": "CLICK / OTHER / unrecognized eventType -> action IGNORED, zero writes to any table",
+          "guarantee": "normal-case automation: non-qualifying engagement events never trigger a stop, handoff, exclusion, or contact mutation"
+        }
+      ]
+    },
+    {
+      "file": "tests/v6-commercial-outcomes.test.js",
+      "cases": [
+        {
+          "name": "resolves accountId via MKT_ACCOUNTS crosswalk and writes attributedRevenue exactly equal to Monto",
+          "guarantee": "attribution: revenue is copied as-is from the authoritative source, never recalculated, never summed with unrelated figures"
+        },
+        {
+          "name": "no unique MKT_ACCOUNTS match (unknown account) -> no pipeline write, unresolvedCount increments",
+          "guarantee": "never join by account name without an authoritative crosswalk; fail-closed on ambiguous/absent identity instead of guessing"
+        },
+        {
+          "name": "account present by name but missing salesforceAccountId/externalAccountId -> unresolved",
+          "guarantee": "canonical Salesforce Account ID or documented 1:1 mapping is mandatory before attribution writes anything"
+        },
+        {
+          "name": "existing pipeline record already has a campaignId and is past CAMPAIGN ACTIVE -> nextAction marks MULTI-CAMPAIGN CONCURRENCY, campaignId is not overwritten",
+          "guarantee": "attribution ambiguity is surfaced explicitly instead of silently reassigning campaign credit"
+        }
+      ]
+    }
+  ],
+  "regressionCoverage": {
+    "description": "Full existing suite re-run after this branch's changes.",
+    "passed": 13,
+    "failed": 7,
+    "failedTestsAreProvenPreExisting": true,
+    "verification": "git stash of all Retention V1 changes + re-run reproduced the identical 7 failures on main, confirming they are unrelated (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions) and were not introduced by this branch.",
+    "failedFiles": [
+      "tests/v55-audience-bridge.test.js",
+      "tests/v55-backend-adapter.test.js",
+      "tests/v55-legacy-status-visibility.test.js",
+      "tests/v55-validation.test.js",
+      "tests/v6-live-opportunities-ui.test.js",
+      "tests/v6-report-ingestion.test.js",
+      "tests/v6-validation.test.js"
+    ]
+  }
+}
