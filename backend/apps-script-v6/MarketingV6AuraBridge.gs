@@ -59,6 +59,12 @@ function v6AuraAutoBuildRetentionScopes_(){
 // the safe-aggregate pattern already used by v6SafeOpportunityResponse_ /
 // runV6BackendSmokeTest.
 function v6AuraEvaluateRetention_(){
+  // Fail-closed freshness gate (MarketingV6DataFreshness.gs): AURA must not run a Retention
+  // campaign cycle against commercial data that is already older than the very cycle that
+  // consumes it. Checked before any refresh/scope-build side effect -- STALE short-circuits
+  // immediately, touching neither MKT_OPPORTUNITIES nor any scope table.
+  var freshness=v6AuraCheckReportFreshness_();
+  if(freshness.status==='STALE')return {status:'BLOCKED_STALE_DATA',freshness:freshness};
   var refresh=v6RefreshOpportunitiesFromReports_();
   var rows=v6Rows_('MKT_OPPORTUNITIES').filter(function(r){return v6AuraText_(r.opportunityType)==='Retention';});
   var detected=0,suppressed=0,reviewRequired=0,byReason={};

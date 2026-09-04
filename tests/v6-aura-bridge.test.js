@@ -6,7 +6,16 @@ const pipelineSource=src('MarketingV6Pipeline.gs');
 const recipientSource=src('MarketingV6RecipientResolution.gs');
 const bridgeSource=src('MarketingV6AuraBridge.gs');
 const responseEventsSource=src('MarketingV6ResponseEvents.gs');
+const freshnessSource=src('MarketingV6DataFreshness.gs');
 const routerSource=src('MarketingV6RouterExtension.gs');
+
+// Default fake DriveApp: report source "just updated" (well inside the 6-hour freshness
+// window), so every existing test in this file keeps exercising the FRESH path unless a
+// test explicitly overrides ctx.DriveApp to simulate STALE (see the freshness gate tests).
+function fakeFreshDriveApp(hoursAgo){
+  var lastUpdated=new Date(Date.now()-((hoursAgo==null?0.1:hoursAgo)*3600000));
+  return {getFileById:function(){return {getLastUpdated:function(){return lastUpdated;}};}};
+}
 
 function fakeUtilities(){
   return {
@@ -23,11 +32,12 @@ var OPP_HEADERS=['opportunityId','accountId','accountName','amOwner','opportunit
 
 function makeContext(tables){
   tables=tables||{};
-  var ctx={Utilities:fakeUtilities(),Session:{getScriptTimeZone:function(){return 'UTC';}},SpreadsheetApp:{},ScriptApp:{},Date:Date,String:String,Array:Array,Object:Object,Number:Number,RegExp:RegExp,console:console};
+  var ctx={Utilities:fakeUtilities(),Session:{getScriptTimeZone:function(){return 'UTC';}},SpreadsheetApp:{},ScriptApp:{},DriveApp:fakeFreshDriveApp(),MKT_V6_REPORT_SOURCE_ID:'FAKE-SOURCE-ID',Date:Date,String:String,Array:Array,Object:Object,Number:Number,RegExp:RegExp,console:console};
   vm.createContext(ctx);
   vm.runInContext(ingestionSource,ctx,{filename:'MarketingV6ReportIngestion.gs'});
   vm.runInContext(pipelineSource,ctx,{filename:'MarketingV6Pipeline.gs'});
   vm.runInContext(recipientSource,ctx,{filename:'MarketingV6RecipientResolution.gs'});
+  vm.runInContext(freshnessSource,ctx,{filename:'MarketingV6DataFreshness.gs'});
   vm.runInContext(bridgeSource,ctx,{filename:'MarketingV6AuraBridge.gs'});
   vm.runInContext(responseEventsSource,ctx,{filename:'MarketingV6ResponseEvents.gs'});
 
@@ -216,6 +226,56 @@ function emptyReportTables(overrides){
   var loadedNoAmount=tables.MKT_ACCOUNT_PIPELINE.filter(function(r){return r.accountId==='ACC-3';})[0];
   assert.equal(loadedNoAmount.attributedRevenue,'','no amount supplied -> attributedRevenue is never fabricated');
   console.log('aura bridge test 6 (QUOTE/LOAD event aliases, no fabricated revenue): PASS');
+})();
+
+// 7. Freshness gate: STALE source blocks evaluate before any refresh/scope-build side effect
+(function freshnessGateTest(){
+  var tables={};
+  var ctx=makeContext(tables);
+  ctx.DriveApp=fakeFreshDriveApp(9); // 9 hours ago > 6-hour threshold -> STALE
+  ctx.v6ReportRows_=function(){throw new Error('STALE must short-circuit before any report read');};
+  var result=ctx.v6AuraEvaluateRetention_();
+  assert.equal(result.status,'BLOCKED_STALE_DATA');
+  assert.equal(result.freshness.status,'STALE');
+  assert(result.freshness.hoursSinceLastUpdate>6);
+  assert.equal(result.freshness.staleThresholdHours,6);
+  assert.strictEqual(tables.MKT_OPPORTUNITIES,undefined,'STALE must never write MKT_OPPORTUNITIES');
+  assert.strictEqual(tables.MKT_CAMPAIGN_SCOPES,undefined,'STALE must never build campaign scope');
+  console.log('aura bridge test 7 (freshness gate blocks STALE source before any write): PASS');
+})();
+
+// 7b. FRESH source proceeds normally (regression: the freshness gate itself must not block
+// a healthy run)
+(function freshnessGatePassesTest(){
+  var tables={};
+  var ctx=makeContext(tables); // default fake DriveApp is FRESH (0.1h ago)
+  ctx.v6ReportRows_=function(){return [];};
+  var result=ctx.v6AuraEvaluateRetention_();
+  assert.equal(result.status,'RETENTION_EVALUATED');
+  console.log('aura bridge test 7b (FRESH source proceeds through evaluate normally): PASS');
+})();
+
+// 8. Idempotency: running v6AuraEvaluateRetention_ twice with the same input does not
+// duplicate MKT_OPPORTUNITIES rows (full rewrite each time) nor MKT_CAMPAIGN_SCOPES /
+// MKT_SCOPE_ACCOUNTS rows (upserted by key)
+(function idempotentDoubleRunTest(){
+  var tables={};
+  var ctx=makeContext(tables);
+  var reportTables={
+    MIGRACION_CAIDAS:[{Cuenta:'Repeat Co','Sales Rep':'Jane','Sin dueno':'NO'}],
+    CUENTAS:[{Cuenta:'Repeat Co',Bucket:'2. OPERA SIN GESTION','Tipo gestion':''}],
+    FICHA_CLIENTES:[],LQS_SIN_RESPUESTA:[],MIGRACION_RECUPERADAS:[]
+  };
+  ctx.v6ReportRows_=function(name){return reportTables[name]||[];};
+  var first=ctx.v6AuraEvaluateRetention_();
+  var oppCountAfterFirst=tables.MKT_OPPORTUNITIES.length,scopeCountAfterFirst=tables.MKT_CAMPAIGN_SCOPES.length,scopeAccountCountAfterFirst=tables.MKT_SCOPE_ACCOUNTS.length;
+  var second=ctx.v6AuraEvaluateRetention_();
+  assert.equal(tables.MKT_OPPORTUNITIES.length,oppCountAfterFirst,'MKT_OPPORTUNITIES must not grow on a second identical run (full rewrite)');
+  assert.equal(tables.MKT_CAMPAIGN_SCOPES.length,scopeCountAfterFirst,'MKT_CAMPAIGN_SCOPES must not grow on a second identical run (upsert by scopeId)');
+  assert.equal(tables.MKT_SCOPE_ACCOUNTS.length,scopeAccountCountAfterFirst,'MKT_SCOPE_ACCOUNTS must not grow on a second identical run (upsert by scopeId+accountId)');
+  assert.equal(second.detected,first.detected);assert.equal(second.suppressed,first.suppressed);
+  assert.equal(second.scopesBuilt,first.scopesBuilt);assert.equal(second.accountsScoped,first.accountsScoped);
+  console.log('aura bridge test 8 (double run is idempotent, no growth in opportunities/scopes): PASS');
 })();
 
 ['v6AuraEvaluateRetention:v6AuraEvaluateRetention_','v6AuraStatus:v6AuraStatus_','v6AuraEnsureCampaignScope:v6AuraEnsureCampaignScope_','v6AuraCreateAccountStop:v6AuraCreateAccountStop_','v6AuraCreateAmHandoff:v6AuraCreateAmHandoff_'].forEach(function(entry){
