@@ -42,6 +42,11 @@ function v6FichaIndex_(){
   rows.forEach(function(r){idx[v6NormAccount_(r.Cliente)]=r;});
   return idx;
 }
+function v6CuentasIndex_(){
+  var rows=v6ReportRows_('CUENTAS'),idx={};
+  rows.forEach(function(r){idx[v6NormAccount_(r.Cuenta)]=r;});
+  return idx;
+}
 function v6ServiceFromFicha_(row){
   if(!row)return 'Multiservicio';
   var used=[];
@@ -69,15 +74,33 @@ function v6BuildQnbOpportunities_(nowIso){
   });
 }
 
-function v6BuildRetentionOpportunities_(nowIso,ficha){
+var MKT_V6_RETENTION_AM_REVIEW_BUCKETS=['6. COTIZAN Y NO CIERRAN','7. CASOS EXTREMOS','8. GESTIONADAS SIN OPERAR'];
+var MKT_V6_RETENTION_NO_MANAGEMENT_BUCKETS=['2. OPERA SIN GESTION','3. SIN GESTION CRITICO','4. SIN GESTION ALTO','5. SIN GESTION MEDIO'];
+
+function v6RetentionAmActivityReason_(r,match){
+  if(v6Yes_(r['Sin dueno'])||v6Text_(r['Sales Rep']).toLowerCase()==='house account')return 'OWNER REQUIRED';
+  if(match){
+    if(v6Text_(match.Bucket)==='1. SIN DUENO'||v6Text_(match['Sales Rep']).toLowerCase()==='house account')return 'OWNER REQUIRED';
+    if(v6Yes_(match['Falso positivo']))return 'FALSE POSITIVE';
+    if(v6Yes_(match['Solo cobranza']))return 'COLLECTIONS';
+    var bucket=v6Text_(match.Bucket);
+    if(MKT_V6_RETENTION_AM_REVIEW_BUCKETS.indexOf(bucket)>=0)return 'AM ACTIVITY REVIEW REQUIRED';
+    if(MKT_V6_RETENTION_NO_MANAGEMENT_BUCKETS.indexOf(bucket)>=0&&v6Text_(match['Tipo gestion']).trim().toUpperCase()==='COMERCIAL')return 'AM ACTIVITY REVIEW REQUIRED';
+  }
+  return '';
+}
+
+function v6BuildRetentionOpportunities_(nowIso,ficha,cuentas){
+  var cuentasIdx=cuentas||{};
   return v6ReportRows_('MIGRACION_CAIDAS').map(function(r){
-    var key=v6NormAccount_(r.Cuenta),reason='';
-    if(v6Yes_(r['Sin dueno'])||v6Text_(r['Sales Rep']).toLowerCase()==='house account')reason='OWNER REQUIRED';
+    var key=v6NormAccount_(r.Cuenta),match=cuentasIdx[key]||null,reason=v6RetentionAmActivityReason_(r,match);
     return {
       opportunityId:v6OppId_('RETENTION',key),accountId:'ACC-'+v6HashKey_(key),accountName:v6Text_(r.Cuenta),amOwner:v6Text_(r['Sales Rep']),
       opportunityType:'Retention',service:v6ServiceFromFicha_(ficha[key]),signalDate:v6IsoDate_(r['Ultimo load']),qnbWindow:'',lane:'',
       sourceReport:'MIGRACION_CAIDAS',sourceRecordId:v6Text_(r['Tier origen'])+'>'+v6Text_(r['Tier destino']),priorityRank:2,
-      eligibilityStatus:reason?'SUPPRESSED':'DETECTED',suppressionReason:reason,campaignId:'',detectedAt:nowIso,updatedAt:nowIso
+      eligibilityStatus:reason?'SUPPRESSED':'DETECTED',suppressionReason:reason,campaignId:'',detectedAt:nowIso,updatedAt:nowIso,
+      amActivityBucket:match?v6Text_(match.Bucket):'',amActivityTipoGestion:match?v6Text_(match['Tipo gestion']):'',
+      amActivityUltimoChatter:match?v6IsoDate_(match['Ultimo chatter']):'',amActivityAutorChatter:match?v6Text_(match['Autor chatter']):''
     };
   });
 }
@@ -162,16 +185,23 @@ function v6OpportunityMetrics_(rows){
   return {total:rows.length,detected:detected,suppressed:suppressed,byType:byType};
 }
 
+function v6RetentionCuentasJoinCoverage_(retentionRows,cuentas){
+  if(!retentionRows.length)return 0;
+  var matched=retentionRows.filter(function(r){return !!cuentas[v6NormAccount_(r.accountName)];}).length;
+  return matched/retentionRows.length;
+}
+
 function v6RefreshOpportunitiesFromReports_(){
-  var nowIso=new Date().toISOString(),ficha=v6FichaIndex_(),rows=[];
+  var nowIso=new Date().toISOString(),ficha=v6FichaIndex_(),cuentas=v6CuentasIndex_(),rows=[];
+  var retentionRows=v6BuildRetentionOpportunities_(nowIso,ficha,cuentas);
   rows=rows.concat(v6BuildQnbOpportunities_(nowIso));
-  rows=rows.concat(v6BuildRetentionOpportunities_(nowIso,ficha));
+  rows=rows.concat(retentionRows);
   rows=rows.concat(v6BuildReactivationOpportunities_(nowIso,ficha));
   rows=rows.concat(v6BuildCrossSellOpportunities_(nowIso));
   rows=rows.concat(v6BuildNurtureOpportunities_(nowIso,ficha));
   rows=v6ApplyPrioritySuppression_(rows);
   v6WriteOpportunities_(rows);
-  return {status:'REPORT_SOURCE_SYNCED',sourceSpreadsheetId:MKT_V6_REPORT_SOURCE_ID,metrics:v6OpportunityMetrics_(rows),syncedAt:nowIso};
+  return {status:'REPORT_SOURCE_SYNCED',sourceSpreadsheetId:MKT_V6_REPORT_SOURCE_ID,metrics:v6OpportunityMetrics_(rows),retentionCuentasJoinCoverage:v6RetentionCuentasJoinCoverage_(retentionRows,cuentas),syncedAt:nowIso};
 }
 
 function v6InstallOpportunityRefreshTrigger_(){
