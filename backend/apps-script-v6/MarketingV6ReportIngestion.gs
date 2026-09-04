@@ -212,4 +212,12 @@ function v6InstallOpportunityRefreshTrigger_(){
   ScriptApp.newTrigger('v6ScheduledOpportunityRefresh_').timeBased().everyHours(6).create();
   return {ok:true,handler:'v6ScheduledOpportunityRefresh_',frequency:'EVERY_6_HOURS'};
 }
-function v6ScheduledOpportunityRefresh_(){return v6RefreshOpportunitiesFromReports_();}
+// Delegates to v6AuraEvaluateRetention_ (MarketingV6AuraBridge.gs) instead of calling
+// v6RefreshOpportunitiesFromReports_ directly: v6AuraEvaluateRetention_ runs the exact
+// same unified refresh (QNB/Retention/Reactivation/Cross-Sell/Nurture detection is
+// unchanged) and then automatically builds/reuses campaign scope for DETECTED Retention
+// accounts only -- so the single already-installed 6-hour trigger now performs
+// detect -> suppress -> build scope for Retention with no manual account list, without
+// adding a second competing trigger. Requires MarketingV6AuraBridge.gs to be present in
+// the same Apps Script project (see docs/AURA_DEPLOYMENT.md).
+function v6ScheduledOpportunityRefresh_(){return v6AuraEvaluateRetention_();}
