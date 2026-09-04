@@ -103,7 +103,8 @@ function v6BuildRetentionOpportunities_(nowIso,ficha,cuentas){
       sourceReport:'MIGRACION_CAIDAS',sourceRecordId:v6Text_(r['Tier origen'])+'>'+v6Text_(r['Tier destino']),priorityRank:2,
       eligibilityStatus:reason?'SUPPRESSED':'DETECTED',suppressionReason:reason,campaignId:'',detectedAt:nowIso,updatedAt:nowIso,
       amActivityBucket:match?v6Text_(match.Bucket):'',amActivityTipoGestion:match?v6Text_(match['Tipo gestion']):'',
-      amActivityUltimoChatter:match?v6IsoDate_(match['Ultimo Chatter']):'',amActivityAutorChatter:match?v6Text_(match['Autor Chatter']):''
+      amActivityUltimoChatter:match?v6IsoDate_(match['Ultimo Chatter']):'',amActivityAutorChatter:match?v6Text_(match['Autor Chatter']):'',
+      tierDestino:v6Text_(r['Tier destino'])
     };
   });
 }
@@ -212,12 +213,16 @@ function v6InstallOpportunityRefreshTrigger_(){
   ScriptApp.newTrigger('v6ScheduledOpportunityRefresh_').timeBased().everyHours(6).create();
   return {ok:true,handler:'v6ScheduledOpportunityRefresh_',frequency:'EVERY_6_HOURS'};
 }
-// Delegates to v6AuraEvaluateRetention_ (MarketingV6AuraBridge.gs) instead of calling
-// v6RefreshOpportunitiesFromReports_ directly: v6AuraEvaluateRetention_ runs the exact
-// same unified refresh (QNB/Retention/Reactivation/Cross-Sell/Nurture detection is
-// unchanged) and then automatically builds/reuses campaign scope for DETECTED Retention
-// accounts only -- so the single already-installed 6-hour trigger now performs
-// detect -> suppress -> build scope for Retention with no manual account list, without
-// adding a second competing trigger. Requires MarketingV6AuraBridge.gs to be present in
-// the same Apps Script project (see docs/AURA_DEPLOYMENT.md).
-function v6ScheduledOpportunityRefresh_(){return v6AuraEvaluateRetention_();}
+// Delegates to v6AuraRunRetentionCycle_ (MarketingV6RetentionReport.gs) instead of calling
+// v6RefreshOpportunitiesFromReports_ directly. v6AuraRunRetentionCycle_ internally calls
+// v6AuraEvaluateRetention_ (which itself runs the exact same unified refresh --
+// QNB/Retention/Reactivation/Cross-Sell/Nurture detection is unchanged -- gated by
+// v6AuraCheckReportFreshness_, then automatically builds/reuses campaign scope for
+// DETECTED Retention accounts only) and, on a FRESH source, additionally generates the
+// AM-facing CSV report and persists a run summary row. So the single already-installed
+// 6-hour trigger now performs detect -> suppress -> build scope -> AM CSV -> run summary
+// for Retention with no manual account list and no manual export, without adding a second
+// competing trigger. Requires MarketingV6AuraBridge.gs, MarketingV6DataFreshness.gs and
+// MarketingV6RetentionReport.gs to be present in the same Apps Script project (see
+// docs/AURA_DEPLOYMENT.md).
+function v6ScheduledOpportunityRefresh_(){return v6AuraRunRetentionCycle_();}
