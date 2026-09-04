@@ -1,10 +1,17 @@
 var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
-  MKT_ACCOUNTS:['accountId','externalSystem','externalAccountId','salesforceAccountId','accountName','amOwner','status','sourceUpdatedAt','createdAt','updatedAt'],
-  MKT_CONTACTS_SECURE:['contactId','accountId','externalSystem','externalContactId','salesforceContactId','email','emailStatus','doNotContact','status','sourceUpdatedAt','createdAt','updatedAt'],
+  MKT_ACCOUNTS:['accountId','externalSystem','externalAccountId','salesforceAccountId','canonicalSalesforceIdStatus','accountName','amOwner','status','sourceUpdatedAt','createdAt','updatedAt'],
+  MKT_CONTACTS_SECURE:['contactId','accountId','externalSystem','externalContactId','salesforceContactId','canonicalSalesforceIdStatus','email','emailStatus','doNotContact','status','sourceUpdatedAt','createdAt','updatedAt'],
   MKT_CAMPAIGN_SCOPES:['scopeId','audienceId','campaignId','campaignType','opportunityType','updatedAt'],
   MKT_SCOPE_ACCOUNTS:['scopeId','audienceId','campaignId','accountId','eligibilityStatus','updatedAt'],
   MKT_EXCLUSIONS:['exclusionId','accountId','contactId','status','active','reasonCode','expiresAt','updatedAt'],
-  MKT_AUDIENCES:['audienceRecipientId','recordType','campaignId','scopeId','accountId','contactId','email','eligibilityStatus','exclusionReason','frequencyStatus','audienceResolved','audienceStatus','eligibleContactCount','excludedContactCount','reasonCode','exclusionStatus','exclusionsCleared','resolvedAt','updatedAt']
+  MKT_AUDIENCES:['audienceRecipientId','recordType','campaignId','scopeId','accountId','contactId','email','eligibilityStatus','exclusionReason','frequencyStatus','audienceResolved','audienceStatus','eligibleContactCount','excludedContactCount','reasonCode','exclusionStatus','exclusionsCleared','resolvedAt','updatedAt'],
+  // Added for the AURA Retention pilot dry-run/AM CSV cycle (MarketingV6RetentionReport.gs).
+  // Reuses this same generic additive-schema audit/ensure engine rather than duplicating it;
+  // MKT_RETENTION_RUN_SUMMARY is a brand-new table, so its sheet tab must be created once,
+  // manually, in the private Data Hub before v6EnsureContactRecipientSchema_() can append
+  // these headers (this function only adds columns to an existing sheet, it never creates
+  // a new tab) -- see docs/AURA_DEPLOYMENT.md.
+  MKT_RETENTION_RUN_SUMMARY:['runId','asOfDate','accountsEvaluated','detected','eligible','suppressed','reviewRequired','campaignReady','responded','handedToAM','rfqs','quotes','loads','attributedRevenue','csvDriveFileId','createdAt']
 };
 function v6SchemaHeaders_(sheet){if(!sheet)return [];var columns=Number(sheet.getLastColumn()||0);if(columns<1)return [];return sheet.getRange(1,1,1,columns).getValues()[0].map(function(value){return String(value||'').trim();}).filter(function(value){return value!=='';});}
 function v6AuditContactRecipientSchema_(){

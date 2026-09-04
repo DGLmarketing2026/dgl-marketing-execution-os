@@ -66,6 +66,14 @@ function routeMarketingV6_(action, payload) {
       return typeof v6AuraCreateAccountStop_ === 'function' ? v6AuraCreateAccountStop_(p) : v6RouteMissing_(a, 'v6AuraCreateAccountStop_');
     case 'v6AuraCreateAmHandoff':
       return typeof v6AuraCreateAmHandoff_ === 'function' ? v6AuraCreateAmHandoff_(p) : v6RouteMissing_(a, 'v6AuraCreateAmHandoff_');
+    case 'v6AuraAuditCanonicalIds':
+      return typeof v6AuraAuditCanonicalIds_ === 'function' ? v6AuraAuditCanonicalIds_(p) : v6RouteMissing_(a, 'v6AuraAuditCanonicalIds_');
+    case 'v6AuraRetentionDryRun':
+      return typeof v6AuraRetentionDryRun_ === 'function' ? v6AuraRetentionDryRun_(p) : v6RouteMissing_(a, 'v6AuraRetentionDryRun_');
+    case 'v6AuraRunRetentionCycle':
+      return typeof v6AuraRunRetentionCycle_ === 'function' ? v6AuraRunRetentionCycle_(p) : v6RouteMissing_(a, 'v6AuraRunRetentionCycle_');
+    case 'v6AuraRetentionRunSummary':
+      return typeof v6AuraRetentionRunSummary_ === 'function' ? v6AuraRetentionRunSummary_(p) : v6RouteMissing_(a, 'v6AuraRetentionRunSummary_');
     case 'v6DeploymentAudit':
       return typeof v6DeploymentAudit_ === 'function' ? v6DeploymentAudit_(p) : { status: 'NOT AVAILABLE' };
     case 'v6AcqSetup':
