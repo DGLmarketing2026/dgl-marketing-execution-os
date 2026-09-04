@@ -51,6 +51,12 @@ function v6AuraRetentionDryRun_(){
     suppressedByAmActivity:suppressedByAmActivity,
     suppressedByMissingAmContext:suppressedByMissingAmContext,
     suppressedByDataQuality:suppressedByDataQuality,
+    // evaluate.suppressed is the true total (every non-DETECTED row, from v6AuraEvaluateRetention_'s
+    // own byReason pass). The three named buckets above only cover the reasons this pilot report
+    // was asked to break out; they do not include e.g. 'HIGHER PRIORITY SIGNAL' (cross-family
+    // suppression). Using their sum here would silently under-report total suppressed accounts
+    // whenever a competing higher-priority family (e.g. QNB) already claims some of them.
+    suppressedTotal:evaluate.suppressed,
     reviewRequired:reviewRequired,
     frequencyBlocked:frequencyBlocked,
     eligible:eligible,
@@ -179,7 +185,7 @@ function v6AuraRunRetentionCycle_(){
   var asOfDate=Utilities.formatDate(new Date(),(typeof Session!=='undefined'&&Session.getScriptTimeZone&&Session.getScriptTimeZone())||'America/Bogota','yyyy-MM-dd');
   var runId=dryRun.runId;
   var csv=v6AuraGenerateAmCsvReport_(runId,asOfDate);
-  var suppressed=(dryRun.suppressedByAmActivity||0)+(dryRun.suppressedByMissingAmContext||0)+(dryRun.suppressedByDataQuality||0);
+  var suppressed=dryRun.suppressedTotal||0;
   var summaryMetrics={
     accountsEvaluated:dryRun.accountsEvaluated,detected:dryRun.detected,eligible:dryRun.eligible,suppressed:suppressed,
     reviewRequired:dryRun.reviewRequired,campaignReady:csv.decisionCounts.campaignReady,responded:csv.decisionCounts.responded,
