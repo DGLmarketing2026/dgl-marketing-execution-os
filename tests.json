@@ -82,6 +82,85 @@
       ]
     },
     {
+      "file": "tests/v6-canonical-identity.test.js",
+      "cases": [
+        {
+          "name": "externalSystem='SALESFORCE_EXPORT' with a populated externalAccountId resolves salesforceAccountId and canonicalSalesforceIdStatus:'RESOLVED'",
+          "guarantee": "Canonical ID Bridge: the real, confirmed bug (exact-match 'SALESFORCE' gate silently leaving salesforceAccountId empty for real 'SALESFORCE_EXPORT' extracts) is fixed and reproduced exactly as reported"
+        },
+        {
+          "name": "account/contact with no externalAccountId/externalContactId stays canonicalSalesforceIdStatus:'UNRESOLVED', never fabricated",
+          "guarantee": "canonical Salesforce ID or a documented 1:1 mapping only; a missing identity is held, never guessed"
+        },
+        {
+          "name": "same SALESFORCE_EXPORT resolution/non-resolution pair for salesforceContactId",
+          "guarantee": "the fix applies identically to accounts and contacts, one shared helper, no divergent second code path"
+        },
+        {
+          "name": "non-Salesforce source (e.g. MANUAL_UPLOAD) never populates salesforceAccountId (regression: /SALESFORCE/ substring match must not become match-anything)",
+          "guarantee": "the more permissive substring match does not weaken the gate into accepting arbitrary sources"
+        },
+        {
+          "name": "v6AuraAuditCanonicalIds_ returns safe RESOLVED/UNRESOLVED/MISSING aggregate counts only, no accountName/email",
+          "guarantee": "AURA never surfaces PII through a read-only audit; MISSING (field never existed on the row) is distinguished from UNRESOLVED (field exists, explicitly unresolved)"
+        }
+      ]
+    },
+    {
+      "file": "tests/v6-data-freshness.test.js",
+      "cases": [
+        {
+          "name": "report source last modified 1h ago -> FRESH",
+          "guarantee": "a healthy, recently-refreshed source never blocks a Retention cycle"
+        },
+        {
+          "name": "report source last modified 10h ago -> STALE",
+          "guarantee": "fail-closed: AURA must not run a Retention campaign cycle against commercial data older than the six-hour cycle that consumes it"
+        },
+        {
+          "name": "just under the 6-hour threshold (5.9h) -> still FRESH",
+          "guarantee": "the threshold is the same six-hour constant as the existing opportunity-refresh trigger, not a new invented number, and the comparison is strictly greater-than"
+        },
+        {
+          "name": "DriveApp.getFileById is called with the real MKT_V6_REPORT_SOURCE_ID, not a fabricated id",
+          "guarantee": "the freshness check inspects the actual private report source, reusing the existing DriveApp dependency already used by MarketingV6DriveArchive.gs"
+        }
+      ]
+    },
+    {
+      "file": "tests/v6-retention-report.test.js",
+      "cases": [
+        {
+          "name": "v6AuraRetentionDryRun_ STALE short-circuits before any report read",
+          "guarantee": "the pilot dry run inherits the same fail-closed freshness gate as evaluate; a stale-data pilot number is never produced"
+        },
+        {
+          "name": "v6AuraRetentionDryRun_ FRESH classifies synthetic accounts into every named category (detected, suppressedByAmActivity, suppressedByMissingAmContext, suppressedByDataQuality, reviewRequired, frequencyBlocked via the existing v6FrequencyStatus_, eligible, campaignScopesGenerated, recipientResolutionBlocked with an explicit un-guessed reason)",
+          "guarantee": "the pilot reuses v6AuraEvaluateRetention_ and v6FrequencyStatus_ verbatim (no duplicated suppression/frequency logic) and never invents a category outside the exact named set"
+        },
+        {
+          "name": "v6AuraDecisionFor_ — one assertion per branch across all 10 named decisions, plus 2 precedence-ordering checks",
+          "guarantee": "a pure, side-effect-free mapper always resolves to exactly one of the ten named decisions in the specified precedence order; a real pipeline stage always outranks a stale opportunity-level suppression label"
+        },
+        {
+          "name": "v6AuraGenerateAmCsvReport_ produces exactly the specified 30 columns, joins strictly by accountId, contains no email/phone, and lands in a distinct Drive folder from MKT_V6_ARCHIVE",
+          "guarantee": "AM-facing reporting never leaks contact PII and never joins by account name; campaign-execution archives and AM reports remain in separate private folders"
+        },
+        {
+          "name": "v6AuraWriteRunSummary_ / v6AuraRetentionRunSummary_ round-trip; unknown runId returns NOT FOUND rather than throwing",
+          "guarantee": "the persisted run summary is idempotent by runId (v6UpsertByKey_) and safely queryable without fabricating a result for an unknown run"
+        },
+        {
+          "name": "v6AuraRunRetentionCycle_ STALE produces no CSV and no summary row",
+          "guarantee": "the single scheduled orchestrator never hands AM a report generated from data it already knows is stale"
+        },
+        {
+          "name": "v6AuraRunRetentionCycle_ FRESH produces exactly one new CSV file and one persisted summary row referencing it",
+          "guarantee": "the full detect -> suppress -> scope -> AM CSV -> run summary cycle runs as one atomic, traceable unit per runId"
+        }
+      ]
+    },
+    {
       "file": "tests/v6-aura-bridge.test.js",
       "cases": [
         {
@@ -111,17 +190,25 @@
         {
           "name": "v6ClassifyResponseEvent_ accepts QUOTE/LOAD as aliases of QUOTE_SIGNAL/LOAD_SIGNAL (case-insensitive) and only sets attributedRevenue on LOAD when the raw event explicitly supplies an amount",
           "guarantee": "the exact event vocabulary requested (REPLY, RFQ, BOUNCE, UNSUBSCRIBE, CLICK, QUOTE, LOAD) is accepted without a second, divergent code path, and revenue is never fabricated on a real-time event"
+        },
+        {
+          "name": "(added Pass 4) freshness gate: STALE source blocks v6AuraEvaluateRetention_ before any write to MKT_OPPORTUNITIES/MKT_CAMPAIGN_SCOPES; FRESH source proceeds normally",
+          "guarantee": "fail-closed data freshness is enforced at the same entry point the scheduler calls, with zero side effects on STALE"
+        },
+        {
+          "name": "(added Pass 4) running v6AuraEvaluateRetention_ twice with identical input does not grow MKT_OPPORTUNITIES (full rewrite), MKT_CAMPAIGN_SCOPES, or MKT_SCOPE_ACCOUNTS (upsert by key)",
+          "guarantee": "duplicate prevention / idempotency: repeated scheduler runs against the same data never accumulate duplicate rows in any of the three tables this cycle writes"
         }
       ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full existing suite re-run after every change in this branch, most recently after the AURA Retention Bridge pass.",
-    "totalFiles": 21,
-    "passed": 14,
+    "description": "Full existing suite re-run after every change in this branch, most recently after the Canonical ID Bridge / data-freshness / Retention pilot pass (Pass 4).",
+    "totalFiles": 24,
+    "passed": 17,
     "failed": 7,
     "failedTestsAreProvenPreExisting": true,
-    "verification": "git stash of all Retention V1 changes + re-run reproduced the identical 7 failures on main before any change in this branch, confirming they are unrelated (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions). Re-verified after the AURA Retention Bridge pass: same 7 files, same failure reason (e.g. v6-report-ingestion.test.js still fails on the same stale 'marketing-opportunity-engine-v6.js?v=20260827-1' assertion), pass/fail counts moved only by the 4 new Retention/AURA test files added across this branch (13 -> 14 passed after this pass's 1 new file; 7 fail is unchanged throughout).",
+    "verification": "git stash of all Retention V1 changes + re-run reproduced the identical 7 failures on main before any change in this branch, confirming they are unrelated (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions). Re-verified after Pass 4: same 7 files, same failure reasons (e.g. v6-report-ingestion.test.js still fails on the same stale 'marketing-opportunity-engine-v6.js?v=20260827-1' assertion; v55-validation.test.js still fails on the same 'AUTOMATION READY' vs 'NEEDS CLARIFICATION' V5.5 assertion). Pass/fail counts moved only by the 3 new test files added in this pass (v6-canonical-identity.test.js, v6-data-freshness.test.js, v6-retention-report.test.js) plus 2 new cases appended to the existing v6-aura-bridge.test.js and a mock-table update in v6-schema-migration.test.js (21 files/14 passed -> 24 files/17 passed; 7 fail is unchanged throughout, same files, same reasons).",
     "failedFiles": [
       "tests/v55-audience-bridge.test.js",
       "tests/v55-backend-adapter.test.js",

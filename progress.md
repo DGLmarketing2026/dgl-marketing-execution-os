@@ -2,6 +2,69 @@
 
 Branch: `retention/v1-am-activity-join` (pushed to `origin`).
 
+## Pass 4 — Canonical ID Bridge fix, data-freshness gate, first Retention pilot + AM CSV report
+
+Goal: fix a confirmed real bug in Salesforce ID population, add a fail-closed data-freshness gate, and produce the first real AM-facing Retention pilot (dry-run metrics + CSV report + persisted run summary), wired into the existing 6-hour scheduler.
+
+### Task 1 — Canonical ID Bridge (diagnosis CONFIRMED, not refuted)
+
+Direct inspection of `MarketingV6ContactIngestion.gs` (before any change on this pass) confirmed the user's diagnosis exactly: `v6IngestAuthoritativeContacts_` only populated `salesforceAccountId`/`salesforceContactId` when `sourceSystem` was the exact literal `'SALESFORCE'`. Real authoritative extracts arrive with `externalSystem='SALESFORCE_EXPORT'`, which failed that exact-match gate, while `externalAccountId`/`externalContactId` (no such gate) were always populated. Fixed with `v6ContactIsSalesforceSource_(source)` — `/SALESFORCE/.test(String(source||'').toUpperCase())` — a substring test, not a second hardcoded literal. Added an additive `canonicalSalesforceIdStatus` field (`'RESOLVED'`/`'UNRESOLVED'`) to every `MKT_ACCOUNTS`/`MKT_CONTACTS_SECURE` record. Schema updated (`MKT_V6_CONTACT_RECIPIENT_SCHEMA`). New read-only audit `v6AuraAuditCanonicalIds_()` (`MarketingV6CanonicalIdentity.gs`, new file), registered as `v6AuraAuditCanonicalIds`.
+
+**Verified, not assumed:** `v6UpsertByKey_` and `v6WriteOpportunities_` behave identically on a field with no matching sheet header — both silently drop it. The real risk from adding a schema field is `v6IngestAuthoritativeContacts_`'s own pre-flight `v6RequireContactRecipientHeaders_` guard, which throws `SCHEMA MIGRATION REQUIRED` until `v6EnsureContactRecipientSchema_()` is re-run against the real sheets — documented as a required one-time deployment step.
+
+Tests: `tests/v6-canonical-identity.test.js` (new, 6 cases) — reproduces the exact bug (`SALESFORCE_EXPORT` + populated `externalAccountId` -> `RESOLVED`), the missing-id case (`UNRESOLVED`), the same two cases for contacts, a non-Salesforce-source regression (must stay `UNRESOLVED`, not a false-positive match), and the audit function's safe aggregates (including the `MISSING` vs `UNRESOLVED` distinction).
+
+### Task 2 — Data freshness (no invented threshold)
+
+Confirmed (not assumed): no automated cadence anywhere in this codebase/docs refreshes `MKT_V6_REPORT_SOURCE_ID` itself from Salesforce/NOVA; the only existing cadence is the six-hour opportunity-refresh trigger, which only rebuilds `MKT_OPPORTUNITIES` from whatever snapshot already exists. New `MarketingV6DataFreshness.gs`: `v6AuraCheckReportFreshness_()` uses `DriveApp.getFileById(MKT_V6_REPORT_SOURCE_ID).getLastUpdated()` (same `DriveApp` API already used in `MarketingV6DriveArchive.gs`) and reuses the exact same six-hour constant as the existing trigger (not a new number) as the staleness threshold. Wired into `v6AuraEvaluateRetention_` (`MarketingV6AuraBridge.gs`): `STALE` now returns `{status:'BLOCKED_STALE_DATA', freshness}` immediately, before any refresh or scope-build write. Documented the remaining external gap (an automated Salesforce/NOVA -> report-source refresh) without naming a specific unverified mechanism as if it already existed.
+
+Tests: `tests/v6-data-freshness.test.js` (new, 4 cases: FRESH, STALE, near-boundary FRESH, uses the real source ID). `tests/v6-aura-bridge.test.js` extended with test 7/7b (STALE blocks evaluate before any write; FRESH proceeds normally) and updated `makeContext` to load the freshness source and a fake `DriveApp`.
+
+### Task 3 — AM CONTEXT REQUIRED gate — confirmed intact
+
+`tests/v6-retention-am-activity.test.js` re-run unmodified after all Pass 4 changes: all 7 cases still pass. `v6RetentionAmActivityReason_` was not touched.
+
+### Task 4 — Full cycle — confirmed and documented
+
+`docs/RETENTION_V1_ARCHITECTURE.md` now has an explicit "Full automatic cycle (confirmed end to end)" section tracing every stage of the canonical pipeline to a concrete, already-documented function, including the new freshness gate as the first step.
+
+### Task 5 — Scheduler uniqueness/idempotency — confirmed by new test
+
+`tests/v6-aura-bridge.test.js` test 8: running `v6AuraEvaluateRetention_()` twice with the same synthetic input does not grow `MKT_OPPORTUNITIES` (full rewrite each time), `MKT_CAMPAIGN_SCOPES`, or `MKT_SCOPE_ACCOUNTS` (both upserted by key). No second trigger was added anywhere in this pass.
+
+### Task 6 — Response events: receiver vs. real source — documented, no code change needed
+
+`docs/AURA_DEPLOYMENT.md` section 4 now states plainly: the receiver (`v6ClassifyResponseEvent_`) is ready and tested; no real emitter is wired anywhere; response automation must never be called "LIVE". Added an explicit example JSON payload contract for a future real emitter.
+
+### Task 7 — First Retention pilot dry run (new)
+
+New `backend/apps-script-v6/MarketingV6RetentionReport.gs`: `v6AuraRetentionDryRun_()` — freshness-gated (reuses `v6AuraCheckReportFreshness_`), then reuses `v6AuraEvaluateRetention_()` for detect/suppress/scope-build, then classifies every Retention opportunity row into the exact categories specified (accountsEvaluated, detected, suppressedByAmActivity, suppressedByMissingAmContext, suppressedByDataQuality, reviewRequired, frequencyBlocked via the already-existing `v6FrequencyStatus_`, eligible, campaignScopesGenerated, recipientResolutionSuccess/Blocked with an explicit unattempted-resolution reason). Registered as `v6AuraRetentionDryRun`.
+
+### Task 8 — AM CSV report + persisted run summary (new)
+
+Same file. `v6AuraDecisionFor_` (pure, 10-branch precedence mapper — pipeline stage always outranks opportunity-level suppression once a real commercial response exists), `v6AuraGenerateAmCsvReport_` (30-column CSV per the exact spec, joined strictly by `accountId` against `MKT_ACCOUNT_PIPELINE`/`MKT_SCOPE_ACCOUNTS`, reuses `v6Csv_`/`v6CsvEscape_` from `MarketingV6DriveArchive.gs`, writes to a new placeholder-ID Drive folder `MKT_V6_AM_REPORTS_FOLDER_ID`, no PII, unique filename every run by construction), `v6AuraWriteRunSummary_`/`v6AuraRetentionRunSummary_` (new `MKT_RETENTION_RUN_SUMMARY` table, schema added to the existing additive-schema engine, upserted by `runId`), and `v6AuraRunRetentionCycle_` (single orchestrator: dry run -> CSV -> summary, or `BLOCKED_STALE_DATA` with no CSV/summary side effects). `v6ScheduledOpportunityRefresh_` now calls `v6AuraRunRetentionCycle_` instead of `v6AuraEvaluateRetention_` directly, so the existing 6-hour trigger now produces the AM CSV and run summary automatically. Also added an additive `tierDestino` field to `v6BuildRetentionOpportunities_` (`MarketingV6ReportIngestion.gs`), sourced directly from `MIGRACION_CAIDAS['Tier destino']`.
+
+Tests: `tests/v6-retention-report.test.js` (new, 7 test blocks: STALE dry run, full category classification with synthetic data, all 10 `v6AuraDecisionFor_` branches plus 2 precedence checks, AM CSV report content/columns/no-PII, run summary write+read-back, STALE cycle produces nothing, FRESH cycle produces exactly one CSV file + one summary row).
+
+### Files changed / added this pass
+
+- Modified: `backend/apps-script-v6/MarketingV6ContactIngestion.gs`, `backend/apps-script-v6/MarketingV6SchemaMigration.gs`, `backend/apps-script-v6/MarketingV6AuraBridge.gs`, `backend/apps-script-v6/MarketingV6ReportIngestion.gs`, `backend/apps-script-v6/MarketingV6RouterExtension.gs`
+- Added: `backend/apps-script-v6/MarketingV6CanonicalIdentity.gs`, `backend/apps-script-v6/MarketingV6DataFreshness.gs`, `backend/apps-script-v6/MarketingV6RetentionReport.gs`
+- Added tests: `tests/v6-canonical-identity.test.js`, `tests/v6-data-freshness.test.js`, `tests/v6-retention-report.test.js`
+- Modified tests: `tests/v6-aura-bridge.test.js` (freshness gate + idempotency tests), `tests/v6-schema-migration.test.js` (mock sheet map extended with the new `MKT_RETENTION_RUN_SUMMARY` table)
+- Docs updated: `docs/RETENTION_V1_ARCHITECTURE.md`, `docs/RETENTION_V1_DATA_CONTRACT.md`, `docs/RETENTION_V1_RUNBOOK.md`, `docs/AURA_DEPLOYMENT.md`, this file, `tests.json`
+
+### What this pass deliberately does NOT do
+
+- Does not auto-refresh `MKT_V6_REPORT_SOURCE_ID` itself — that remains a named, undecided DGL integration choice (scheduled Salesforce Data Export, Flow, or ETL connector), documented, not invented.
+- Does not wire a real response-event emitter (unchanged gap from Pass 3).
+- Does not automatically re-point `MKT_RETENTION_RUN_SUMMARY.csvDriveFileId` to a newer CSV on a second manual invocation of `v6AuraGenerateAmCsvReport_` for an already-summarized `runId` — the underlying "never overwrite, always create a new file" behavior is already correct and tested; only the automatic *decision* of when to regenerate is left pending, documented in `docs/RETENTION_V1_ARCHITECTURE.md` section 13.
+- Does not touch `v6ApplyPrioritySuppression_`, `v6RetentionAmActivityReason_`, QNB/Reactivation/Cross-Sell/Nurture build functions, or the execution engine.
+
+### Final status after this pass
+
+All eight numbered tasks are code-complete except the two explicitly-named external integration gaps in Task 6 (real response-event source) and the upstream report-source auto-refresh named in Task 2/4 — both documented, neither invented. Full test suite: see `tests.json` for the exact, current pass/fail breakdown (unchanged 7 pre-existing failures, all new files passing).
+
 ## Pass 3 — AURA Retention Bridge (unblock real campaign execution)
 
 Goal: remove the remaining blockers to running a real Retention campaign, without a PR/merge to `main`, per the canonical architecture already corrected in Pass 2.
