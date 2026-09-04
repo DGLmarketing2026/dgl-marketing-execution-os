@@ -1,6 +1,10 @@
 # Retention V1 — Progress
 
-Branch: `retention/v1-am-activity-join` (local only, not pushed).
+Branch: `retention/v1-am-activity-join` (pushed to `origin`).
+
+## Architecture correction (post-initial-implementation)
+
+The initial implementation of the `CUENTAS` join let a `MIGRACION_CAIDAS` (NOVA) candidate with no `CUENTAS` (AM Intelligence) match resolve to `DETECTED` by default. Per the canonical architecture (`NOVA/SALESFORCE -> AM PLATFORM / AM INTELLIGENCE -> AURA -> MARKETING OS -> ...`, now recorded in the workspace `CLAUDE.md`), that is a NOVA -> AURA path that skips AM, which is explicitly prohibited. Fixed: a missing `CUENTAS` match now resolves to `SUPPRESSED` / `AM CONTEXT REQUIRED` (`v6RetentionAmActivityReason_`, `MarketingV6ReportIngestion.gs`). Tests 1 and 7 in `tests/v6-retention-am-activity.test.js`, and the corresponding rows in `docs/RETENTION_V1_DATA_CONTRACT.md` / `docs/RETENTION_V1_ARCHITECTURE.md`, were updated to match. Also fixed in the same pass: the AM-activity evidence fields were reading `'Ultimo chatter'`/`'Autor chatter'` (lowercase) against a report header that is actually `'Ultimo Chatter'`/`'Autor Chatter'` (capitalized), so both were always empty — corrected to the real header casing.
 
 ## What this pass implements
 

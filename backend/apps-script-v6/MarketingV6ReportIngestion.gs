@@ -79,14 +79,17 @@ var MKT_V6_RETENTION_NO_MANAGEMENT_BUCKETS=['2. OPERA SIN GESTION','3. SIN GESTI
 
 function v6RetentionAmActivityReason_(r,match){
   if(v6Yes_(r['Sin dueno'])||v6Text_(r['Sales Rep']).toLowerCase()==='house account')return 'OWNER REQUIRED';
-  if(match){
-    if(v6Text_(match.Bucket)==='1. SIN DUENO'||v6Text_(match['Sales Rep']).toLowerCase()==='house account')return 'OWNER REQUIRED';
-    if(v6Yes_(match['Falso positivo']))return 'FALSE POSITIVE';
-    if(v6Yes_(match['Solo cobranza']))return 'COLLECTIONS';
-    var bucket=v6Text_(match.Bucket);
-    if(MKT_V6_RETENTION_AM_REVIEW_BUCKETS.indexOf(bucket)>=0)return 'AM ACTIVITY REVIEW REQUIRED';
-    if(MKT_V6_RETENTION_NO_MANAGEMENT_BUCKETS.indexOf(bucket)>=0&&v6Text_(match['Tipo gestion']).trim().toUpperCase()==='COMERCIAL')return 'AM ACTIVITY REVIEW REQUIRED';
-  }
+  // Canonical architecture: NOVA / SALESFORCE -> AM PLATFORM / AM INTELLIGENCE -> AURA.
+  // A Retention candidate with no AM Intelligence (CUENTAS) record must not advance on
+  // NOVA-only fields alone (MIGRACION_CAIDAS) -- that would be a NOVA->AURA path that
+  // skips AM. Hold it instead of auto-detecting.
+  if(!match)return 'AM CONTEXT REQUIRED';
+  if(v6Text_(match.Bucket)==='1. SIN DUENO'||v6Text_(match['Sales Rep']).toLowerCase()==='house account')return 'OWNER REQUIRED';
+  if(v6Yes_(match['Falso positivo']))return 'FALSE POSITIVE';
+  if(v6Yes_(match['Solo cobranza']))return 'COLLECTIONS';
+  var bucket=v6Text_(match.Bucket);
+  if(MKT_V6_RETENTION_AM_REVIEW_BUCKETS.indexOf(bucket)>=0)return 'AM ACTIVITY REVIEW REQUIRED';
+  if(MKT_V6_RETENTION_NO_MANAGEMENT_BUCKETS.indexOf(bucket)>=0&&v6Text_(match['Tipo gestion']).trim().toUpperCase()==='COMERCIAL')return 'AM ACTIVITY REVIEW REQUIRED';
   return '';
 }
 

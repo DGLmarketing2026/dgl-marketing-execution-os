@@ -25,13 +25,16 @@ function buildRetentionRow(ctx,migracionRow,cuentas){
   return ctx.v6BuildRetentionOpportunities_('2026-09-04T00:00:00.000Z',{},cuentas||{})[0];
 }
 
-// 1. Detection base sin CUENTAS ni contradicciones -> DETECTED
+// 1. Deteccion base CON contexto de AM Intelligence (CUENTAS) presente y sin contradicciones -> DETECTED
+// Canonical architecture: NOVA -> AM PLATFORM / AM INTELLIGENCE -> AURA. La deteccion base
+// requiere el match de AM Intelligence; sin el, ver test 7b (AM CONTEXT REQUIRED).
 (function test1(){
   var ctx=makeIngestionContext();
-  var row=buildRetentionRow(ctx,{Cuenta:'Acme Freight','Sales Rep':'Jane Doe','Sin dueno':'NO'},{});
+  var cuentas={'acme freight':{Bucket:'2. OPERA SIN GESTION','Tipo gestion':''}};
+  var row=buildRetentionRow(ctx,{Cuenta:'Acme Freight','Sales Rep':'Jane Doe','Sin dueno':'NO'},cuentas);
   assert.equal(row.eligibilityStatus,'DETECTED');
   assert.equal(row.suppressionReason,'');
-  console.log('retention test 1 (base detection): PASS');
+  console.log('retention test 1 (base detection with AM Intelligence context): PASS');
 })();
 
 // 2. Suppression por Sin dueno (regression) -> SUPPRESSED/OWNER REQUIRED, sin tocar rama CUENTAS
@@ -109,7 +112,10 @@ function buildRetentionRow(ctx,migracionRow,cuentas){
   console.log('retention test 6 (bucket vs gestion contradiction): PASS');
 })();
 
-// 7. Cobertura de join: fila sin match en cuentas -> DETECTED (no fail-closed por dato faltante)
+// 7. Cobertura de join: fila sin match en CUENTAS -> SUPPRESSED / AM CONTEXT REQUIRED.
+// Canonical architecture correction: AURA no debe avanzar un candidato de Retention a
+// DETECTED usando solo campos NOVA (MIGRACION_CAIDAS) cuando no hay AM Intelligence
+// (CUENTAS) correspondiente -- eso seria una ruta NOVA -> AURA que salta a AM.
 (function test7(){
   var ctx=makeIngestionContext();
   var tables={MIGRACION_CAIDAS:[
@@ -119,12 +125,14 @@ function buildRetentionRow(ctx,migracionRow,cuentas){
   ctx.v6ReportRows_=function(name){return tables[name]||[];};
   var cuentas={'matched co':{Bucket:'2. OPERA SIN GESTION','Tipo gestion':'OPERATIVA'}};
   var rows=ctx.v6BuildRetentionOpportunities_('2026-09-04T00:00:00.000Z',{},cuentas);
+  var matched=rows.filter(function(r){return r.accountName==='Matched Co';})[0];
+  assert.equal(matched.eligibilityStatus,'DETECTED');
   var unmatched=rows.filter(function(r){return r.accountName==='Unmatched Co';})[0];
-  assert.equal(unmatched.eligibilityStatus,'DETECTED');
-  assert.equal(unmatched.suppressionReason,'');
+  assert.equal(unmatched.eligibilityStatus,'SUPPRESSED');
+  assert.equal(unmatched.suppressionReason,'AM CONTEXT REQUIRED');
   var coverage=ctx.v6RetentionCuentasJoinCoverage_(rows,cuentas);
   assert.equal(coverage,0.5);
-  console.log('retention test 7 (join coverage, no fail-closed on missing match): PASS');
+  console.log('retention test 7 (missing AM Intelligence match is held, not auto-detected): PASS');
 })();
 
 console.log('V6 retention AM activity join: ALL PASS');

@@ -6,8 +6,8 @@
       "file": "tests/v6-retention-am-activity.test.js",
       "cases": [
         {
-          "name": "base detection, no CUENTAS match, no contradictions -> DETECTED",
-          "guarantee": "normal-case automation: a Retention signal with no AM-activity red flags is never suppressed by default"
+          "name": "base detection, WITH a CUENTAS (AM Intelligence) match and no contradictions -> DETECTED",
+          "guarantee": "normal-case automation: a Retention signal with AM Intelligence context and no AM-activity red flags is never suppressed by default"
         },
         {
           "name": "Sin dueno / house account -> SUPPRESSED / OWNER REQUIRED (regression), CUENTAS branch never touched",
@@ -30,8 +30,8 @@
           "guarantee": "suppression: contradictory AM-activity evidence is flagged for human review instead of silently auto-detected or auto-suppressed"
         },
         {
-          "name": "row with no CUENTAS match at all -> DETECTED, join coverage metric reflects partial match",
-          "guarantee": "no fail-closed behavior on missing/incomplete join data; join coverage is observability-only, never a gate"
+          "name": "row with no CUENTAS (AM Intelligence) match at all -> SUPPRESSED / AM CONTEXT REQUIRED, join coverage metric reflects partial match",
+          "guarantee": "canonical architecture: AURA never advances a NOVA-only signal to DETECTED by skipping AM Intelligence; a missing AM Intelligence record fails closed, and join coverage remains an observability metric on top of that gate, never a substitute for it"
         }
       ]
     },

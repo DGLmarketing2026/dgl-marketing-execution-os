@@ -3,6 +3,16 @@
 Scope: RETENTION / EARLY RISK workflow inside DGL Marketing OS V6 (Google Apps Script, private data hub). This document maps the full mandated pipeline —
 `ingest -> normalize -> detect -> prioritize -> suppress -> build scope -> resolve recipients -> govern -> queue -> execute -> capture response -> account stop -> AM handoff -> attribution` — to concrete functions, and marks what already existed (generic, shared across QNB/Reactivation/Cross-Sell/Nurture/Retention) vs what Retention V1 adds (AM-activity join + response classification + commercial attribution).
 
+## Canonical architecture (governs every section below)
+
+```
+NOVA / SALESFORCE -> AM PLATFORM / AM INTELLIGENCE -> AURA -> MARKETING OS
+  -> CAMPAIGN EXECUTION -> CUSTOMER RESPONSE -> AURA -> AM HANDOFF
+  -> SALESFORCE / NOVA -> ATTRIBUTION -> NEXT SIGNAL
+```
+
+AURA (the interpretive layer producing the detection rules in this document) must never classify a signal that requires Account Management context from NOVA-only fields alone, skipping AM. In this codebase, `CUENTAS` is AM Intelligence output (ownership, bucket, Chatter/commercial activity, relationship status), not a generic NOVA export — it is the required upstream gate for Retention detection, not optional enrichment. A `MIGRACION_CAIDAS` (NOVA) candidate with no corresponding `CUENTAS` (AM Intelligence) record is held (`SUPPRESSED` / `AM CONTEXT REQUIRED`), never auto-advanced to `DETECTED` on NOVA fields alone — see the Detect section and `RETENTION_V1_DATA_CONTRACT.md`.
+
 All line references are to `backend/apps-script-v6/` in this repo, as of this branch (`retention/v1-am-activity-join`).
 
 ## 1. Ingest (private report source -> row objects)
@@ -19,7 +29,7 @@ All line references are to `backend/apps-script-v6/` in this repo, as of this br
 ## 3. Detect (opportunity signal construction)
 
 - Already existed: `v6BuildRetentionOpportunities_(nowIso, ficha)` reading `MIGRACION_CAIDAS`, with `OWNER REQUIRED` suppression only — `MarketingV6ReportIngestion.gs:72` (pre-change).
-- **Changed (Retention V1):** signature is now `v6BuildRetentionOpportunities_(nowIso, ficha, cuentas)` — `MarketingV6ReportIngestion.gs:93`. The `reason` (suppression) logic is now delegated to the new helper `v6RetentionAmActivityReason_(r, match)` — `MarketingV6ReportIngestion.gs:80` — which joins the `MIGRACION_CAIDAS` row against the `CUENTAS` index (`match = cuentas[v6NormAccount_(r.Cuenta)]`) and evaluates, in strict priority order: `OWNER REQUIRED` (own-row `Sin dueno`/house account, unchanged) -> `OWNER REQUIRED` (CUENTAS match Bucket `1. SIN DUENO` / house account) -> `FALSE POSITIVE` (CUENTAS `Falso positivo`) -> `COLLECTIONS` (CUENTAS `Solo cobranza`) -> `AM ACTIVITY REVIEW REQUIRED` (CUENTAS bucket is one of the "activity exists but didn't convert" buckets `6/7/8`) -> `AM ACTIVITY REVIEW REQUIRED` (bucket says "no management" but `Tipo gestion` says `COMERCIAL` — contradiction) -> no reason (`DETECTED`).
+- **Changed (Retention V1):** signature is now `v6BuildRetentionOpportunities_(nowIso, ficha, cuentas)` — `MarketingV6ReportIngestion.gs:93`. The `reason` (suppression) logic is now delegated to the new helper `v6RetentionAmActivityReason_(r, match)` — `MarketingV6ReportIngestion.gs:80` — which joins the `MIGRACION_CAIDAS` row against the `CUENTAS` (AM Intelligence) index (`match = cuentas[v6NormAccount_(r.Cuenta)]`) and evaluates, in strict priority order: `OWNER REQUIRED` (own-row `Sin dueno`/house account, unchanged) -> **`AM CONTEXT REQUIRED` if there is no `CUENTAS` match at all** (canonical-architecture gate: a NOVA-only candidate cannot advance without AM Intelligence) -> `OWNER REQUIRED` (CUENTAS match Bucket `1. SIN DUENO` / house account) -> `FALSE POSITIVE` (CUENTAS `Falso positivo`) -> `COLLECTIONS` (CUENTAS `Solo cobranza`) -> `AM ACTIVITY REVIEW REQUIRED` (CUENTAS bucket is one of the "activity exists but didn't convert" buckets `6/7/8`) -> `AM ACTIVITY REVIEW REQUIRED` (bucket says "no management" but `Tipo gestion` says `COMERCIAL` — contradiction) -> no reason (`DETECTED`, only reachable when a `CUENTAS` match exists and confirms genuine absence of management).
   - Every Retention opportunity row also now carries 4 non-decisional evidence fields: `amActivityBucket`, `amActivityTipoGestion`, `amActivityUltimoChatter`, `amActivityAutorChatter` (all sourced from the `CUENTAS` match, empty string if there is no match). These are informational only; `v6WriteOpportunities_` (`MarketingV6ReportIngestion.gs:169`, unchanged) only writes whatever columns already exist as headers in `MKT_OPPORTUNITIES`, so these fields are silently ignored until/unless that sheet's header row is extended — no risk of breaking the existing write path.
 - Unchanged: `v6BuildQnbOpportunities_`, `v6BuildReactivationOpportunities_`, `v6BuildCrossSellOpportunities_`, `v6BuildNurtureOpportunities_` — same code, same call signatures, same suppression vocabulary as before this branch.
 
@@ -31,7 +41,7 @@ All line references are to `backend/apps-script-v6/` in this repo, as of this br
 
 - Already existed: `v6WriteOpportunities_` (unchanged), `v6OpportunityMetrics_` (unchanged).
 - **Changed:** `v6RefreshOpportunitiesFromReports_()` — `MarketingV6ReportIngestion.gs:194`. Now also builds `cuentas = v6CuentasIndex_()` and threads it into `v6BuildRetentionOpportunities_(nowIso, ficha, cuentas)`. The other four `v6Build*Opportunities_` calls are untouched (same arguments as before).
-- **Added:** join-coverage metric. `v6RetentionCuentasJoinCoverage_(retentionRows, cuentas)` — `MarketingV6ReportIngestion.gs:188` — computes the fraction of Retention rows that found a match in `CUENTAS` (0 when there are no Retention rows, to avoid divide-by-zero). Surfaced as `retentionCuentasJoinCoverage` in the return value of `v6RefreshOpportunitiesFromReports_`. This is an observability signal only; it never gates or suppresses anything (an unmatched row still resolves to `DETECTED` unless another rule fires — no fail-closed behavior on missing join data, see test 7 in `tests/v6-retention-am-activity.test.js`).
+- **Added:** join-coverage metric. `v6RetentionCuentasJoinCoverage_(retentionRows, cuentas)` — `MarketingV6ReportIngestion.gs:188` — computes the fraction of Retention rows that found a match in `CUENTAS` (0 when there are no Retention rows, to avoid divide-by-zero). Surfaced as `retentionCuentasJoinCoverage` in the return value of `v6RefreshOpportunitiesFromReports_`. This is an observability signal on top of the actual gate: an unmatched row is already held by `v6RetentionAmActivityReason_` (`SUPPRESSED` / `AM CONTEXT REQUIRED`, see Detect section and test 7 in `tests/v6-retention-am-activity.test.js`); low coverage tells engineering *why* a batch has many held rows, it does not itself decide anything.
 
 ## 6. Build scope / resolve recipients / govern (unchanged, reused as-is)
 

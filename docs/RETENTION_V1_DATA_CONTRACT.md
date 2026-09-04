@@ -1,5 +1,9 @@
 # Retention V1 Data Contract
 
+## Canonical architecture note
+
+`MIGRACION_CAIDAS` is a NOVA/Salesforce-derived export. `CUENTAS` is **AM Intelligence** output (ownership, bucket, Chatter/commercial activity, relationship status) — per the canonical flow `NOVA/SALESFORCE -> AM PLATFORM / AM INTELLIGENCE -> AURA -> MARKETING OS`, it is the required upstream gate for Retention detection, not optional enrichment. A `MIGRACION_CAIDAS` candidate with no `CUENTAS` match is held (`AM CONTEXT REQUIRED`), never advanced to `DETECTED` on NOVA-only fields.
+
 ## Report source fields actually used
 
 All report reads go through `v6ReportRows_(sheetName)` against the private `MKT_V6_REPORT_SOURCE_ID` spreadsheet (`backend/apps-script-v6/MarketingV6ReportIngestion.gs:1-14`). Headers are trimmed; row objects are keyed by the raw (trimmed) header text.
@@ -26,8 +30,8 @@ Indexed by `v6CuentasIndex_()` keyed on normalized `Cuenta` (same normalization 
 | `Falso positivo` | `v6Yes_` -> `FALSE POSITIVE` |
 | `Solo cobranza` | `v6Yes_` -> `COLLECTIONS` |
 | `Tipo gestion` | trimmed/uppercased; only meaningful in combination with certain Buckets (contradiction check) |
-| `Ultimo chatter` | copied as `amActivityUltimoChatter` (via `v6IsoDate_`) — evidence only |
-| `Autor chatter` | copied as `amActivityAutorChatter` — evidence only |
+| `Ultimo Chatter` | copied as `amActivityUltimoChatter` (via `v6IsoDate_`) — evidence only |
+| `Autor Chatter` | copied as `amActivityAutorChatter` — evidence only |
 
 This is the same `CUENTAS` sheet already read by `v6BuildReactivationOpportunities_` for the Reactivation family — no new sheet, no new credentials, no new spreadsheet ID.
 
@@ -48,14 +52,15 @@ Used only for `v6ServiceFromFicha_` (`FTL`/`LTL`/`Drayage` volume columns) to se
 ## Bucket -> decision mapping (Retention `reason`, evaluated in this exact order — first match wins)
 
 1. `MIGRACION_CAIDAS.Sin dueno` is truthy (`v6Yes_`) OR `MIGRACION_CAIDAS['Sales Rep']` (case-insensitive) equals `house account` -> `OWNER REQUIRED`.
-2. Else, if there is a `CUENTAS` match and (`Bucket === '1. SIN DUENO'` OR `CUENTAS['Sales Rep']` is `house account`) -> `OWNER REQUIRED`.
-3. Else, if `CUENTAS['Falso positivo']` is truthy -> `FALSE POSITIVE`.
-4. Else, if `CUENTAS['Solo cobranza']` is truthy -> `COLLECTIONS`.
-5. Else, if `CUENTAS.Bucket` is one of `['6. COTIZAN Y NO CIERRAN', '7. CASOS EXTREMOS', '8. GESTIONADAS SIN OPERAR']` -> `AM ACTIVITY REVIEW REQUIRED` (activity exists, didn't convert; needs AM review before automated retention outreach).
-6. Else, if `CUENTAS.Bucket` is one of `['2. OPERA SIN GESTION', '3. SIN GESTION CRITICO', '4. SIN GESTION ALTO', '5. SIN GESTION MEDIO']` AND `CUENTAS['Tipo gestion']` (trimmed, uppercased) `=== 'COMERCIAL'` -> `AM ACTIVITY REVIEW REQUIRED` (contradiction: bucket says "no management happening" but the last recorded management type says commercial activity did occur — ambiguous, do not auto-suppress silently and do not auto-detect silently; flag for review).
-7. Else (no `CUENTAS` match at all, OR a `CUENTAS` match whose bucket confirms genuine absence of management with no contradiction) -> no reason, `eligibilityStatus:'DETECTED'`.
+2. Else, if there is **no** `CUENTAS` (AM Intelligence) match at all -> `AM CONTEXT REQUIRED`. Canonical-architecture gate: a NOVA-only signal (`MIGRACION_CAIDAS`) must not advance without the corresponding AM Intelligence record; this is enforced before any bucket/field evaluation below, which all require a match to even run.
+3. Else (a `CUENTAS` match exists), if `Bucket === '1. SIN DUENO'` OR `CUENTAS['Sales Rep']` is `house account` -> `OWNER REQUIRED`.
+4. Else, if `CUENTAS['Falso positivo']` is truthy -> `FALSE POSITIVE`.
+5. Else, if `CUENTAS['Solo cobranza']` is truthy -> `COLLECTIONS`.
+6. Else, if `CUENTAS.Bucket` is one of `['6. COTIZAN Y NO CIERRAN', '7. CASOS EXTREMOS', '8. GESTIONADAS SIN OPERAR']` -> `AM ACTIVITY REVIEW REQUIRED` (activity exists, didn't convert; needs AM review before automated retention outreach).
+7. Else, if `CUENTAS.Bucket` is one of `['2. OPERA SIN GESTION', '3. SIN GESTION CRITICO', '4. SIN GESTION ALTO', '5. SIN GESTION MEDIO']` AND `CUENTAS['Tipo gestion']` (trimmed, uppercased) `=== 'COMERCIAL'` -> `AM ACTIVITY REVIEW REQUIRED` (contradiction: bucket says "no management happening" but the last recorded management type says commercial activity did occur — ambiguous, do not auto-suppress silently and do not auto-detect silently; flag for review).
+8. Else (a `CUENTAS` match exists and its bucket confirms genuine absence of management with no contradiction) -> no reason, `eligibilityStatus:'DETECTED'`.
 
-`eligibilityStatus = reason ? 'SUPPRESSED' : 'DETECTED'`. A missing `CUENTAS` match never fails closed — rule 7 explicitly allows `DETECTED` when there is nothing to join against (see `tests/v6-retention-am-activity.test.js`, test 7).
+`eligibilityStatus = reason ? 'SUPPRESSED' : 'DETECTED'`. A missing `CUENTAS` match **fails closed** (`AM CONTEXT REQUIRED`, rule 2) — `DETECTED` is only reachable through rule 8, which requires a `CUENTAS` match to exist. See `tests/v6-retention-am-activity.test.js`, test 7.
 
 After per-row rules, the shared `v6ApplyPrioritySuppression_` still applies cross-family suppression (`HIGHER PRIORITY SIGNAL`) — Retention (`priorityRank:2`) is superseded by QNB (`priorityRank:1`) for the same account, unchanged from before this branch.
 
@@ -65,10 +70,11 @@ After per-row rules, the shared `v6ApplyPrioritySuppression_` still applies cros
 |---|---|---|
 | `OWNER REQUIRED` | account has no assigned AM / is a house account | existing |
 | `HIGHER PRIORITY SIGNAL` | a higher-priority opportunity family (e.g. QNB) already claims this account | existing (cross-family) |
+| `AM CONTEXT REQUIRED` | no `CUENTAS` (AM Intelligence) record found for this account — a NOVA-only signal cannot advance per the canonical architecture | new (Retention V1 only) |
 | `FALSE POSITIVE` | AM has flagged this Retention signal as a false positive in `CUENTAS` | new (Retention V1; already existed for Reactivation) |
 | `COLLECTIONS` | account activity is collections-only, not commercial | new (Retention V1; already existed for Reactivation) |
 | `AM ACTIVITY REVIEW REQUIRED` | AM activity evidence is ambiguous or contradictory relative to the "no management" bucket — requires human AM review before automated retention outreach | new (Retention V1 only) |
-| *(empty string)* | no suppression; `eligibilityStatus:'DETECTED'` | existing |
+| *(empty string)* | no suppression; `eligibilityStatus:'DETECTED'` — only reachable when an AM Intelligence match exists | existing |
 
 ## AccountId strategy (unchanged — hash + crosswalk)
 
