@@ -43,9 +43,15 @@ All line references are to `backend/apps-script-v6/` in this repo, as of this br
 - **Changed:** `v6RefreshOpportunitiesFromReports_()` — `MarketingV6ReportIngestion.gs:194`. Now also builds `cuentas = v6CuentasIndex_()` and threads it into `v6BuildRetentionOpportunities_(nowIso, ficha, cuentas)`. The other four `v6Build*Opportunities_` calls are untouched (same arguments as before).
 - **Added:** join-coverage metric. `v6RetentionCuentasJoinCoverage_(retentionRows, cuentas)` — `MarketingV6ReportIngestion.gs:188` — computes the fraction of Retention rows that found a match in `CUENTAS` (0 when there are no Retention rows, to avoid divide-by-zero). Surfaced as `retentionCuentasJoinCoverage` in the return value of `v6RefreshOpportunitiesFromReports_`. This is an observability signal on top of the actual gate: an unmatched row is already held by `v6RetentionAmActivityReason_` (`SUPPRESSED` / `AM CONTEXT REQUIRED`, see Detect section and test 7 in `tests/v6-retention-am-activity.test.js`); low coverage tells engineering *why* a batch has many held rows, it does not itself decide anything.
 
-## 6. Build scope / resolve recipients / govern (unchanged, reused as-is)
+## 6. Build scope (new, automatic) / resolve recipients / govern (reused as-is)
 
-- Already existed, untouched by this branch: `v6ResolveRecipients_`, `v6AudienceStatus_`, `v6IngestAuthoritativeContacts_` (`MarketingV6ContactIngestion.gs`), `v6FrequencyStatus_` / `v6EvaluateCampaignPressure_` (`MarketingV6FrequencyControl.gs`), `MKT_EXCLUSIONS` / `MKT_SCOPE_ACCOUNTS` / `MKT_CAMPAIGN_SCOPES` / `MKT_AUDIENCES` contracts (see `backend/apps-script-v6/README_INSTALL_V6.md`). Retention V1 does not modify any of these; it only extends `MKT_EXCLUSIONS` writes via the new response-event path below (same table, same upsert helper, same schema).
+- **Added (AURA Retention Bridge):** `backend/apps-script-v6/MarketingV6AuraBridge.gs`. Before this, nothing in the public source pack populated `MKT_CAMPAIGN_SCOPES`/`MKT_SCOPE_ACCOUNTS` for any opportunity family -- those tables were only ever written by the private, out-of-pack `createRequest`/`createCampaign` adapter calls the frontend (`campaign-scope-bridge-v6.js`) makes. `v6AuraAutoBuildRetentionScopes_` closes this for Retention only: it reads DETECTED Retention rows from `MKT_OPPORTUNITIES`, groups them by `(amOwner, service)` (Retention rows never carry a window/reasonCategory, matching today's frontend grouping), computes a `scopeId` with `v6AuraScopeId_`/`v6AuraSlug_` -- a byte-for-byte port of the frontend's `scopeId()`/`slug()` in `assets/js/lifecycle-modules-v6.js`, so an ID computed here and one computed in the browser for the same group always match -- and calls `v6AuraEnsureCampaignScope_` per group, which idempotently upserts one `MKT_CAMPAIGN_SCOPES` row and one `MKT_SCOPE_ACCOUNTS` row per eligible account (`campaignId` left blank; assigning one remains the private backend's job, see the Data Contract doc). `v6AuraEvaluateRetention_` calls this automatically after every detection pass, so the existing 6-hour trigger now performs detect -> suppress -> build scope for Retention end-to-end (see section 5b below). Never touches QNB/Reactivation/Cross-Sell/Nurture rows or scopes (filtered by `opportunityType`, and a Retention `scopeId` always carries the `-RETENTION-` segment so it can never collide with another family's scope row).
+- **Added (AURA Retention Bridge):** `v6AuraStatus_(payload)` -- read-only, safe-aggregate consolidated status for one `accountId` (pipeline stage, latest Retention signal, audience status if a campaign is already linked). Never returns accountName/email/phone.
+- Already existed, unchanged: `v6ResolveRecipients_`, `v6AudienceStatus_`, `v6IngestAuthoritativeContacts_` (`MarketingV6ContactIngestion.gs`), `v6FrequencyStatus_` / `v6EvaluateCampaignPressure_` (`MarketingV6FrequencyControl.gs`), `MKT_EXCLUSIONS` / `MKT_AUDIENCES` contracts (see `backend/apps-script-v6/README_INSTALL_V6.md`). Retention V1 does not modify these; it only extends `MKT_EXCLUSIONS` writes via the response-event path below (same table, same upsert helper, same schema).
+
+## 5b. Automatic scheduling (changed)
+
+- **Changed:** `v6ScheduledOpportunityRefresh_` (`MarketingV6ReportIngestion.gs`) now calls `v6AuraEvaluateRetention_()` (AURA Retention Bridge) instead of calling `v6RefreshOpportunitiesFromReports_()` directly. `v6AuraEvaluateRetention_` runs that exact same unified refresh internally -- QNB/Retention/Reactivation/Cross-Sell/Nurture detection logic is byte-for-byte unchanged -- and then additionally runs `v6AuraAutoBuildRetentionScopes_()` for Retention only. The already-installed, already-idempotent trigger (`v6InstallOpportunityRefreshTrigger_`, unchanged, still dedupes by handler name before creating) therefore now performs Retention's detect -> suppress -> build-scope steps automatically every 6 hours, with **no second trigger added** and no manual account list at any point. QNB/Reactivation/Cross-Sell/Nurture scheduling behavior is unaffected.
 
 ## 7. Queue / execute (unchanged)
 
@@ -59,12 +65,16 @@ All line references are to `backend/apps-script-v6/` in this repo, as of this br
     - `BOUNCE` -> **added** `v6MarkContactEmailInvalid_` (`MarketingV6ResponseEvents.gs:1`), which reads the existing `MKT_CONTACTS_SECURE` row (if any), merges in `emailStatus:'INVALID'`, and upserts by `contactId` — following the same read-merge-upsert pattern already used by `v6IngestAuthoritativeContacts_` (`MarketingV6ContactIngestion.gs:38`). No pipeline write. No other contact fields are touched.
     - `UNSUBSCRIBE` -> **added** `v6RegisterExclusion_` (`MarketingV6ResponseEvents.gs:9`), which upserts an `ACTIVE` row into the already-existing `MKT_EXCLUSIONS` table, keyed by a deterministic `exclusionId` (`'UNSUB:'+contactId` or `'UNSUB:'+accountId`) so repeated unsubscribe events are idempotent. No pipeline write.
     - `CLICK`, `OTHER`, and any unrecognized `eventType` -> no write at all, `action:'IGNORED'`.
-  - Registered in the router: `routeMarketingV6_` — `MarketingV6RouterExtension.gs:1` — new entry `v6ClassifyResponseEvent`.
-  - **Explicit external gap:** there is no webhook/HTTP endpoint in this repo that receives raw provider response/engagement events (email replies, RFQ webhooks, bounce/unsubscribe callbacks) and calls `v6ClassifyResponseEvent_`. That ingress does not exist yet anywhere in the codebase we have access to. See `RETENTION_V1_RUNBOOK.md` for the exact gap and BLOCKED status.
+  - **Added (AURA Retention Bridge event vocabulary):** `MKT_V6_RESPONSE_EVENT_ALIASES_` maps the plain names `QUOTE`/`LOAD` onto `QUOTE_SIGNAL`/`LOAD_SIGNAL` (case-insensitive) so an external caller (AM Platform, mail/CRM webhook) can send either vocabulary without changing stored pipeline semantics. `LOAD_SIGNAL`/`LOAD` additionally accepts an optional `amount` on the raw event, passed straight through as `attributedRevenue` — never fabricated, only set when the source system explicitly supplies it on the real-time event; the authoritative batch cross-check against NOVA's own `Monto` field remains `v6IngestCommercialOutcomes_` (section 10).
+  - Registered in the router: `routeMarketingV6_` — `MarketingV6RouterExtension.gs:1` — entry `v6ClassifyResponseEvent`.
+  - **Explicit external gap (unchanged by this pass):** there is no webhook/HTTP endpoint in this repo that receives raw provider response/engagement events (email replies, RFQ webhooks, bounce/unsubscribe callbacks) and calls `v6ClassifyResponseEvent_`. That ingress does not exist yet anywhere in the codebase we have access to; connecting one is a deployment-time integration decision, not a code gap in this function. See `docs/AURA_DEPLOYMENT.md`.
 
-## 9. Account stop / AM handoff (unchanged, reused)
+## 9. Account stop / AM handoff (explicit named routes added, mechanism reused)
 
 - Already existed, unchanged: `v6UpsertPipelineStage_` already sets `nextAction:'STOP ACCOUNT AUTOMATION / V5.5 HANDOFF'` and `handoffStatus:'PENDING'` whenever a stage transition lands on `RESPONDED` (`MarketingV6Pipeline.gs:5`). Retention V1's `REPLY` classification reuses this exact mechanism — it is the same "stop this account, hand off to AM" behavior every other opportunity family already gets through the pipeline, not a new stop/handoff mechanism.
+- **Added (AURA Retention Bridge):** `v6AuraCreateAccountStop_(payload)` — explicit, named entry point (`MarketingV6AuraBridge.gs`) for stopping one account outside the REPLY/RFQ response path (e.g. a DNC or governance-driven stop). Delegates to `v6UpsertPipelineStage_({..., hardSuppression:true, nextAction:'ACCOUNT STOP: <reason>', handoffStatus:'PENDING'})`. If the account has already advanced past the rank `CLOSED / SUPPRESSED` would occupy (e.g. already `QUOTED`), the existing `preventDowngrade` guard in `v6UpsertPipelineStage_` keeps the more advanced commercial stage intact — a Marketing stop must never erase evidence that a Quote/Load already happened — while `nextAction`/`handoffStatus` are still updated, so the stop/handoff intent is never lost.
+- **Added (AURA Retention Bridge):** `v6AuraCreateAmHandoff_(payload)` — explicit, named entry point for creating/confirming an AM handoff without forcing any stage transition. Reads the account's existing pipeline row first and passes its `currentStage` straight through to `v6UpsertPipelineStage_`, so a handoff call never resets an already-advanced stage back to `OPPORTUNITY DETECTED` (the default `v6StageFromSignal_` would fall back to if no `currentStage` were supplied). Refuses (throws) if there is no existing pipeline record for the account, rather than fabricating one.
+- Both registered in the router: `v6AuraCreateAccountStop`, `v6AuraCreateAmHandoff`.
 
 ## 10. Attribution (new)
 
@@ -75,17 +85,25 @@ All line references are to `backend/apps-script-v6/` in this repo, as of this br
   - Registered in the router: `v6IngestCommercialOutcomes` — `MarketingV6RouterExtension.gs:1`.
   - **Extended (not replaced):** `v6PipelineSummary_()` — `MarketingV6Pipeline.gs:15` — now also returns `byCurrentStageRevenue`, `byOpportunityTypeRevenue`, `byServiceRevenue`, `byAmOwnerRevenue`, summing `Number(r.attributedRevenue||0)` only where that field is present and numeric, using the exact same grouping keys as the existing count aggregates (`byCurrentStage`, `byOpportunityType`, `byService`, `byAmOwner`), computed in the same single pass over `MKT_ACCOUNT_PIPELINE`.
 
+## 11. Evaluate / query status (AURA Retention Bridge entry points)
+
+- **Added:** `v6AuraEvaluateRetention_()` — the single entry point the scheduler now calls (section 5b). Runs detection + suppression + automatic scope build, returns Retention-scoped safe aggregates only (`detected`, `suppressed`, `reviewRequired`, `byReason`, `retentionCuentasJoinCoverage`, `scopesBuilt`, `accountsScoped`). Registered as `v6AuraEvaluateRetention`.
+- **Added:** `v6AuraStatus_({accountId})` — read-only consolidated status per account (section 6). Registered as `v6AuraStatus`.
+
 ## Summary of what is new vs reused
 
-| Stage | Reused as-is | Added in Retention V1 |
+| Stage | Reused as-is | Added in Retention V1 / AURA Bridge |
 |---|---|---|
 | Ingest | `v6ReportRows_`, `v6FichaIndex_` | `v6CuentasIndex_`, `v6IngestCommercialOutcomes_` read of `LOADS_ORIGEN_LQ` |
 | Normalize | all `v6*_` primitives | none |
 | Detect | build-function pattern, `v6ServiceFromFicha_` | `v6RetentionAmActivityReason_`, 4 evidence fields, `cuentas` param |
 | Prioritize | `v6ApplyPrioritySuppression_` | none |
 | Suppress/write | `v6WriteOpportunities_`, `v6OpportunityMetrics_` | `v6RetentionCuentasJoinCoverage_` metric |
-| Scope/recipients/govern | full V6 contact/recipient/frequency stack | none |
+| Schedule | `v6InstallOpportunityRefreshTrigger_` (still the only trigger, unchanged) | `v6ScheduledOpportunityRefresh_` now calls `v6AuraEvaluateRetention_` |
+| Evaluate/status | none | `v6AuraEvaluateRetention_`, `v6AuraStatus_` |
+| Build scope | none (private backend only, out of pack) | `v6AuraEnsureCampaignScope_`, `v6AuraAutoBuildRetentionScopes_` (Retention only) |
+| Recipients/govern | full V6 contact/recipient/frequency stack | none |
 | Queue/execute | `MarketingV6ExecutionEngine.gs`, `MarketingV6DriveArchive.gs` | none |
-| Capture response | `v6UpsertPipelineStage_` | `v6ClassifyResponseEvent_`, `v6MarkContactEmailInvalid_`, `v6RegisterExclusion_` |
-| Stop/handoff | `RESPONDED` -> stop/handoff in `v6UpsertPipelineStage_` | none (reused via REPLY classification) |
-| Attribution | `v6PipelineTransition_`, `v6PipelineAdvanced_` | `v6IngestCommercialOutcomes_`, revenue aggregates in `v6PipelineSummary_` |
+| Capture response | `v6UpsertPipelineStage_` | `v6ClassifyResponseEvent_` (+ `QUOTE`/`LOAD` aliases), `v6MarkContactEmailInvalid_`, `v6RegisterExclusion_` |
+| Stop/handoff | `RESPONDED` -> stop/handoff in `v6UpsertPipelineStage_` | `v6AuraCreateAccountStop_`, `v6AuraCreateAmHandoff_` (explicit named routes over the same mechanism) |
+| Attribution | `v6PipelineTransition_`, `v6PipelineAdvanced_` | `v6IngestCommercialOutcomes_`, revenue aggregates in `v6PipelineSummary_`, optional real-time `amount` on `LOAD` events |

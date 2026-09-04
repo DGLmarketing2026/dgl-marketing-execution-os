@@ -80,14 +80,48 @@
           "guarantee": "attribution ambiguity is surfaced explicitly instead of silently reassigning campaign credit"
         }
       ]
+    },
+    {
+      "file": "tests/v6-aura-bridge.test.js",
+      "cases": [
+        {
+          "name": "v6AuraEvaluateRetention_ aggregates DETECTED/SUPPRESSED/reviewRequired by reason and automatically builds campaign scope only for DETECTED accounts",
+          "guarantee": "detect -> suppress -> build scope runs as one automatic, no-manual-list unit; suppressed/review-required accounts are never scoped"
+        },
+        {
+          "name": "v6AuraAutoBuildRetentionScopes_ groups by (amOwner, service), excludes suppressed rows and other opportunity families",
+          "guarantee": "duplicate prevention + family isolation: a Retention scope build can never include a non-Retention account or a suppressed Retention account"
+        },
+        {
+          "name": "v6AuraStatus_ returns safe consolidated status (pipeline stage, Retention signal, audience status once a campaign is linked); no PII fields",
+          "guarantee": "AURA never surfaces accountName/email/contact PII through a status query, only aggregate/status fields"
+        },
+        {
+          "name": "v6AuraEnsureCampaignScope_ is idempotent: re-running with an added account merges into the existing scope row, never duplicates it",
+          "guarantee": "duplicate prevention: repeated scheduler runs against the same scope never create parallel scope/scope-account rows"
+        },
+        {
+          "name": "v6AuraCreateAccountStop_ closes a fresh account to CLOSED / SUPPRESSED; an account already at QUOTED keeps that stage (preventDowngrade) while nextAction/handoffStatus still update",
+          "guarantee": "account stop never erases evidence that a Quote/Load already happened, while still recording the stop/handoff intent"
+        },
+        {
+          "name": "v6AuraCreateAmHandoff_ preserves the account's current pipeline stage and refuses to run with no existing pipeline record",
+          "guarantee": "AM handoff never resets an already-advanced stage back to OPPORTUNITY DETECTED and never fabricates a pipeline context that doesn't exist"
+        },
+        {
+          "name": "v6ClassifyResponseEvent_ accepts QUOTE/LOAD as aliases of QUOTE_SIGNAL/LOAD_SIGNAL (case-insensitive) and only sets attributedRevenue on LOAD when the raw event explicitly supplies an amount",
+          "guarantee": "the exact event vocabulary requested (REPLY, RFQ, BOUNCE, UNSUBSCRIBE, CLICK, QUOTE, LOAD) is accepted without a second, divergent code path, and revenue is never fabricated on a real-time event"
+        }
+      ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full existing suite re-run after this branch's changes.",
-    "passed": 13,
+    "description": "Full existing suite re-run after every change in this branch, most recently after the AURA Retention Bridge pass.",
+    "totalFiles": 21,
+    "passed": 14,
     "failed": 7,
     "failedTestsAreProvenPreExisting": true,
-    "verification": "git stash of all Retention V1 changes + re-run reproduced the identical 7 failures on main, confirming they are unrelated (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions) and were not introduced by this branch.",
+    "verification": "git stash of all Retention V1 changes + re-run reproduced the identical 7 failures on main before any change in this branch, confirming they are unrelated (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions). Re-verified after the AURA Retention Bridge pass: same 7 files, same failure reason (e.g. v6-report-ingestion.test.js still fails on the same stale 'marketing-opportunity-engine-v6.js?v=20260827-1' assertion), pass/fail counts moved only by the 4 new Retention/AURA test files added across this branch (13 -> 14 passed after this pass's 1 new file; 7 fail is unchanged throughout).",
     "failedFiles": [
       "tests/v55-audience-bridge.test.js",
       "tests/v55-backend-adapter.test.js",

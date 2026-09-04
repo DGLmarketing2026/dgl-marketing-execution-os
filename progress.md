@@ -2,6 +2,32 @@
 
 Branch: `retention/v1-am-activity-join` (pushed to `origin`).
 
+## Pass 3 — AURA Retention Bridge (unblock real campaign execution)
+
+Goal: remove the remaining blockers to running a real Retention campaign, without a PR/merge to `main`, per the canonical architecture already corrected in Pass 2.
+
+1. **`.claude/agents/aura.md`** (this workspace, not the GitHub repo) — formal lead-agent identity for AURA (Account Understanding, Retention & Automation), encoding the canonical architecture and hard rules; coordinates the 6 existing Retention subagents at the top level (subagents cannot invoke each other).
+2. **`backend/apps-script-v6/MarketingV6AuraBridge.gs`** (new) — the named contract surface AURA calls, every function delegating to an already-existing engine:
+   - `v6AuraEvaluateRetention_()` — runs the unified refresh + automatic scope build for Retention; this is now what the scheduler calls (see point 5).
+   - `v6AuraStatus_({accountId})` — read-only consolidated status, safe aggregates only.
+   - `v6AuraEnsureCampaignScope_(payload)` / `v6AuraAutoBuildRetentionScopes_()` — closes a real gap: nothing in the public source pack previously populated `MKT_CAMPAIGN_SCOPES`/`MKT_SCOPE_ACCOUNTS` for any family. Groups DETECTED Retention accounts by `(amOwner, service)` using a byte-for-byte port of the frontend's `scopeId()`/`slug()`, and idempotently upserts scope + scope-accounts rows. Never touches other families' scopes (filtered by `opportunityType`, and a Retention `scopeId` always carries `-RETENTION-`).
+   - `v6AuraCreateAccountStop_(payload)` / `v6AuraCreateAmHandoff_(payload)` — explicit named routes over the existing `v6UpsertPipelineStage_` machine, with care taken not to downgrade an already-advanced commercial stage (stop) and not to reset stage on a handoff call (handoff reads and preserves `currentStage` first).
+3. **`MarketingV6ResponseEvents.gs`** — added `QUOTE`/`LOAD` as accepted event-type aliases for `QUOTE_SIGNAL`/`LOAD_SIGNAL` (matching the exact vocabulary requested), plus optional real-time `attributedRevenue` passthrough on `LOAD` events when the source system explicitly supplies an `amount` (never fabricated).
+4. **`MarketingV6ReportIngestion.gs`** — `v6ScheduledOpportunityRefresh_` (the function the existing, already-idempotent 6-hour trigger calls) now calls `v6AuraEvaluateRetention_()` instead of `v6RefreshOpportunitiesFromReports_()` directly. Same underlying detection for every family, unchanged; Retention additionally gets automatic scope build on every scheduled run. No second trigger was added.
+5. **`MarketingV6RouterExtension.gs`** — registered `v6AuraEvaluateRetention`, `v6AuraStatus`, `v6AuraEnsureCampaignScope`, `v6AuraCreateAccountStop`, `v6AuraCreateAmHandoff`.
+6. **`tests/v6-aura-bridge.test.js`** (new, 7 cases) — see `tests.json`.
+7. **`docs/AURA_DEPLOYMENT.md`** (new) — exact one-time deployment checklist. `docs/RETENTION_V1_RUNBOOK.md` and `docs/RETENTION_V1_ARCHITECTURE.md` / `docs/RETENTION_V1_DATA_CONTRACT.md` updated to reference and describe the bridge.
+
+### What this pass deliberately does NOT do
+
+- Does not build a webhook/HTTP ingress for real response events (Gmail reply detection, Salesforce outbound messages, ESP callbacks) — that is a DGL integration decision naming a specific external system, not something this codebase can invent without fabricating one. Documented explicitly in `docs/AURA_DEPLOYMENT.md` step 4.
+- Does not assign `campaignId` on scope rows — that remains the private, out-of-pack backend's `createRequest`/`createCampaign` responsibility.
+- Does not touch QNB/Reactivation/Cross-Sell/Nurture build functions, `v6AggregateOpportunities_`, or any shared frequency/exclusion/recipient logic.
+
+### Final status: `AURA_BLOCKED_ONLY_BY_DEPLOYMENT`
+
+All code for this pass is written and unit-tested. The only remaining blockers are the three named in `docs/RETENTION_V1_RUNBOOK.md` / `docs/AURA_DEPLOYMENT.md`: (1) no credentials/network path to the private Apps Script project from this environment, (2) no real response-event source wired yet (a DGL integration choice), (3) `MKT_ACCOUNTS`/`MKT_CONTACTS_SECURE` not yet populated from a real Salesforce extract. None of the three are missing code.
+
 ## Architecture correction (post-initial-implementation)
 
 The initial implementation of the `CUENTAS` join let a `MIGRACION_CAIDAS` (NOVA) candidate with no `CUENTAS` (AM Intelligence) match resolve to `DETECTED` by default. Per the canonical architecture (`NOVA/SALESFORCE -> AM PLATFORM / AM INTELLIGENCE -> AURA -> MARKETING OS -> ...`, now recorded in the workspace `CLAUDE.md`), that is a NOVA -> AURA path that skips AM, which is explicitly prohibited. Fixed: a missing `CUENTAS` match now resolves to `SUPPRESSED` / `AM CONTEXT REQUIRED` (`v6RetentionAmActivityReason_`, `MarketingV6ReportIngestion.gs`). Tests 1 and 7 in `tests/v6-retention-am-activity.test.js`, and the corresponding rows in `docs/RETENTION_V1_DATA_CONTRACT.md` / `docs/RETENTION_V1_ARCHITECTURE.md`, were updated to match. Also fixed in the same pass: the AM-activity evidence fields were reading `'Ultimo chatter'`/`'Autor chatter'` (lowercase) against a report header that is actually `'Ultimo Chatter'`/`'Autor Chatter'` (capitalized), so both were always empty — corrected to the real header casing.
