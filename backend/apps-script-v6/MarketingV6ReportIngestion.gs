@@ -100,7 +100,7 @@ function v6BuildRetentionOpportunities_(nowIso,ficha,cuentas){
       sourceReport:'MIGRACION_CAIDAS',sourceRecordId:v6Text_(r['Tier origen'])+'>'+v6Text_(r['Tier destino']),priorityRank:2,
       eligibilityStatus:reason?'SUPPRESSED':'DETECTED',suppressionReason:reason,campaignId:'',detectedAt:nowIso,updatedAt:nowIso,
       amActivityBucket:match?v6Text_(match.Bucket):'',amActivityTipoGestion:match?v6Text_(match['Tipo gestion']):'',
-      amActivityUltimoChatter:match?v6IsoDate_(match['Ultimo chatter']):'',amActivityAutorChatter:match?v6Text_(match['Autor chatter']):''
+      amActivityUltimoChatter:match?v6IsoDate_(match['Ultimo Chatter']):'',amActivityAutorChatter:match?v6Text_(match['Autor Chatter']):''
     };
   });
 }
