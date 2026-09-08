@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>DGL Marketing OS · Campaign Experience V1</title>
-<meta name="description" content="DGL Marketing OS: Existing Account Growth + New Business Acquisition, governed execution and closed-loop attribution." />
+<title>DGL Marketing OS · Acquisition Automation V2</title>
+<meta name="description" content="DGL Marketing OS: Existing Account Growth + automated New Business Acquisition, governed execution and closed-loop attribution." />
 <script>
 (function(){"use strict";var ready=false,p=[];function f(){var b=document.getElementById("bootError"),r=document.getElementById("bootReload");if(!b||!p.length)return;b.style.display="block";b.textContent=p.join("\n");if(r)r.style.display="inline-block"}function x(m){if(p.indexOf(m)<0)p.push(m);f()}window.__dglMarkReady=function(){ready=true;p=[];f()};window.__dglBootFail=x;window.addEventListener("error",function(e){if(e&&e.target&&(e.target.tagName==="SCRIPT"||e.target.tagName==="LINK"))x("No se pudo cargar: "+(e.target.src||e.target.href||"recurso desconocido"));else if(e&&e.message&&!ready)x("Error de JavaScript: "+e.message)},true);document.addEventListener("DOMContentLoaded",f);document.addEventListener("click",function(e){if(e.target&&e.target.id==="bootReload")location.reload()});setTimeout(function(){if(!ready)x("La plataforma tarda más de lo esperado en iniciar.")},8000)})();
 </script>
@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="assets/css/campaign-v5.css?v=20260901-66" />
 <link rel="stylesheet" href="assets/css/lifecycle-v6.css?v=20260901-66" />
 <link rel="stylesheet" href="assets/css/acquisition-experience-v1.css?v=20260908-acq1" />
+<link rel="stylesheet" href="assets/css/acquisition-automation-v2.css?v=20260908-acq2" />
 <script src="https://unpkg.com/lucide@0.294.0/dist/umd/lucide.js" crossorigin="anonymous"></script>
 </head>
 <body>
@@ -35,6 +36,7 @@
 <script src="assets/js/marketing-playbooks-v55.js?v=20260901-66"></script>
 
 <script src="assets/js/marketing-backend-adapter-v55.js?v=20260901-66"></script>
+<script src="assets/js/acquisition-backend-adapter-v1.js?v=20260908-acq2"></script>
 <script src="assets/js/marketing-opportunity-engine-v6.js?v=20260901-66"></script>
 <script src="assets/js/marketing-frequency-control-v6.js?v=20260901-66"></script>
 <script src="assets/js/creative-orchestration-v6.js?v=20260901-66"></script>
@@ -51,8 +53,9 @@
 <script src="assets/js/agent-control-v1.js?v=20260901-66"></script>
 <script src="assets/js/system-integrity-v6.js?v=20260901-66"></script>
 
-<!-- New Business Acquisition extension MUST load after canonical renderers so it can own acquisition routes. -->
 <script src="assets/js/acquisition-experience-v1.js?v=20260908-acq1"></script>
+<!-- Automation V2 overrides acquisition renderers; V1 remains as a safe fallback. -->
+<script src="assets/js/acquisition-automation-v2.js?v=20260908-acq2"></script>
 
 <script src="assets/js/interactions.js?v=20260901-66"></script>
 <script src="assets/js/app.js?v=20260908-acq1"></script>

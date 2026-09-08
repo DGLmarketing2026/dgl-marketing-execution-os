@@ -1,0 +1,20 @@
+const fs=require('fs'),path=require('path'),root=path.resolve(__dirname,'..');
+const read=p=>fs.readFileSync(path.join(root,p),'utf8');
+let failures=[];const ok=(cond,msg)=>{if(!cond)failures.push(msg)};
+const idx=read('index.html'),ui=read('assets/js/acquisition-automation-v2.js'),adapter=read('assets/js/acquisition-backend-adapter-v1.js'),engine=read('backend/apps-script-v6/MarketingV6AcquisitionEngine.gs'),router=read('backend/apps-script-v6/MarketingV6RouterExtension.gs'),pub=read('backend/apps-script-acquisition-public/AcquisitionPublicRuntime.gs');
+ok(idx.includes('acquisition-backend-adapter-v1.js'),'index missing acquisition backend adapter');
+ok(idx.includes('acquisition-automation-v2.js'),'index missing automation V2');
+ok(ui.includes('Normal operation does not require manual landing creation'),'UI does not declare automation-first landing policy');
+ok(!ui.includes('Nueva Landing'),'V2 reintroduces manual landing as primary control');
+ok(engine.includes("everyHours(1)"),'hourly acquisition trigger missing');
+ok(engine.includes("Brazil")&&engine.includes("pt-BR"),'Brazil pt-BR rule missing');
+ok(engine.includes("MKT_ACQ_LEADS")&&engine.includes("MKT_ACQ_LANDING_PAGES"),'private acquisition tables missing');
+ok(engine.includes("EXISTING_CONTACT"),'dedup against existing contacts missing');
+ok(engine.includes("ACQ_SALESFORCE_LEAD_ENDPOINT"),'Salesforce routing connector missing');
+ok(router.includes('v6AcqStatus')&&router.includes('v6AcqRun')&&router.includes('v6AcqIngestSignal'),'router acquisition routes missing');
+ok(adapter.includes('v6AcqLandingPages')&&adapter.includes('v6AcqRouteLeads'),'frontend adapter routes missing');
+ok(pub.includes('MKT_DATA_HUB_ID')&&pub.includes('doPost'),'public lead intake runtime missing');
+ok(pub.includes('website')&&pub.includes('LockService'),'public intake anti-spam/lock controls missing');
+ok(!engine.includes('DGLmarketing2026')&&!pub.includes('DGLmarketing2026'),'backend should not depend on GitHub for business data');
+if(failures.length){console.error('FAIL',failures);process.exit(1)}
+console.log('PASS acquisition-automation-v2-static',14,'checks');
