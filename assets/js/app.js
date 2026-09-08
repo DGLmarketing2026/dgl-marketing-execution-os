@@ -1,5 +1,10 @@
 /**
- * DGL Marketing Campaign OS — App Shell / Router V5
+ * DGL Marketing OS — App Shell / Router
+ * Campaign Experience V1
+ *
+ * Canonical separation:
+ * 1) Existing Account Growth: NOVA/Salesforce -> AM Intelligence -> AURA -> Marketing OS
+ * 2) New Business Acquisition: Traffic/Prospecting -> Channels -> Lead Capture -> Salesforce/New Business
  */
 (function (global) {
   "use strict";
@@ -12,21 +17,42 @@
       ]
     },
     {
-      label: "CAMPAIGNS",
+      label: "EXISTING ACCOUNT GROWTH",
       items: [
-        { id: "campaign-opportunities", label: "Campaign Opportunities", icon: "radar", group: "Campaigns" },
-        { id: "campaign-execution", label: "Campaign Control", icon: "megaphone", group: "Campaigns" },
-        { id: "campaign-studio", label: "Campaign Studio", icon: "palette", group: "Campaigns" },
-        { id: "reactivation", label: "Reactivation Campaigns", icon: "refresh-cw", group: "Campaigns" },
-        { id: "quoted-not-booked", label: "Quoted Not Booked", icon: "file-warning", group: "Campaigns" },
-        { id: "growth", label: "Cross-Sell Campaigns", icon: "shuffle", group: "Campaigns" },
-        { id: "retention", label: "Retention / Nurture", icon: "shield-check", group: "Campaigns" }
+        { id: "campaign-opportunities", label: "Campaign Opportunities", icon: "radar", group: "Existing Account Growth" },
+        { id: "retention", label: "Retention / Nurture", icon: "shield-check", group: "Existing Account Growth" },
+        { id: "reactivation", label: "Reactivation Campaigns", icon: "refresh-cw", group: "Existing Account Growth" },
+        { id: "quoted-not-booked", label: "Quoted Not Booked", icon: "file-warning", group: "Existing Account Growth" },
+        { id: "growth", label: "Cross-Sell Campaigns", icon: "shuffle", group: "Existing Account Growth" }
       ]
     },
     {
-      label: "FUTURE ARCHITECTURE",
+      label: "CAMPAIGN OPERATIONS",
       items: [
-        { id: "agent-control", label: "Agent Control · Future", icon: "bot", group: "Future Architecture" }
+        { id: "campaign-execution", label: "Campaign Control", icon: "megaphone", group: "Campaign Operations" },
+        { id: "campaign-studio", label: "Campaign Studio", icon: "palette", group: "Campaign Operations" },
+        { id: "email-marketing", label: "Customer Email Campaigns", icon: "mail", group: "Campaign Operations" }
+      ]
+    },
+    {
+      label: "NEW BUSINESS ACQUISITION",
+      items: [
+        { id: "acquisition-command-center", label: "Acquisition Command Center", icon: "goal", group: "New Business Acquisition" },
+        { id: "landing-pages", label: "Landing Pages", icon: "panels-top-left", group: "New Business Acquisition" },
+        { id: "channel-orchestration", label: "Channel Orchestration", icon: "radio", group: "New Business Acquisition" },
+        { id: "paid-media", label: "Paid Media", icon: "badge-dollar-sign", group: "New Business Acquisition" },
+        { id: "linkedin-acquisition", label: "LinkedIn Acquisition", icon: "linkedin", group: "New Business Acquisition" },
+        { id: "outbound-acquisition", label: "Outbound / Lead Nurture", icon: "send", group: "New Business Acquisition" },
+        { id: "lead-capture", label: "Lead Capture", icon: "inbox", group: "New Business Acquisition" },
+        { id: "lead-routing", label: "Lead Routing", icon: "route", group: "New Business Acquisition" },
+        { id: "acquisition-attribution", label: "Acquisition Attribution", icon: "chart-no-axes-combined", group: "New Business Acquisition" },
+        { id: "automation-playbooks", label: "Acquisition Journeys", icon: "workflow", group: "New Business Acquisition" }
+      ]
+    },
+    {
+      label: "CONTENT",
+      items: [
+        { id: "content-library", label: "Content & Asset Library", icon: "folder-open", group: "Content" }
       ]
     },
     {
@@ -36,15 +62,6 @@
         { id: "ftl-marketing", label: "FTL Campaigns", icon: "truck", group: "Campaigns by Service" },
         { id: "ltl-marketing", label: "LTL Campaigns", icon: "package-open", group: "Campaigns by Service" },
         { id: "drayage-marketing", label: "Drayage Campaigns", icon: "container", group: "Campaigns by Service" }
-      ]
-    },
-    {
-      label: "CHANNELS",
-      items: [
-        { id: "email-marketing", label: "Email Marketing", icon: "mail", group: "Channels" },
-        { id: "channel-orchestration", label: "Paid / Retargeting / LinkedIn", icon: "radio", group: "Channels" },
-        { id: "content-library", label: "Content & Landing Assets", icon: "folder-open", group: "Channels" },
-        { id: "automation-playbooks", label: "Automation Playbooks", icon: "workflow", group: "Channels" }
       ]
     },
     {
@@ -58,9 +75,15 @@
     {
       label: "ANALYTICS",
       items: [
-        { id: "campaign-attribution", label: "Campaign Revenue Attribution", icon: "circle-dollar-sign", group: "Analytics" },
+        { id: "campaign-attribution", label: "Existing Account Attribution", icon: "circle-dollar-sign", group: "Analytics" },
         { id: "analytics", label: "Marketing Analytics", icon: "bar-chart-3", group: "Analytics" },
         { id: "account-campaign-reports", label: "Account & Campaign Reports", icon: "file-bar-chart", group: "Analytics" }
+      ]
+    },
+    {
+      label: "FUTURE ARCHITECTURE",
+      items: [
+        { id: "agent-control", label: "AURA Control · Future", icon: "bot", group: "Future Architecture" }
       ]
     },
     {
@@ -98,10 +121,10 @@
       </div>
       <nav class="bottom-nav" id="bottomNav" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#0a0c1e;border-top:1px solid var(--border);padding:8px 6px;justify-content:space-around;z-index:140">
         <a href="#/command-center" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="layout-dashboard"></i>Home</a>
-        <a href="#/campaign-opportunities" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="radar"></i>Opportunities</a>
+        <a href="#/campaign-opportunities" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="radar"></i>Accounts</a>
         <a href="#/campaign-studio" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="palette"></i>Studio</a>
-        <a href="#/service-marketing" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="layers-3"></i>Services</a>
-        <a href="#/campaign-attribution" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="circle-dollar-sign"></i>Revenue</a>
+        <a href="#/acquisition-command-center" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="goal"></i>Leads</a>
+        <a href="#/landing-pages" class="nav-item" style="flex-direction:column;gap:2px;font-size:9.5px;padding:6px"><i data-lucide="panels-top-left"></i>Landing</a>
       </nav>
     `;
     document.getElementById("quickFab").style.display = "";
@@ -129,11 +152,11 @@
             });
           }
         } catch (err) {
-          console.error("DGL Marketing Campaign OS — error renderizando módulo '" + id + "':", err);
+          console.error("DGL Marketing OS — error renderizando módulo '" + id + "':", err);
           mainEl.innerHTML = window.DGL_UI.emptyState({
             icon: "alert-triangle",
             title: "No se pudo cargar este módulo",
-            text: "Ocurrió un error al renderizar '" + mod.label + "'. Revisa la consola del navegador (F12). " + (err && err.message ? err.message : "")
+            text: "Ocurrió un error al renderizar '" + mod.label + "'. " + (err && err.message ? err.message : "")
           });
         }
         window.DGL_UI.setActiveNav(id);
@@ -152,7 +175,7 @@
       if (window.lucide) window.lucide.createIcons();
       if (window.__dglMarkReady) window.__dglMarkReady();
     } catch (err) {
-      console.error("DGL Marketing Campaign OS — fallo al iniciar:", err);
+      console.error("DGL Marketing OS — fallo al iniciar:", err);
       if (window.__dglBootFail) window.__dglBootFail("Error al iniciar la aplicación: " + (err && err.message ? err.message : err));
     }
   }
