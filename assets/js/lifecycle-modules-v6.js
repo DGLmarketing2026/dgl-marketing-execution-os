@@ -129,6 +129,45 @@ async function live(force=false){
   return cache={groups:o?.groups||[],summary:o?.summary||null,pipe:p||null,ts:Date.now()};
 }
 
+// Safe Data Hub recovery snapshot: owner-level opportunity aggregates only.
+// No account name, contact, quote or load identifier is present in this data.
+const RECOVERY_SNAPSHOT_AT="2026-09-03T13:52:00-05:00";
+const RECOVERY_OWNERS=["Alejandro Ochoa","Alex Cifuentes","Ali Pirela","Andres Bernal","Andy J. McNelly","Caroline Salamanca","Cindy Ave","Cristian Serna","DGL Accounts","Daniel Martin","David Cuestas","Fabian Lopez","German Cano","House Account","Juan Rodriguez","Juan Ruiz","Luis Simoes","Manuel Arias","Mateo Matallana","Nicolas Monroy","Santiago Villegas","Sebastian Crespo","Tatiana Lozano","Valentina Rico"];
+const RECOVERY_TYPES=["CROSS-SELL","NURTURE","QNB","REACTIVATION","RETENTION"];
+const RECOVERY_SERVICES=["Drayage","FTL","LTL","Multiservicio"];
+const RECOVERY_WINDOWS=["","0-14","15-30","30+"];
+const RECOVERY_GROUPS_RAW=[[5,2,2,1,15,15,0],[2,2,2,2,14,14,0],[2,2,2,1,12,12,0],[16,2,0,3,12,12,0],[5,2,2,2,11,11,0],[2,2,2,3,10,10,0],[12,2,2,3,10,10,0],[16,2,2,1,8,8,0],[2,2,1,3,7,7,0],[17,2,2,3,6,6,0],[7,2,1,2,5,5,0],[11,2,0,3,5,5,0],[0,2,2,1,4,4,0],[2,2,1,1,4,4,0],[5,2,2,3,4,4,0],[11,2,1,3,4,4,0],[16,2,2,2,4,4,0],[20,2,2,1,4,4,0],[2,2,0,2,3,3,0],[5,2,1,2,3,3,0],[7,2,1,1,3,3,0],[7,2,1,3,3,3,0],[7,2,2,1,3,3,0],[12,2,2,2,3,3,0],[16,2,1,3,3,3,0],[16,2,1,1,3,3,0],[16,2,0,2,3,3,0],[20,2,2,3,3,3,0],[23,2,1,3,3,3,0],[23,2,1,1,3,3,0],[0,2,0,1,2,2,0],[2,2,1,2,2,2,0],[3,2,1,2,2,2,0],[5,2,0,1,2,2,0],[7,2,0,3,2,2,0],[7,2,2,3,2,2,0],[11,2,0,1,2,2,0],[11,2,2,3,2,2,0],[11,2,2,1,2,2,0],[12,2,1,3,2,2,0],[12,2,0,3,2,2,0],[16,2,0,1,2,2,0],[17,2,2,1,2,2,0],[17,2,1,3,2,2,0],[20,2,0,3,2,2,0],[23,2,2,1,2,2,0],[23,2,1,2,2,2,0],[0,2,2,3,1,1,0],[0,2,0,3,1,1,0],[0,2,1,3,1,1,0],[0,2,1,1,1,1,0],[1,2,0,3,1,1,0],[2,2,0,1,1,1,0],[3,2,1,3,1,1,0],[5,2,1,3,1,1,0],[5,2,0,2,1,1,0],[5,2,0,3,1,1,0],[5,2,1,1,1,1,0],[7,2,2,2,1,1,0],[11,2,1,1,1,1,0],[11,2,1,2,1,1,0],[11,2,2,2,1,1,0],[12,2,0,1,1,1,0],[12,2,1,1,1,1,0],[12,2,2,1,1,1,0],[14,2,2,2,1,1,0],[14,2,2,1,1,1,0],[15,2,0,1,1,1,0],[15,2,2,1,1,1,0],[16,2,1,2,1,1,0],[16,2,2,3,1,1,0],[17,2,0,1,1,1,0],[17,2,0,2,1,1,0],[17,2,0,3,1,1,0],[17,2,1,1,1,1,0],[20,2,1,3,1,1,0],[20,2,2,2,1,1,0],[20,2,1,1,1,1,0],[23,2,0,2,1,1,0],[23,2,2,2,1,1,0],[23,2,2,3,1,1,0],[13,2,2,3,14,0,14],[13,2,2,2,11,0,11],[13,2,2,1,4,0,4],[13,2,0,3,2,0,2],[7,2,3,3,1,0,1],[13,2,1,1,1,0,1],[13,2,0,1,1,0,1],[23,2,3,2,1,0,1],[12,4,3,0,8,4,4],[11,4,3,0,7,4,3],[2,4,3,0,12,3,9],[1,4,3,0,4,3,1],[5,4,3,0,9,2,7],[16,4,3,0,6,2,4],[20,4,3,0,5,2,3],[3,4,3,0,1,1,0],[9,4,3,0,1,1,0],[16,4,2,0,1,1,0],[16,4,1,0,1,1,0],[18,4,3,0,1,1,0],[20,4,0,0,1,1,0],[8,4,3,0,6,0,6],[0,4,3,0,2,0,2],[5,4,2,0,2,0,2],[13,4,3,0,2,0,2],[17,4,3,0,2,0,2],[5,4,1,0,1,0,1],[18,3,3,0,5,5,0],[5,3,3,0,10,4,6],[12,3,3,0,3,2,1],[17,3,3,0,3,2,1],[2,3,3,0,11,1,10],[16,3,3,0,7,1,6],[11,3,3,0,2,1,1],[23,3,3,0,2,1,1],[13,3,3,0,98,0,98],[8,3,3,0,28,0,28],[5,3,2,0,3,0,3],[16,3,2,0,3,0,3],[0,3,3,0,2,0,2],[3,3,3,0,2,0,2],[4,3,1,0,2,0,2],[0,3,2,0,1,0,1],[7,3,2,0,1,0,1],[11,3,2,0,1,0,1],[15,3,2,0,1,0,1],[16,3,1,0,1,0,1],[16,3,0,0,1,0,1],[20,3,3,0,1,0,1],[21,0,3,0,43,6,37],[10,0,3,0,6,2,4],[4,0,3,0,4,2,2],[14,0,3,0,4,2,2],[0,0,3,0,3,2,1],[1,0,3,0,3,2,1],[19,0,3,0,17,1,16],[6,0,3,0,4,1,3],[12,0,3,0,3,1,2],[20,0,3,0,3,1,2],[22,0,3,0,3,1,2],[3,0,3,0,6,0,6],[15,0,3,0,1,0,1],[5,1,3,0,4,1,3],[20,1,3,0,1,1,0],[5,1,2,0,3,0,3],[23,1,3,0,3,0,3],[2,1,3,0,2,0,2],[7,1,2,0,2,0,2],[11,1,0,0,2,0,2],[11,1,2,0,2,0,2],[0,1,1,0,1,0,1],[0,1,3,0,1,0,1],[0,1,2,0,1,0,1],[2,1,2,0,1,0,1],[12,1,3,0,1,0,1],[15,1,2,0,1,0,1],[16,1,3,0,1,0,1],[16,1,0,0,1,0,1],[16,1,2,0,1,0,1],[17,1,3,0,1,0,1],[20,1,1,0,1,0,1]];
+
+function recoveryGroups(){
+  return RECOVERY_GROUPS_RAW.map((r,i)=>({
+    groupId:`RECOVERY-GROUP-${i+1}`,
+    amOwner:RECOVERY_OWNERS[r[0]],
+    opportunityType:RECOVERY_TYPES[r[1]],
+    service:RECOVERY_SERVICES[r[2]],
+    window:RECOVERY_WINDOWS[r[3]],
+    qnbWindow:RECOVERY_WINDOWS[r[3]],
+    reasonCategory:"",
+    detectedAccounts:r[4],
+    eligibleAccounts:r[5],
+    suppressedAccounts:r[6],
+    priority:ORDER[family(RECOVERY_TYPES[r[1]])]||99,
+    lastEngineRun:RECOVERY_SNAPSHOT_AT,
+    recoverySnapshot:true
+  }));
+}
+async function liveWithRecovery(force=false){
+  let groups=[],failed=false;
+  if(C()){
+    try{
+      const d=await live(force);
+      groups=d.groups||[];
+      if(!groups.length)failed=true;
+    }catch(_){failed=true;}
+  }else failed=true;
+  if(groups.length)return{groups,recovered:false};
+  return{groups:recoveryGroups(),recovered:true};
+}
+
 const badge=(t,k="info")=>`<span class="life-badge ${k}">${E(t)}</span>`;
 const header=(title,sub,eye="AUTOMATION LIFECYCLE · V6")=>`<div class="page-head"><div><div class="eyebrow">${E(eye)}</div><h2>${E(title)}</h2><p class="lede">${E(sub)}</p></div><div class="page-head-actions">${C()?badge("PRIVATE BACKEND / LIVE","live"):badge("PRIVATE BACKEND REQUIRED","warn")}${C()?'<button class="btn btn-secondary" data-life-refresh>REFRESH VIEW</button>':'<button class="btn btn-primary" data-life-connect>CONNECT PRIVATE BACKEND</button>'}</div></div>`;
 const kpis=a=>`<div class="kpi-grid">${a.map(([l,v,f])=>`<div class="kpi-card"><div class="kpi-content"><div class="kpi-label">${E(l)}</div><div class="kpi-value">${f===false?E(v):N(v)}</div></div></div>`).join("")}</div>`;
@@ -198,6 +237,20 @@ async function scopeView(c,{title,sub,fams=null,service=null,eye="CAMPAIGN ENGIN
     kpis([["DETECTED SIGNALS",det],["ELIGIBLE ACCOUNTS",eli],["SUPPRESSED",sup],["AUTOMATIC SCOPES",visible.length]])+
     `<div class="life-status-strip"><div><span>Operating rule</span><strong>AUTOMATIC SCOPE GENERATION</strong></div><p>No recurring manual account selection. Rules decide eligibility, suppression, pressure and routing.</p></div>
      <div class="life-scope-stack">${visible.length?visible.map(card).join(""):`<div class="life-empty"><strong>No live scopes for ${E(selectedOwner())}</strong></div>`}</div>`;
+}
+async function campaignOpportunitiesView(c){
+  const title="Campaign Opportunities",sub="All report-derived opportunities grouped into automatic governed scopes.";
+  const {groups:all,recovered}=await liveWithRecovery();
+  const visible=filterOwner(all).sort((a,b)=>(+a.priority||99)-(+b.priority||99)||(+b.eligibleAccounts||0)-(+a.eligibleAccounts||0));
+  const det=visible.reduce((s,x)=>s+(+x.detectedAccounts||0),0),eli=visible.reduce((s,x)=>s+(+x.eligibleAccounts||0),0),sup=visible.reduce((s,x)=>s+(+x.suppressedAccounts||0),0);
+  g.__DGL_LIFE_GROUPS=Object.fromEntries(all.map(x=>[scopeId(x),x]));
+  const statusBadge=recovered?badge("SAFE DATA HUB RECOVERY","warn"):badge("PRIVATE BACKEND / LIVE","live");
+  const head=`<div class="page-head"><div><div class="eyebrow">OPPORTUNITY ENGINE · ${recovered?"RECOVERY":"LIVE"}</div><h2>${E(title)}</h2><p class="lede">${E(sub)}</p></div><div class="page-head-actions">${statusBadge}${C()?'<button class="btn btn-secondary" data-life-refresh>REFRESH VIEW</button>':'<button class="btn btn-primary" data-life-connect>CONNECT PRIVATE BACKEND</button>'}</div></div>`;
+  const recoveryNotice=recovered?`<div class="life-status-strip warn"><div><span>DATA SOURCE</span><strong>SAFE DATA HUB RECOVERY</strong></div><p>Live V6 routing is not responding; owner and opportunity aggregates are restored from the governed Data Hub snapshot (${E(RECOVERY_SNAPSHOT_AT)}). Only owner-level counts are shown — no account, contact or quote identifier is included.</p></div>`:"";
+  c.innerHTML=head+ownerToolbar(all)+recoveryNotice+
+    kpis([["DETECTED SIGNALS",det],["ELIGIBLE ACCOUNTS",eli],["SUPPRESSED",sup],["AUTOMATIC SCOPES",visible.length]])+
+    `<div class="life-status-strip"><div><span>Operating rule</span><strong>AUTOMATIC SCOPE GENERATION</strong></div><p>No recurring manual account selection. Rules decide eligibility, suppression, pressure and routing.</p></div>
+     <div class="life-scope-stack">${visible.length?visible.map(card).join(""):`<div class="life-empty"><strong>No scopes for ${E(selectedOwner())}</strong></div>`}</div>`;
 }
 async function commandCenter(c){
   if(!C())return required(c,"Marketing Campaign Command Center","Automatic decision system from commercial signal to retained revenue.");
@@ -312,7 +365,7 @@ function governance(c){
 }
 
 R["command-center"]=commandCenter;
-R["campaign-opportunities"]=c=>scopeView(c,{title:"Campaign Opportunities",sub:"All report-derived opportunities grouped into automatic governed scopes.",eye:"OPPORTUNITY ENGINE · LIVE"});
+R["campaign-opportunities"]=campaignOpportunitiesView;
 R["campaign-execution"]=control;
 R["reactivation"]=c=>scopeView(c,{title:"Reactivation Campaigns",sub:"Dormant-account opportunities detected automatically. House reassignment timing becomes event-driven when the AM activity signal is joined.",fams:["REACTIVATION"],eye:"CAMPAIGN ENGINE · REACTIVATION"});
 R["quoted-not-booked"]=c=>scopeView(c,{title:"Quoted Not Booked",sub:"Priority-1 recovery. Reason-aware strategy activates automatically when Reason becomes available; window routing is the safe fallback.",fams:["QNB"],eye:"PRIORITY 1 · QNB"});
