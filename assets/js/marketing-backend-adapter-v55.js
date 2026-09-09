@@ -15,7 +15,7 @@
         const mount=document.getElementById("mainContent");
         const renderer=global.DGL_MODULE_RENDERERS&&global.DGL_MODULE_RENDERERS[id];
         if(mount&&renderer)renderer(mount);
-      }catch(error){console.error("DGL lifecycle rerender failed",error);}
+      }catch(error){lastError="Lifecycle rerender failed: "+(error&&error.message||error);}
     },0);
   }
 

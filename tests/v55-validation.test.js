@@ -15,8 +15,8 @@ assert.equal(p.getPlaybookForRequest({...base,qnbWindow:"30+"}).id,"QNB_30_PLUS"
 assert.equal(p.getPlaybookForRequest({...base,objective:"Retention",qnbWindow:""}).id,"RETENTION_RISK");
 assert.equal(p.getPlaybookForRequest({...base,objective:"Reactivation",qnbWindow:""}).id,"REACTIVATION_ACCOUNT");
 assert.equal(p.resolveStrategy({...base,objective:"Cross-Sell",service:"Drayage",qnbWindow:""}).strategy.service,"Drayage");
-assert.equal(p.validateRequest({...base,objective:"Lane Campaign",qnbWindow:"",lane:""}).status,"NEEDS CLARIFICATION");
-assert.equal(p.validateRequest({...base,qnbWindow:""}).status,"NEEDS CLARIFICATION");
+assert.equal(p.validateRequest({...base,objective:"Lane Campaign",qnbWindow:"",lane:""}).status,"DATA / POLICY BLOCKED");
+assert.equal(p.validateRequest({...base,qnbWindow:""}).status,"DATA / POLICY BLOCKED");
 assert.equal(p.resolveStrategy(base).strategy.creativeSystem,"DGL Executive Minimal");
 assert.equal(p.resolveStrategy({...base,objective:"Cross-Sell",qnbWindow:""}).strategy.creativeSystem,"DGL Service Architecture");
 const scoped=a.buildCampaignContext({...base,id:"AMR-SCOPE-1",audienceId:"",audienceCount:0,accountCount:2});assert.equal(scoped.audienceId,"SCOPE-AMR-SCOPE-1");assert.equal(scoped.audienceMode,"AM_REQUEST_SCOPE");assert.equal(scoped.audienceResolved,false);assert.equal(scoped.audienceStatus,"ACCOUNT SCOPE DEFINED · CONTACTS PENDING");

@@ -1,0 +1,135 @@
+{
+  "suite": "Retention V1",
+  "runner": "node <test-file>.test.js (no test framework/package.json in this repo; each *.test.js is a standalone Node script using assert + vm, matching the existing repo convention)",
+  "newTests": [
+    {
+      "file": "tests/v6-retention-am-activity.test.js",
+      "cases": [
+        {
+          "name": "base detection, WITH a CUENTAS (AM Intelligence) match and no contradictions -> DETECTED",
+          "guarantee": "normal-case automation: a Retention signal with AM Intelligence context and no AM-activity red flags is never suppressed by default"
+        },
+        {
+          "name": "Sin dueno / house account -> SUPPRESSED / OWNER REQUIRED (regression), CUENTAS branch never touched",
+          "guarantee": "suppression: pre-existing owner-required rule still wins first and short-circuits before any new join logic runs"
+        },
+        {
+          "name": "cross-priority suppression (QNB beats Retention for the same account) -> HIGHER PRIORITY SIGNAL",
+          "guarantee": "suppression: shared v6ApplyPrioritySuppression_ still enforces one active family per account after adding the CUENTAS join"
+        },
+        {
+          "name": "bucket confirms genuine absence of management, no contradiction -> DETECTED",
+          "guarantee": "normal-case automation: AM-activity evidence that clearly confirms no management does not block automated retention outreach"
+        },
+        {
+          "name": "ambiguous bucket ('8. GESTIONADAS SIN OPERAR') -> SUPPRESSED / AM ACTIVITY REVIEW REQUIRED, and v6PipelineWinner_/v6PipelineSyncSignals_ route it to CLOSED / SUPPRESSED like any other suppressed row",
+          "guarantee": "suppression + duplicate prevention: an ambiguous AM-activity signal never leaks into the active pipeline through the idempotent bulk pipeline sync"
+        },
+        {
+          "name": "bucket says 'no management' but Tipo gestion says COMERCIAL (contradiction) -> SUPPRESSED / AM ACTIVITY REVIEW REQUIRED",
+          "guarantee": "suppression: contradictory AM-activity evidence is flagged for human review instead of silently auto-detected or auto-suppressed"
+        },
+        {
+          "name": "row with no CUENTAS (AM Intelligence) match at all -> SUPPRESSED / AM CONTEXT REQUIRED, join coverage metric reflects partial match",
+          "guarantee": "canonical architecture: AURA never advances a NOVA-only signal to DETECTED by skipping AM Intelligence; a missing AM Intelligence record fails closed, and join coverage remains an observability metric on top of that gate, never a substitute for it"
+        }
+      ]
+    },
+    {
+      "file": "tests/v6-response-events.test.js",
+      "cases": [
+        {
+          "name": "REPLY -> pipeline RESPONDED, nextAction STOP ACCOUNT AUTOMATION / V5.5 HANDOFF, handoffStatus PENDING",
+          "guarantee": "stop + handoff: a real commercial reply stops account automation and creates an AM handoff via the existing pipeline stage machine"
+        },
+        {
+          "name": "RFQ -> pipeline RFQ RECEIVED with rfqAt set",
+          "guarantee": "response capture correctly advances pipeline stage for qualifying commercial activity"
+        },
+        {
+          "name": "BOUNCE -> MKT_CONTACTS_SECURE emailStatus INVALID via read-merge-upsert, historical fields preserved, pipeline untouched",
+          "guarantee": "duplicate prevention / idempotent UPSERT (merge-by-contactId, never blind overwrite) and isolation (a delivery failure does not affect account pipeline state)"
+        },
+        {
+          "name": "UNSUBSCRIBE -> MKT_EXCLUSIONS ACTIVE exclusion with deterministic exclusionId, pipeline untouched",
+          "guarantee": "suppression / DNC governance: an unsubscribe becomes a durable, idempotent exclusion (re-processing the same event does not duplicate the exclusion row) without altering pipeline stage"
+        },
+        {
+          "name": "CLICK / OTHER / unrecognized eventType -> action IGNORED, zero writes to any table",
+          "guarantee": "normal-case automation: non-qualifying engagement events never trigger a stop, handoff, exclusion, or contact mutation"
+        }
+      ]
+    },
+    {
+      "file": "tests/v6-commercial-outcomes.test.js",
+      "cases": [
+        {
+          "name": "resolves accountId via MKT_ACCOUNTS crosswalk and writes attributedRevenue exactly equal to Monto",
+          "guarantee": "attribution: revenue is copied as-is from the authoritative source, never recalculated, never summed with unrelated figures"
+        },
+        {
+          "name": "no unique MKT_ACCOUNTS match (unknown account) -> no pipeline write, unresolvedCount increments",
+          "guarantee": "never join by account name without an authoritative crosswalk; fail-closed on ambiguous/absent identity instead of guessing"
+        },
+        {
+          "name": "account present by name but missing salesforceAccountId/externalAccountId -> unresolved",
+          "guarantee": "canonical Salesforce Account ID or documented 1:1 mapping is mandatory before attribution writes anything"
+        },
+        {
+          "name": "existing pipeline record already has a campaignId and is past CAMPAIGN ACTIVE -> nextAction marks MULTI-CAMPAIGN CONCURRENCY, campaignId is not overwritten",
+          "guarantee": "attribution ambiguity is surfaced explicitly instead of silently reassigning campaign credit"
+        }
+      ]
+    },
+    {
+      "file": "tests/v6-aura-bridge.test.js",
+      "cases": [
+        {
+          "name": "v6AuraEvaluateRetention_ aggregates DETECTED/SUPPRESSED/reviewRequired by reason and automatically builds campaign scope only for DETECTED accounts",
+          "guarantee": "detect -> suppress -> build scope runs as one automatic, no-manual-list unit; suppressed/review-required accounts are never scoped"
+        },
+        {
+          "name": "v6AuraAutoBuildRetentionScopes_ groups by (amOwner, service), excludes suppressed rows and other opportunity families",
+          "guarantee": "duplicate prevention + family isolation: a Retention scope build can never include a non-Retention account or a suppressed Retention account"
+        },
+        {
+          "name": "v6AuraStatus_ returns safe consolidated status (pipeline stage, Retention signal, audience status once a campaign is linked); no PII fields",
+          "guarantee": "AURA never surfaces accountName/email/contact PII through a status query, only aggregate/status fields"
+        },
+        {
+          "name": "v6AuraEnsureCampaignScope_ is idempotent: re-running with an added account merges into the existing scope row, never duplicates it",
+          "guarantee": "duplicate prevention: repeated scheduler runs against the same scope never create parallel scope/scope-account rows"
+        },
+        {
+          "name": "v6AuraCreateAccountStop_ closes a fresh account to CLOSED / SUPPRESSED; an account already at QUOTED keeps that stage (preventDowngrade) while nextAction/handoffStatus still update",
+          "guarantee": "account stop never erases evidence that a Quote/Load already happened, while still recording the stop/handoff intent"
+        },
+        {
+          "name": "v6AuraCreateAmHandoff_ preserves the account's current pipeline stage and refuses to run with no existing pipeline record",
+          "guarantee": "AM handoff never resets an already-advanced stage back to OPPORTUNITY DETECTED and never fabricates a pipeline context that doesn't exist"
+        },
+        {
+          "name": "v6ClassifyResponseEvent_ accepts QUOTE/LOAD as aliases of QUOTE_SIGNAL/LOAD_SIGNAL (case-insensitive) and only sets attributedRevenue on LOAD when the raw event explicitly supplies an amount",
+          "guarantee": "the exact event vocabulary requested (REPLY, RFQ, BOUNCE, UNSUBSCRIBE, CLICK, QUOTE, LOAD) is accepted without a second, divergent code path, and revenue is never fabricated on a real-time event"
+        }
+      ]
+    }
+  ],
+  "regressionCoverage": {
+    "description": "Full existing suite re-run after every change in this branch, most recently after the AURA Retention Bridge pass.",
+    "totalFiles": 21,
+    "passed": 14,
+    "failed": 7,
+    "failedTestsAreProvenPreExisting": true,
+    "verification": "git stash of all Retention V1 changes + re-run reproduced the identical 7 failures on main before any change in this branch, confirming they are unrelated (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions). Re-verified after the AURA Retention Bridge pass: same 7 files, same failure reason (e.g. v6-report-ingestion.test.js still fails on the same stale 'marketing-opportunity-engine-v6.js?v=20260827-1' assertion), pass/fail counts moved only by the 4 new Retention/AURA test files added across this branch (13 -> 14 passed after this pass's 1 new file; 7 fail is unchanged throughout).",
+    "failedFiles": [
+      "tests/v55-audience-bridge.test.js",
+      "tests/v55-backend-adapter.test.js",
+      "tests/v55-legacy-status-visibility.test.js",
+      "tests/v55-validation.test.js",
+      "tests/v6-live-opportunities-ui.test.js",
+      "tests/v6-report-ingestion.test.js",
+      "tests/v6-validation.test.js"
+    ]
+  }
+}
