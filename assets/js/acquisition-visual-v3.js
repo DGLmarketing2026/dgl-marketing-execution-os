@@ -80,27 +80,49 @@ async function runQa(c){
 }
 
 /* ---------- Landing Pages ---------- */
-const LANDING_DESIGNS=[
-  {service:"FTL",system:"SPLIT FREIGHT",asset:"assets/creative/dgl-ftl-truck.webp",skin:"split",
-    copy:{es:"Capacidad FTL en EE.UU. cuando su operación no puede esperar.",en:"U.S. FTL capacity when your operation cannot wait.","pt-BR":"Capacidade FTL nos EUA quando sua operação não pode esperar."}},
-  {service:"LTL",system:"EDITORIAL WHITE",asset:"assets/creative/dgl-ltl-terminal.png",skin:"editorial",
-    copy:{es:"Menos volumen. La misma precisión.",en:"Smaller shipment. Same precision.","pt-BR":"Menor volume. A mesma precisão."}},
-  {service:"Drayage",system:"ROUTE INTELLIGENCE",asset:"assets/creative/dgl-container-transload.jpg",skin:"route",
-    copy:{es:"Del puerto al siguiente punto, sin perder visibilidad.",en:"From port to next point, without losing visibility.","pt-BR":"Do porto ao próximo ponto, sem perder visibilidade."}}
-];
-const LANG_LABEL={es:"Español",en:"English","pt-BR":"Português (Brasil)"};
-let landingLang="es";
+const I18N=()=>g.DGL_ACQUISITION_I18N_V4;
+const LANG_LABEL={en:"English",es:"Español","pt-BR":"Português (Brasil)"};
+let landingLang=(I18N()&&I18N().marketDefaultLanguage("USA"))||"en";
 
-function designCard(d,lang){
-  return `<article class="acq-design-card skin-${d.skin}">
-    <div class="acq-design-top"><span>${esc(d.system)}</span><strong>${esc(d.service)}</strong></div>
-    <div class="acq-design-visual" style="background-image:url('${esc(d.asset)}')"><div class="acq-design-overlay"><p>${esc(d.copy[lang]||d.copy.en)}</p><span class="acq-design-cta">${lang==="pt-BR"?"SOLICITAR COTAÇÃO":lang==="en"?"REQUEST A QUOTE":"ENVIAR REQUERIMIENTO"}</span></div></div>
+function designMeta(){return (I18N()&&I18N().SERVICES)||[];}
+
+function designCard(meta,lang){
+  const l=I18N().landingContent(meta.id,lang);
+  return `<article class="acq-design-card skin-${meta.skin}">
+    <div class="acq-design-top"><span>${esc(meta.system)}</span><strong>${esc(meta.id)}</strong></div>
+    <div class="acq-design-visual" style="background-image:url('${esc(meta.asset)}')"><div class="acq-design-overlay"><p>${esc(l.headline)}</p><span class="acq-design-cta">${esc(l.cta)}</span></div></div>
+    <div class="acq-design-body">
+      <p class="acq-design-sub">${esc(l.subheadline)}</p>
+      <p class="acq-design-support">${esc(l.supportingCopy)}</p>
+      <div class="acq-design-form-preview">${["firstName","lastName","company","email","country","service"].map(k=>`<span>${esc(l.formLabels[k])}</span>`).join("")}</div>
+      <p class="acq-design-confirm"><strong>Confirmation:</strong> ${esc(l.confirmation)}</p>
+      <div class="acq-design-seo"><span>SEO TITLE</span><strong>${esc(l.seoTitle)}</strong><span>SEO DESCRIPTION</span><p>${esc(l.seoDescription)}</p></div>
+      <div class="acq-design-meta-row"><span>/${esc(l.slug)}</span><span>${esc(l.utm.utm_source)}/${esc(l.utm.utm_medium)}/${esc(l.utm.utm_campaign)}</span></div>
+    </div>
     <div class="acq-design-foot"><span>Design system preview</span><span>Not a live URL</span></div>
   </article>`;
 }
 function designGrid(lang){
-  return `<div class="acq-design-toolbar"><span>Preview language</span><div class="acq-lang-switch" data-acq-lang-switch>${Object.keys(LANG_LABEL).map(l=>`<button type="button" class="${l===lang?"active":""}" data-acq-lang="${l}">${esc(LANG_LABEL[l])}</button>`).join("")}</div></div>
-  <div class="acq-design-grid">${LANDING_DESIGNS.map(d=>designCard(d,lang)).join("")}</div>`;
+  return `<div class="acq-design-toolbar"><span>Preview language — changes headline, subheadline, copy, CTA, form labels, confirmation, SEO and slug</span><div class="acq-lang-switch" data-acq-lang-switch>${Object.keys(LANG_LABEL).map(l=>`<button type="button" class="${l===lang?"active":""}" data-acq-lang="${l}">${esc(LANG_LABEL[l])}</button>`).join("")}</div></div>
+  <div class="acq-design-grid">${designMeta().map(meta=>designCard(meta,lang)).join("")}</div>`;
+}
+function creativeVariant(meta,lang){
+  const cr=I18N().creativeContent(meta.id,lang);
+  return `<div class="acq-creative-variant"><span class="acq-creative-lang">${esc(LANG_LABEL[lang])}</span>
+    <strong>${esc(cr.headline)}</strong><p>${esc(cr.supportingLine)}</p>
+    <p class="acq-creative-social">${esc(cr.socialPost)}</p>
+    <div class="acq-creative-hashtags">${cr.hashtags.map(h=>`<span>${esc(h)}</span>`).join("")}</div>
+    <span class="acq-creative-cta">${esc(cr.cta)}</span></div>`;
+}
+function creativeCard(meta){
+  return `<article class="acq-creative-card">
+    <div class="acq-design-top"><span>${esc(meta.system)}</span><strong>${esc(meta.id)} · Social / Ad Creative</strong></div>
+    <div class="acq-creative-variants">${(I18N().LANGUAGES||["en","es","pt-BR"]).map(lang=>creativeVariant(meta,lang)).join("")}</div>
+  </article>`;
+}
+function creativesSection(){
+  return `<section class="acq-panel"><div class="acq-panel-head"><div><span>ACQUISITION CREATIVES</span><h3>Social / ad posts — all 3 languages generated together</h3></div>${badge("EN · ES · PT-BR","good")}</div>
+  <div class="acq-creative-grid">${designMeta().map(creativeCard).join("")}</div></section>`;
 }
 function landingCard(p){
   return `<article class="acq-page-card"><div class="acq-page-top"><div><span>${esc(p.objective||"Lead Generation")} · ${esc(p.service||"Multiservice")}</span><h3>${esc(p.market||"Market")} · ${esc(p.language||"en")}</h3></div>${badge(p.status,p.status==="LIVE"?"good":"muted")}</div><div class="acq-page-meta"><span>${esc(p.channel||"Channel")}</span><span>/${esc(p.slug||"")}</span><span>${esc(p.utmCampaign||"")}</span></div><p>${esc(p.headline||"")}</p><div class="acq-actions">${p.publishedUrl?`<a class="btn btn-secondary btn-sm" href="${esc(p.publishedUrl)}" target="_blank" rel="noopener">OPEN LIVE PAGE</a>`:""}</div></article>`;
@@ -113,17 +135,19 @@ async function landingPages(c){
 }
 function renderLanding(c,d,loading){
   const s=d.status||{},pages=d.pages||[];
-  c.innerHTML=head("NEW BUSINESS ACQUISITION","Landing Page Center","Three governed design systems, one per core service, in Español, English and Português (Brasil). Automation V2 generates and publishes the real pages server-side.")+
+  c.innerHTML=head("NEW BUSINESS ACQUISITION","Landing Page Center","Every landing and creative is generated automatically in English, Español and Português (Brasil) — real localized fields, not a literal translation. Automation V2 publishes the real pages server-side.")+
     metrics([
-      ["DESIGN SYSTEMS",LANDING_DESIGNS.length,"FTL · LTL · Drayage"],
+      ["DESIGN SYSTEMS",designMeta().length,"FTL · LTL · Drayage"],
+      ["LANGUAGES PER PAGE",3,"EN · ES · PT-BR, always generated"],
       ["GENERATED",loading?"…":safeNum(s.landingPages),"From acquisition signals"],
-      ["LIVE",loading?"…":safeNum(s.landingLive),"Published automatically"],
-      ["LEADS",loading?"…":safeNum(s.leads),"Captured server-side"]
+      ["LIVE",loading?"…":safeNum(s.landingLive),"Published automatically"]
     ])+
+    `<div class="acq-callout"><strong>Market routing (default language only)</strong><p>USA / International → English · LATAM → Español · Brazil → Português (Brasil). All three languages are always generated for every landing and creative; routing only decides which one opens first.</p></div>`+
     `<section class="acq-panel"><div class="acq-panel-head"><div><span>LANDING DESIGN SYSTEM</span><h3>What every generated page looks like</h3></div>${badge("VISIBLE WITHOUT BACKEND","good")}</div>
     ${designGrid(landingLang)}</section>`+
+    creativesSection()+
     `<div class="acq-toolbar"><span>Normal path: Signal → Generate → Publish → Capture</span><strong>No lead PII is stored in GitHub.</strong></div>
-     <div class="acq-page-grid">${pages.length?pages.map(landingCard).join(""):`<div class="acq-empty"><i data-lucide="circle-dashed"></i><strong>${loading?"Loading generated pages…":"No generated pages yet"}</strong><p>${loading?"Checking the private backend for live landing pages.":"The server scheduler creates evergreen and connector-driven landing pages once Acquisition Automation is deployed. The design system above is real and ships with every generated page."}</p></div>`}</div>`;
+     <div class="acq-page-grid">${pages.length?pages.map(landingCard).join(""):`<div class="acq-empty"><i data-lucide="circle-dashed"></i><strong>${loading?"Loading generated pages…":"No generated pages yet"}</strong><p>${loading?"Checking the private backend for live landing pages.":"The server scheduler creates evergreen and connector-driven landing pages once Acquisition Automation is deployed. The design system above is real and ships with every generated page, in all three languages."}</p></div>`}</div>`;
   icons();
 }
 function bindLanding(c){
@@ -164,5 +188,5 @@ R["acquisition-command-center"]=commandCenter;
 R["landing-pages"]=landingPages;
 R["lead-routing"]=leadRouting;
 
-g.DGL_ACQUISITION_VISUAL_V3={LANDING_DESIGNS};
+g.DGL_ACQUISITION_VISUAL_V3={designMeta};
 })(window);
