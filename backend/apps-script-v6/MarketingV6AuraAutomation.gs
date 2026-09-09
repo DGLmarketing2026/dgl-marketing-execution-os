@@ -169,13 +169,18 @@ function v6AuraPrepareExecution_(scope, campaign) {
   // v6ExecutionGates_ checks the STORED row's executionCsvDriveFileId, not the
   // queue payload's — the file id must be persisted onto the row first.
   if (archived.fileId) v6UpdateExecutionFiles_(execution.executionId, { executionCsvDriveFileId: archived.fileId });
+  // Real subject/body/HTML, generated server-side from the SAME approved
+  // copy strategy Campaign Studio uses — no human needs to open Campaign
+  // Studio for this to exist. Archived regardless of gate outcome so the
+  // email is ready to inspect/approve the moment a provider is configured.
+  var email = (typeof v6AuraGenerateAndArchiveEmail_ === 'function') ? v6AuraGenerateAndArchiveEmail_(scope, campaign, execution.executionId) : null;
   var queue = v6QueueExecution_({
     executionId: execution.executionId, campaignId: campaign.campaignId,
     marketingApproved: v6AuraPolicyApproved_(campaign.objective),
     audienceResolved: audience.audienceResolved, frequencyStatus: audience.frequencyStatus,
     archiveConfigured: archived.status === 'CSV ARCHIVED', executionCsvDriveFileId: archived.fileId
   });
-  return { executionId: execution.executionId, audience: audience, archive: archived, queue: queue };
+  return { executionId: execution.executionId, audience: audience, archive: archived, queue: queue, email: email };
 }
 
 // --- Automatic reporting ----------------------------------------------------

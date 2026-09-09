@@ -221,6 +221,17 @@ function v6AcqAutomationTick_(){
   if(typeof v6AcqWordPressTick_==='function'){try{row.wordpress=v6AcqWordPressTick_();}catch(err){row.wordpress={status:'ERROR',error:String(err&&err.message||err)};}}
   // Automatic landing report + CSV archive every tick — no manual export.
   try{row.landingReport=v6AcqLandingReport_();}catch(err){row.landingReport={status:'ERROR',error:String(err&&err.message||err)};}
+  // AURA (Existing Account Growth: Retention/Reactivation/QNB/Cross-Sell)
+  // runs inside this SAME hourly heartbeat — one trigger drives both
+  // Acquisition and Existing Account Growth automation, never a second
+  // recurring manual workflow.
+  if (typeof v6AuraAutomationTick_ === 'function') {
+    try {
+      row.aura = v6AuraAutomationTick_();
+    } catch (err) {
+      row.aura = {status:'ERROR', error:String(err && err.message || err)};
+    }
+  }
   return row;
 }
 function v6AcqSetupSheetsOnly_(){Object.keys(MKT_V6_ACQ_SCHEMA).forEach(function(name){v6AcqEnsureSheet_(name,MKT_V6_ACQ_SCHEMA[name]);});return true;}
