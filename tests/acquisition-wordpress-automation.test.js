@@ -167,21 +167,26 @@ function wpProps(extra){return Object.assign({ACQ_WP_BASE_URL:'https://www.dglus
   console.log('PASS: WordPress publisher upserts by campaign+service+language, never duplicates a page');
 })();
 
-// --- Every campaign publishes real EN/ES/PT-BR variants ---
-(function testThreeLanguageVariantsPublished(){
+// --- Production publishes the English-only variant (FINAL CANONICAL
+// OPERATING MODEL, 2026-09-09: production UI and automation are English-only
+// for now). The underlying WordPress publisher itself is language-agnostic
+// -- it publishes whatever v6AcqEnsureLandingVariants_ hands it -- so this
+// only needs to confirm the English variant publishes correctly even for a
+// non-English market signal (Brazil), and that no es/pt-BR page is created
+// while that policy is active. ---
+(function testEnglishOnlyVariantPublished(){
   const ctx=makeContext({props:wpProps()});
   const signal={signalId:'SIG-WP-2',source:'EVERGREEN',channel:'Organic',market:'Brazil',service:'LTL',objective:'Lead Generation',languageOverride:''};
   const variants=ctx.v6AcqEnsureLandingVariants_(signal).records;
   const results=variants.map(v=>ctx.v6AcqWpUpsertPage_(v,'2026-09',{qa:false}));
-  assert.equal(results.length,3);
+  assert.equal(results.length,1);
   results.forEach(r=>assert.equal(r.status,'PUBLISHED'));
-  const langs=variants.map(v=>v.language).sort();
-  assert.deepEqual(langs,['en','es','pt-BR'].sort());
+  const langs=variants.map(v=>v.language);
+  assert.deepEqual(langs,['en'],'production must publish only the English WordPress page');
   const bodies=[...ctx.__wp.__pages.values()].filter(p=>p.meta&&p.meta.dgl_service==='LTL');
-  const ptBrBody=bodies.find(p=>p.meta.dgl_language==='pt-BR');
-  assert(ptBrBody.content.indexOf('Menor volume')>=0,'pt-BR WordPress content must render the real Portuguese headline');
-  assert(ptBrBody.content.indexOf('Menos volumen')<0,'pt-BR WordPress content must not fall back to the Spanish headline');
-  console.log('PASS: every campaign publishes real EN/ES/PT-BR WordPress page variants');
+  assert.equal(bodies.length,1);
+  assert.equal(bodies[0].meta.dgl_language,'en');
+  console.log('PASS: production publishes only the English WordPress page variant, even for a non-English market signal');
 })();
 
 // --- QA pages are private + noindex ---
@@ -206,12 +211,17 @@ function wpProps(extra){return Object.assign({ACQ_WP_BASE_URL:'https://www.dglus
     return res;
   };
   ctx.v6AcqWpQaRun_();
-  assert(seenCreates.length>=3,'QA must create at least 3 page variants (en/es/pt-BR)');
+  // Production is English-only today (FINAL CANONICAL OPERATING MODEL,
+  // 2026-09-09), so QA exercises exactly the variant(s) production actually
+  // generates -- v6AcqWpQaRun_ itself has no hardcoded language count, it
+  // just iterates whatever v6AcqEnsureLandingVariants_ returns.
+  assert(seenCreates.length>=1,'QA must create at least the English page variant');
   seenCreates.forEach(p=>{
     assert.equal(p.status,'private','every QA page must be created with WordPress status=private');
     assert.equal(p.meta.dgl_noindex,'1','every QA page must be flagged dgl_noindex=1');
+    assert.equal(p.meta.dgl_language,'en','production QA must only exercise the English variant while the language policy is English-only');
   });
-  console.log('PASS: QA WordPress page variants are created private + noindex in all 3 languages');
+  console.log('PASS: QA WordPress page variant(s) created private + noindex, matching the active (English-only) language policy');
 })();
 
 // --- QA lead isolation: never in MKT_ACQ_LEADS, never Salesforce-eligible ---

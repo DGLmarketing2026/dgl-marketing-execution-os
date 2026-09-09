@@ -89,9 +89,15 @@ async function runQa(c){
 }
 
 /* ---------- Landing Pages ---------- */
+// Production language scope: English only (FINAL CANONICAL OPERATING MODEL,
+// 2026-09-09 — "production UI and automation must use English only"). The
+// underlying I18N module (assets/js/acquisition-multilingual-v4.js) still
+// generates real ES/PT-BR content and stays available for internal/future
+// use; only the production-facing preview below is locked to English.
 const I18N=()=>g.DGL_ACQUISITION_I18N_V4;
 const LANG_LABEL={en:"English",es:"Español","pt-BR":"Português (Brasil)"};
-let landingLang=(I18N()&&I18N().marketDefaultLanguage("USA"))||"en";
+const PRODUCTION_LANGUAGES=["en"];
+const landingLang="en";
 
 function designMeta(){return (I18N()&&I18N().SERVICES)||[];}
 
@@ -112,7 +118,7 @@ function designCard(meta,lang){
   </article>`;
 }
 function designGrid(lang){
-  return `<div class="acq-design-toolbar"><span>Preview language — changes headline, subheadline, copy, CTA, form labels, confirmation, SEO and slug</span><div class="acq-lang-switch" data-acq-lang-switch>${Object.keys(LANG_LABEL).map(l=>`<button type="button" class="${l===lang?"active":""}" data-acq-lang="${l}">${esc(LANG_LABEL[l])}</button>`).join("")}</div></div>
+  return `<div class="acq-design-toolbar"><span>Production language: English</span>${badge("ES / PT-BR AVAILABLE INTERNALLY","muted")}</div>
   <div class="acq-design-grid">${designMeta().map(meta=>designCard(meta,lang)).join("")}</div>`;
 }
 function creativeVariant(meta,lang){
@@ -129,11 +135,11 @@ function creativeVariant(meta,lang){
 function creativeCard(meta){
   return `<article class="acq-creative-card">
     <div class="acq-design-top"><span>${esc(meta.system)}</span><strong>${esc(meta.id)} · Social / Ad Creative</strong></div>
-    <div class="acq-creative-variants">${(I18N().LANGUAGES||["en","es","pt-BR"]).map(lang=>creativeVariant(meta,lang)).join("")}</div>
+    <div class="acq-creative-variants">${PRODUCTION_LANGUAGES.map(lang=>creativeVariant(meta,lang)).join("")}</div>
   </article>`;
 }
 function creativesSection(){
-  return `<section class="acq-panel"><div class="acq-panel-head"><div><span>ACQUISITION CREATIVES</span><h3>Social / ad posts — generated automatically from the signal, all 3 languages together</h3></div>${badge("VISUAL CREATIVE READY","good")}${badge("PUBLISH CONNECTOR REQUIRED","warn")}</div>
+  return `<section class="acq-panel"><div class="acq-panel-head"><div><span>ACQUISITION CREATIVES</span><h3>Social / ad posts — generated automatically from the signal (English, production scope)</h3></div>${badge("VISUAL CREATIVE READY","good")}${badge("PUBLISH CONNECTOR REQUIRED","warn")}</div>
   <p class="acq-note">The visual template and copy are real and generated automatically per signal. No server-side PNG export or social publish connector exists yet — DGL does not claim a post was published until that connector is built and configured.</p>
   <div class="acq-creative-grid">${designMeta().map(creativeCard).join("")}</div></section>`;
 }
@@ -148,29 +154,22 @@ async function landingPages(c){
 }
 function renderLanding(c,d,loading){
   const s=d.status||{},pages=d.pages||[];
-  c.innerHTML=head("NEW BUSINESS ACQUISITION","Landing Page Center","Every landing and creative is generated automatically in English, Español and Português (Brasil) — real localized fields, not a literal translation. Automation V2 publishes the real pages server-side.")+
+  c.innerHTML=head("NEW BUSINESS ACQUISITION","Landing Page Center","Every landing and creative is generated automatically in English — real production copy, not placeholder text. Automation V2 publishes the real pages server-side.")+
     metrics([
       ["DESIGN SYSTEMS",designMeta().length,"FTL · LTL · Drayage"],
-      ["LANGUAGES PER PAGE",3,"EN · ES · PT-BR, always generated"],
+      ["LANGUAGES PER PAGE",1,"English (production scope)"],
       ["GENERATED",loading?"…":safeNum(s.landingPages),"From acquisition signals"],
       ["LIVE",loading?"…":safeNum(s.landingLive),"Published automatically"]
     ])+
-    `<div class="acq-callout"><strong>Market routing (default language only)</strong><p>USA / International → English · LATAM → Español · Brazil → Português (Brasil). All three languages are always generated for every landing and creative; routing only decides which one opens first.</p></div>`+
+    `<div class="acq-callout"><strong>Production language scope</strong><p>Every landing and creative generates in English only today. The multilingual engine (Español, Português Brasil) stays built and ready internally — re-enabling it for production is a configuration change, not new development.</p></div>`+
     `<section class="acq-panel"><div class="acq-panel-head"><div><span>LANDING DESIGN SYSTEM</span><h3>What every generated page looks like</h3></div>${badge("VISIBLE WITHOUT BACKEND","good")}</div>
     ${designGrid(landingLang)}</section>`+
     creativesSection()+
     `<div class="acq-toolbar"><span>Normal path: Signal → Generate → Publish → Capture</span><strong>No lead PII is stored in GitHub.</strong></div>
-     <div class="acq-page-grid">${pages.length?pages.map(landingCard).join(""):`<div class="acq-empty"><i data-lucide="circle-dashed"></i><strong>${loading?"Loading generated pages…":"No generated pages yet"}</strong><p>${loading?"Checking the private backend for live landing pages.":"The server scheduler creates evergreen and connector-driven landing pages once Acquisition Automation is deployed. The design system above is real and ships with every generated page, in all three languages."}</p></div>`}</div>`;
+     <div class="acq-page-grid">${pages.length?pages.map(landingCard).join(""):`<div class="acq-empty"><i data-lucide="circle-dashed"></i><strong>${loading?"Loading generated pages…":"No generated pages yet"}</strong><p>${loading?"Checking the private backend for live landing pages.":"The server scheduler creates evergreen and connector-driven landing pages once Acquisition Automation is deployed. The design system above is real and ships with every generated page."}</p></div>`}</div>`;
   icons();
 }
-function bindLanding(c){
-  c.addEventListener("click",e=>{
-    const b=e.target.closest("[data-acq-lang]");
-    if(!b)return;
-    landingLang=b.dataset.acqLang;
-    statusData().then(d=>renderLanding(c,d,false));
-  });
-}
+function bindLanding(c){}
 
 /* ---------- Lead Routing ---------- */
 const ROUTING_FLOW=["FORM SUBMITTED","VALIDATE","DEDUPLICATE","EXISTING CONTACT CHECK","QUALIFY","SALESFORCE","OWNER"];
@@ -218,9 +217,9 @@ function channelSpecs(h){
     {key:"paidMedia",name:"Paid Media",fn:"Generates qualified paid traffic (Google / Meta) into the same automatic lead pipeline as every other channel.",input:"Campaign budget and targeting set in the ad platform",output:"Traffic → Landing Page → Lead Capture",connector:"ACQ_PAID_CONNECTOR",nextAction:"Connect the provider so spend, CPL and conversions can be reported truthfully",blocker:"ACQ_PAID_CONNECTOR is not configured. No spend, CPL or conversion number is shown until it is connected — DGL does not invent paid performance data."},
     {key:"linkedin",name:"LinkedIn Acquisition",fn:"B2B lead generation and prospecting on LinkedIn, routed into the same New Business pipeline.",input:"LinkedIn Ads / Lead Gen Forms campaign",output:"Lead → Validate → Dedupe → Salesforce",connector:"ACQ_LINKEDIN_CONNECTOR",nextAction:"Connect LinkedIn Ads / Lead Gen so campaign and conversion data can be reported truthfully",blocker:"ACQ_LINKEDIN_CONNECTOR is not configured. No LinkedIn spend or lead count is shown until it is connected."},
     {key:"outbound",name:"Outbound / Lead Nurture",fn:"Cold prospecting and lead nurture for new prospects only — never existing DGL accounts.",input:"Prospect list from an approved outbound provider (not AM/AURA accounts)",output:"Reply / Meeting → New Business lead",connector:"ACQ_OUTBOUND_CONNECTOR",nextAction:"Connect an approved bulk provider; deduplicate against Salesforce before any send",blocker:"ACQ_OUTBOUND_CONNECTOR is not configured. No outbound send happens until a provider is connected and dedupe against existing accounts is verified."},
-    {key:"leadIntake",name:"Lead Capture",fn:"Public landing forms (EN/ES/PT-BR) write directly to the private Data Hub — never to GitHub.",input:"Landing form submission",output:"New row in MKT_ACQ_LEADS (private)",connector:"AcquisitionPublicRuntime.gs (public web app)",nextAction:"Validate → Deduplicate → Qualify → Route to Salesforce",blocker:"ACQ_PUBLIC_LANDING_BASE_URL is not configured. Landing pages exist as a governed design system but cannot capture real leads until the public runtime is deployed."},
+    {key:"leadIntake",name:"Lead Capture",fn:"Public landing forms (English, production scope) write directly to the private Data Hub — never to GitHub.",input:"Landing form submission",output:"New row in MKT_ACQ_LEADS (private)",connector:"AcquisitionPublicRuntime.gs (public web app)",nextAction:"Validate → Deduplicate → Qualify → Route to Salesforce",blocker:"ACQ_PUBLIC_LANDING_BASE_URL is not configured. Landing pages exist as a governed design system but cannot capture real leads until the public runtime is deployed."},
     {key:"attribution",name:"Acquisition Attribution",fn:"Closes the loop from source to new-business revenue: source → landing → lead → opportunity → customer.",input:"Routed Salesforce leads and their outcomes",output:"Opportunity / Customer / New Business revenue",connector:"ACQ_ATTRIBUTION_CONNECTOR",nextAction:"Connect the Salesforce outcome sync so revenue can be attributed truthfully",blocker:"ACQ_ATTRIBUTION_CONNECTOR is not configured. Revenue is shown as — rather than a fabricated number."},
-    {key:"wordpress",name:"WordPress Publisher",fn:"Upserts governed, DGL-branded landing pages (EN/ES/PT-BR) to dglus.com — evergreen pages updated in place, never duplicated.",input:"Generated landing variant (headline, copy, CTA, SEO, UTM)",output:"Published/updated WordPress page, form posts back into this same pipeline",connector:"ACQ_WP_BASE_URL / ACQ_WP_USERNAME / ACQ_WP_APP_PASSWORD",nextAction:"Create a WordPress application password and set the 3 Script Properties",blocker:"WordPress credentials are not configured. No page is published until all 3 are set."},
+    {key:"wordpress",name:"WordPress Publisher",fn:"Upserts governed, DGL-branded landing pages (English, production scope) to dglus.com — evergreen pages updated in place, never duplicated.",input:"Generated landing variant (headline, copy, CTA, SEO, UTM)",output:"Published/updated WordPress page, form posts back into this same pipeline",connector:"ACQ_WP_BASE_URL / ACQ_WP_USERNAME / ACQ_WP_APP_PASSWORD",nextAction:"Create a WordPress application password and set the 3 Script Properties",blocker:"WordPress credentials are not configured. No page is published until all 3 are set."},
     {key:"ga4",name:"GA4 Analytics",fn:"Connector contract only — decides whether traffic/conversion reporting can ever appear.",input:"GA4 property id",output:"Traffic/conversion metrics (once the Data API integration is built)",connector:"ACQ_GA4_PROPERTY_ID",nextAction:"Set the property id, then build the GA4 Data API integration",blocker:h.ga4==="CONNECTOR REQUIRED"?"Property id is set, but the GA4 Data API integration is not built yet — no traffic number is shown.":"ACQ_GA4_PROPERTY_ID is not configured."}
   ].map(spec=>({...spec,status:spec.key==="ga4"?(h.ga4||"NOT CONFIGURED"):((h[spec.key]||"NOT CONFIGURED")==="READY"?"READY":"NOT CONFIGURED")}));
 }

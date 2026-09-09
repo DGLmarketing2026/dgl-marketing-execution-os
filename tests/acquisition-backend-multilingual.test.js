@@ -51,14 +51,19 @@ function makeContext(){
   return ctx;
 }
 
-// --- 3 landing variants per signal, all fields populated ---
-(function testThreeVariants(){
+// --- Production generates English-only landing variants (FINAL CANONICAL
+// OPERATING MODEL, 2026-09-09: "Remove ES/PT-BR from the active production
+// workflow for now ... production UI and automation must use English only").
+// The underlying multilingual engine (v6AcqI18n_, MKT_V6_ACQ_LANGUAGES_ALL)
+// stays fully intact -- see testInternalMultilingualPreserved below -- this
+// only asserts what PRODUCTION actually generates today. ---
+(function testEnglishOnlyVariant(){
   const ctx=makeContext();
   const signal={signalId:'SIG-TEST-1',source:'TEST',channel:'Organic',market:'USA',service:'FTL',objective:'Lead Generation',languageOverride:''};
   const result=ctx.v6AcqEnsureLandingVariants_(signal);
-  assert.equal(result.created,3,'must generate exactly 3 variants (en/es/pt-BR) on first run');
-  const langs=result.records.map(r=>r.language).sort();
-  assert.deepEqual(langs,['en','es','pt-BR'].sort(),'must cover all 3 languages');
+  assert.equal(result.created,1,'production must generate exactly 1 variant (English only) per signal');
+  const langs=result.records.map(r=>r.language);
+  assert.deepEqual(langs,['en'],'production must generate only the English variant');
   result.records.forEach(r=>{
     ['landingPageId','signalId','variantKey','language','defaultForMarket','campaignKey','channel','market','service','objective','designSystem','assetPath','slug','headline','subheadline','supportingCopy','ctaLabel','seoTitle','seoDescription','formVariant','utmSource','utmMedium','utmCampaign','status','createdAt','updatedAt'].forEach(field=>{
       assert(Object.prototype.hasOwnProperty.call(r,field),`variant missing field ${field}`);
@@ -67,10 +72,21 @@ function makeContext(){
   });
   const en=result.records.find(r=>r.language==='en');
   assert.equal(en.designSystem,'SPLIT FREIGHT');assert.equal(en.assetPath,'assets/creative/dgl-ftl-truck.webp');
-  assert.equal(en.defaultForMarket,true,'USA market must default to English');
-  assert.equal(result.records.find(r=>r.language==='es').defaultForMarket,false);
-  assert.equal(result.records.find(r=>r.language==='pt-BR').defaultForMarket,false);
-  console.log('PASS: 3 landing variants generated per signal, all fields populated, USA defaults to EN');
+  assert.equal(en.defaultForMarket,true,'the single generated English variant must be the default');
+  console.log('PASS: production generates the English-only landing variant, all fields populated');
+})();
+
+// --- English-only production stays correct even for LATAM/Brazil markets:
+// the market-routing suggestion (es/pt-BR) is clamped to the active
+// (English-only) language set, never silently generating zero variants. ---
+(function testEnglishOnlyClampedForNonEnglishMarkets(){
+  const ctx=makeContext();
+  const signal={signalId:'SIG-TEST-BR',source:'TEST',channel:'Organic',market:'Brazil',service:'LTL',objective:'Lead Generation',languageOverride:''};
+  const result=ctx.v6AcqEnsureLandingVariants_(signal);
+  assert.equal(result.created,1);
+  assert.equal(result.records[0].language,'en');
+  assert.equal(result.records[0].defaultForMarket,true,'must still be marked default even though the market would otherwise suggest pt-BR');
+  console.log('PASS: Brazil/LATAM signals still generate exactly the English variant, correctly marked default');
 })();
 
 // --- Idempotency: signal + language = one variant, never duplicated ---
@@ -78,13 +94,21 @@ function makeContext(){
   const ctx=makeContext();
   const signal={signalId:'SIG-TEST-2',source:'TEST',channel:'Organic',market:'Brazil',service:'LTL',objective:'Lead Generation',languageOverride:''};
   const first=ctx.v6AcqEnsureLandingVariants_(signal);
-  assert.equal(first.created,3);
+  assert.equal(first.created,1);
   const second=ctx.v6AcqEnsureLandingVariants_(signal);
   assert.equal(second.created,0,'re-running the same signal must not create new rows');
   const all=ctx.v6AcqRows_('MKT_ACQ_LANDING_PAGES').filter(r=>r.signalId==='SIG-TEST-2');
-  assert.equal(all.length,3,'total rows for the signal must stay at 3 after a second run');
-  const third=ctx.v6AcqEvaluateSignals_ ? null : null; // evaluateSignals is exercised separately below
+  assert.equal(all.length,1,'total rows for the signal must stay at 1 after a second run');
   console.log('PASS: signal + language idempotency holds across repeated scheduler runs');
+})();
+
+// --- Multilingual engine stays intact internally: re-enabling ES/PT-BR
+// production output later is a one-line change, not a rewrite. ---
+(function testInternalMultilingualPreserved(){
+  const ctx=makeContext();
+  assert.deepEqual(ctx.MKT_V6_ACQ_LANGUAGES_ALL.slice().sort(),['en','es','pt-BR'].sort(),'the full language list must still be defined for internal/future use');
+  assert.deepEqual(ctx.MKT_V6_ACQ_LANGUAGES,['en'],'production language scope must be English-only today');
+  console.log('PASS: multilingual capability preserved internally (MKT_V6_ACQ_LANGUAGES_ALL) while production scope is English-only (MKT_V6_ACQ_LANGUAGES)');
 })();
 
 // --- Market routing defaults ---

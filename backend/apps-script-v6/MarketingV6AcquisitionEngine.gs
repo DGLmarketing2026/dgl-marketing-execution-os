@@ -1,8 +1,15 @@
 // DGL Marketing OS — New Business Acquisition Automation V2
 // Separate from NOVA -> AM -> AURA -> Existing Account Growth.
 // All normal operations are event/trigger driven. No manual lead lists.
-// Every signal generates all 3 language variants (EN/ES/PT-BR). Market
-// routing only decides which variant is defaultForMarket; none is skipped.
+//
+// Production language scope: English only for now (FINAL CANONICAL OPERATING
+// MODEL, 2026-09-09 — "Remove ES/PT-BR from the active production workflow
+// for now ... Keep multilingual code only if useful internally, but
+// production UI and automation must use English only"). v6AcqI18n_ still
+// generates real ES/PT-BR content and MKT_V6_ACQ_LANGUAGES_ALL still lists
+// all three — re-enabling multilingual production output later is a
+// one-line change (set MKT_V6_ACQ_LANGUAGES back to MKT_V6_ACQ_LANGUAGES_ALL),
+// not a rewrite.
 
 var MKT_V6_ACQ_SCHEMA={
   MKT_ACQ_SIGNALS:['signalId','source','channel','market','service','objective','campaignBrief','priority','languageOverride','status','sourceUpdatedAt','createdAt','processedAt','updatedAt'],
@@ -11,7 +18,8 @@ var MKT_V6_ACQ_SCHEMA={
   MKT_ACQ_RUNS:['runId','startedAt','finishedAt','signalsEvaluated','landingsGenerated','landingsReady','leadsEvaluated','leadsQualified','leadsDeduped','salesforceRouted','blocked','status','updatedAt']
 };
 
-var MKT_V6_ACQ_LANGUAGES=['en','es','pt-BR'];
+var MKT_V6_ACQ_LANGUAGES_ALL=['en','es','pt-BR'];
+var MKT_V6_ACQ_LANGUAGES=['en'];
 
 function v6AcqText_(v){return String(v==null?'':v).trim();}
 function v6AcqNow_(){return new Date().toISOString();}
@@ -51,10 +59,13 @@ function v6AcqSetup_(){
   return {status:'ACQUISITION AUTOMATION READY',sheets:Object.keys(MKT_V6_ACQ_SCHEMA).length,evergreenSignals:boot.created,trigger:trigger.status};
 }
 
-// Market routing decides only the DEFAULT variant. All 3 languages are
-// always generated for every signal (see v6AcqEnsureLandingVariants_).
+// Market routing suggests which language WOULD be the default variant for a
+// market (kept intact for when multilingual production output is
+// re-enabled); v6AcqEnsureLandingVariants_ only ever generates the languages
+// listed in MKT_V6_ACQ_LANGUAGES (English-only in production today), so the
+// suggestion is clamped to that active set there.
 function v6AcqLanguageForMarket_(market,override){
-  var o=v6AcqText_(override);if(MKT_V6_ACQ_LANGUAGES.indexOf(o)>=0)return o;
+  var o=v6AcqText_(override);if(MKT_V6_ACQ_LANGUAGES_ALL.indexOf(o)>=0)return o;
   var m=v6AcqText_(market).toUpperCase();
   if(['BR','BRAZIL','BRASIL','SÃO PAULO','SAO PAULO'].some(function(x){return m.indexOf(x)>=0;}))return 'pt-BR';
   var es=['MEXICO','MÉXICO','COLOMBIA','PANAMA','PANAMÁ','PERU','PERÚ','CHILE','ARGENTINA','ECUADOR','COSTA RICA','GUATEMALA','EL SALVADOR','HONDURAS','NICARAGUA','DOMINICAN','REPÚBLICA DOMINICANA','REPUBLICA DOMINICANA','URUGUAY','PARAGUAY','BOLIVIA','LATAM','LATIN'];
@@ -108,7 +119,8 @@ function v6AcqPublicBase_(){return v6AcqText_(PropertiesService.getScriptPropert
 // marks exactly one of them (per v6AcqLanguageForMarket_) without skipping
 // the other two.
 function v6AcqEnsureLandingVariants_(signal){
-  var base=v6AcqPublicBase_(),defaultLanguage=v6AcqLanguageForMarket_(signal.market,signal.languageOverride);
+  var base=v6AcqPublicBase_(),suggestedLanguage=v6AcqLanguageForMarket_(signal.market,signal.languageOverride);
+  var defaultLanguage=MKT_V6_ACQ_LANGUAGES.indexOf(suggestedLanguage)>=0?suggestedLanguage:MKT_V6_ACQ_LANGUAGES[0];
   var design=v6AcqDesignFor_(signal.service),i18n=v6AcqI18n_(signal.service),key=v6AcqCampaignKey_(signal),now=v6AcqNow_();
   var existingAll=v6AcqRows_('MKT_ACQ_LANDING_PAGES').filter(function(r){return v6AcqText_(r.signalId)===v6AcqText_(signal.signalId);});
   var createdCount=0,records=[];
@@ -207,6 +219,8 @@ function v6AcqAutomationTick_(){
   // QA all live in MarketingV6AcquisitionWordPress.gs and run inside this
   // SAME hourly heartbeat — no separate manual workflow is ever required.
   if(typeof v6AcqWordPressTick_==='function'){try{row.wordpress=v6AcqWordPressTick_();}catch(err){row.wordpress={status:'ERROR',error:String(err&&err.message||err)};}}
+  // Automatic landing report + CSV archive every tick — no manual export.
+  try{row.landingReport=v6AcqLandingReport_();}catch(err){row.landingReport={status:'ERROR',error:String(err&&err.message||err)};}
   return row;
 }
 function v6AcqSetupSheetsOnly_(){Object.keys(MKT_V6_ACQ_SCHEMA).forEach(function(name){v6AcqEnsureSheet_(name,MKT_V6_ACQ_SCHEMA[name]);});return true;}
@@ -235,3 +249,39 @@ function v6AcqStatus_(){
   };
 }
 function v6AcqRun_(){return {run:v6AcqAutomationTick_(),status:v6AcqStatus_()};}
+
+// --- Automatic landing report ----------------------------------------------
+// One row per published landing page, upserted automatically — no manual
+// export required. Visits/Conversion Rate are only ever populated once a
+// real analytics connector (GA4) exists; they stay blank otherwise, never
+// fabricated. Leads/Qualified Leads are always real counts from MKT_ACQ_LEADS.
+var MKT_V6_LANDING_REPORT_HEADERS=['campaignKey','service','landingUrl','publishedAt','visits','leads','qualifiedLeads','conversionRate','utmSource','utmMedium','utmCampaign','status'];
+function v6AcqLandingReportRows_(){
+  var pages=v6AcqRows_('MKT_ACQ_LANDING_PAGES'),leads=v6AcqRows_('MKT_ACQ_LEADS');
+  var ga4Ready=(typeof v6AcqGa4Status_==='function')&&v6AcqGa4Status_().status==='CONNECTED';
+  return pages.map(function(p){
+    var pageLeads=leads.filter(function(l){return v6AcqText_(l.landingPageId)===v6AcqText_(p.landingPageId);});
+    var qualified=pageLeads.filter(function(l){return v6AcqText_(l.qualificationStatus)==='QUALIFIED_REQUIREMENT';}).length;
+    var visits=ga4Ready?Number(p.visits||0):'';
+    return {
+      campaignKey:p.campaignKey,service:p.service,landingUrl:p.publishedUrl||p.wpUrl||'',publishedAt:p.status==='LIVE'?p.updatedAt:'',
+      visits:visits,leads:pageLeads.length,qualifiedLeads:qualified,
+      conversionRate:(ga4Ready&&visits)?(pageLeads.length/visits):'', // never fabricated: blank unless real traffic exists
+      utmSource:p.utmSource,utmMedium:p.utmMedium,utmCampaign:p.utmCampaign,status:p.status
+    };
+  });
+}
+function v6AcqLandingReportCsv_(){return (typeof v6Csv_==='function')?v6Csv_(MKT_V6_LANDING_REPORT_HEADERS,v6AcqLandingReportRows_()):'';}
+function v6AcqArchiveLandingReport_(){
+  try{
+    var folderId=v6AcqText_(PropertiesService.getScriptProperties().getProperty('ACQ_LANDING_REPORT_ARCHIVE_FOLDER_ID'))||(typeof MKT_V6_ARCHIVE!=='undefined'&&MKT_V6_ARCHIVE.results);
+    if(!folderId)return {status:'ARCHIVE FOLDER NOT CONFIGURED',fileId:''};
+    var csv=v6AcqLandingReportCsv_();if(!csv)return {status:'ARCHIVE PENDING',fileId:''};
+    var file=DriveApp.getFolderById(folderId).createFile('acquisition-landing-report-'+v6AcqNow_().slice(0,10)+'.csv',csv,MimeType.CSV);
+    return {status:'CSV ARCHIVED',fileId:file.getId()};
+  }catch(err){return {status:'ARCHIVE ERROR',fileId:'',error:String(err&&err.message||err)};}
+}
+function v6AcqLandingReport_(){
+  var rows=v6AcqLandingReportRows_();
+  return {status:'OK',rows:rows.length,report:rows,archive:v6AcqArchiveLandingReport_()};
+}

@@ -41,12 +41,27 @@ function load(){
   console.log('PASS: Safe Data Hub recovery snapshot carries only owner-level aggregates, no account/contact PII');
 })();
 
-// --- Recovery is scoped to Campaign Opportunities only (per explicit instruction) ---
-(function testScopedToOpportunitiesOnly(){
+// --- Recovery now covers every Existing Account Growth route, not just
+// Campaign Opportunities (superseding the earlier Campaign-Opportunities-only
+// policy per explicit later instruction: "Retention / Reactivation / QNB /
+// Cross-Sell must never show false zeros. Use the same safe recovery
+// strategy as Campaign Opportunities when live V6 returns an invalid/empty
+// payload.") ---
+(function testRecoveryCoversAllAmRoutes(){
   assert(source.includes('R["campaign-opportunities"]=campaignOpportunitiesView'),'campaign-opportunities must use the dedicated recovery-aware view');
-  assert(source.includes('R["retention"]=c=>scopeView('),'other Existing Account Growth routes must keep using the standard (non-recovery) scopeView');
-  console.log('PASS: Safe Data Hub recovery is scoped to Campaign Opportunities; other AM routes are unaffected');
+  assert(/function scopeView\([^)]*\)\{[\s\S]{0,400}liveWithRecovery\(\)/.test(source),'scopeView (used by retention/reactivation/quoted-not-booked/growth) must also use liveWithRecovery, not the plain "private backend required" empty state');
+  console.log('PASS: Safe Data Hub recovery covers every Existing Account Growth route (scopeView included)');
 })();
 
+return (async function testRetentionRendersWhenDisconnected(){
+  const {window}=load();
+  const container={innerHTML:''};
+  await window.DGL_MODULE_RENDERERS['retention'](container);
+  assert(container.innerHTML.includes('SAFE DATA HUB RECOVERY'),'Retention must show the Safe Data Hub Recovery banner when V6 live is disconnected, never "Private backend required"');
+  assert(!container.innerHTML.includes('Private backend required'),'Retention must render real aggregates instead of the empty "private backend required" state');
+  console.log('PASS: Retention / Nurture renders Safe Data Hub Recovery when disconnected (never a false empty state)');
+})();
+
+}).then(()=>{
 console.log('Lifecycle Safe Data Hub recovery: ALL PASS');
 }).catch(e=>{console.error(e);process.exitCode=1;});

@@ -225,18 +225,24 @@ function card(x){
   </article>`;
 }
 async function scopeView(c,{title,sub,fams=null,service=null,eye="CAMPAIGN ENGINE · LIVE"}){
-  if(!C())return required(c,title,sub);
-  const d=await live(),all=d.groups||[];
+  // Retention/Reactivation/QNB/Cross-Sell must never show a false empty
+  // state: fall back to the same Safe Data Hub Recovery snapshot Campaign
+  // Opportunities uses whenever live V6 is disconnected or returns an
+  // invalid/empty payload. Owners and scopes stay visible either way.
+  const {groups:all,recovered}=await liveWithRecovery();
   let base=all;
   if(fams)base=base.filter(x=>fams.includes(family(x.opportunityType)));
   if(service)base=base.filter(x=>U(x.service)===U(service));
   const visible=filterOwner(base).sort((a,b)=>(+a.priority||99)-(+b.priority||99)||(+b.eligibleAccounts||0)-(+a.eligibleAccounts||0));
   const det=visible.reduce((s,x)=>s+(+x.detectedAccounts||0),0),eli=visible.reduce((s,x)=>s+(+x.eligibleAccounts||0),0),sup=visible.reduce((s,x)=>s+(+x.suppressedAccounts||0),0);
   g.__DGL_LIFE_GROUPS=Object.fromEntries(all.map(x=>[scopeId(x),x]));
-  c.innerHTML=header(title,sub,eye)+ownerToolbar(base)+
+  const statusBadge=recovered?badge("SAFE DATA HUB RECOVERY","warn"):badge("PRIVATE BACKEND / LIVE","live");
+  const head=`<div class="page-head"><div><div class="eyebrow">${E(eye)}</div><h2>${E(title)}</h2><p class="lede">${E(sub)}</p></div><div class="page-head-actions">${statusBadge}${C()?'<button class="btn btn-secondary" data-life-refresh>REFRESH VIEW</button>':'<button class="btn btn-primary" data-life-connect>CONNECT PRIVATE BACKEND</button>'}</div></div>`;
+  const recoveryNotice=recovered?`<div class="life-status-strip warn"><div><span>DATA SOURCE</span><strong>SAFE DATA HUB RECOVERY</strong></div><p>Live V6 routing is not responding; owner and opportunity aggregates are restored from the governed Data Hub snapshot (${E(RECOVERY_SNAPSHOT_AT)}). Only owner-level counts are shown — no account, contact or quote identifier is included.</p></div>`:"";
+  c.innerHTML=head+ownerToolbar(base)+recoveryNotice+
     kpis([["DETECTED SIGNALS",det],["ELIGIBLE ACCOUNTS",eli],["SUPPRESSED",sup],["AUTOMATIC SCOPES",visible.length]])+
     `<div class="life-status-strip"><div><span>Operating rule</span><strong>AUTOMATIC SCOPE GENERATION</strong></div><p>No recurring manual account selection. Rules decide eligibility, suppression, pressure and routing.</p></div>
-     <div class="life-scope-stack">${visible.length?visible.map(card).join(""):`<div class="life-empty"><strong>No live scopes for ${E(selectedOwner())}</strong></div>`}</div>`;
+     <div class="life-scope-stack">${visible.length?visible.map(card).join(""):`<div class="life-empty"><strong>No scopes for ${E(selectedOwner())}</strong></div>`}</div>`;
 }
 async function campaignOpportunitiesView(c){
   const title="Campaign Opportunities",sub="All report-derived opportunities grouped into automatic governed scopes.";

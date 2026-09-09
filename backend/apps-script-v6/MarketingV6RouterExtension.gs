@@ -94,6 +94,12 @@ function routeMarketingV6_(action, payload) {
       return typeof v6AcqWpQaRun_ === 'function' ? v6AcqWpQaRun_(p) : v6RouteMissing_(a, 'v6AcqWpQaRun_');
     case 'v6AcqGa4Status':
       return typeof v6AcqGa4Status_ === 'function' ? v6AcqGa4Status_(p) : v6RouteMissing_(a, 'v6AcqGa4Status_');
+    case 'v6AcqLandingReport':
+      return typeof v6AcqLandingReport_ === 'function' ? v6AcqLandingReport_(p) : v6RouteMissing_(a, 'v6AcqLandingReport_');
+    case 'v6AuraAutomationTick':
+      return typeof v6AuraAutomationTick_ === 'function' ? v6AuraAutomationTick_(p) : v6RouteMissing_(a, 'v6AuraAutomationTick_');
+    case 'v6AuraAutomaticReportStatus':
+      return typeof v6AuraAutomaticReportStatus_ === 'function' ? v6AuraAutomaticReportStatus_(p) : v6RouteMissing_(a, 'v6AuraAutomaticReportStatus_');
     default:
       return null;
   }
