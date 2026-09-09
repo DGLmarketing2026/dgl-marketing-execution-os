@@ -108,11 +108,14 @@ function designGrid(lang){
 }
 function creativeVariant(meta,lang){
   const cr=I18N().creativeContent(meta.id,lang);
-  return `<div class="acq-creative-variant"><span class="acq-creative-lang">${esc(LANG_LABEL[lang])}</span>
-    <strong>${esc(cr.headline)}</strong><p>${esc(cr.supportingLine)}</p>
-    <p class="acq-creative-social">${esc(cr.socialPost)}</p>
-    <div class="acq-creative-hashtags">${cr.hashtags.map(h=>`<span>${esc(h)}</span>`).join("")}</div>
-    <span class="acq-creative-cta">${esc(cr.cta)}</span></div>`;
+  return `<div class="acq-creative-variant">
+    <div class="acq-creative-visual" style="background-image:url('${esc(meta.asset)}')"><div class="acq-creative-overlay"><span class="acq-creative-lang">${esc(LANG_LABEL[lang])}</span><strong>${esc(cr.headline)}</strong><p>${esc(cr.supportingLine)}</p><span class="acq-creative-cta">${esc(cr.cta)}</span></div></div>
+    <div class="acq-creative-copy">
+      <p class="acq-creative-social">${esc(cr.socialPost)}</p>
+      <p class="acq-creative-desc">${esc(cr.description)}</p>
+      <div class="acq-creative-hashtags">${cr.hashtags.map(h=>`<span>${esc(h)}</span>`).join("")}</div>
+    </div>
+  </div>`;
 }
 function creativeCard(meta){
   return `<article class="acq-creative-card">
@@ -121,7 +124,8 @@ function creativeCard(meta){
   </article>`;
 }
 function creativesSection(){
-  return `<section class="acq-panel"><div class="acq-panel-head"><div><span>ACQUISITION CREATIVES</span><h3>Social / ad posts — all 3 languages generated together</h3></div>${badge("EN · ES · PT-BR","good")}</div>
+  return `<section class="acq-panel"><div class="acq-panel-head"><div><span>ACQUISITION CREATIVES</span><h3>Social / ad posts — generated automatically from the signal, all 3 languages together</h3></div>${badge("VISUAL CREATIVE READY","good")}${badge("PUBLISH CONNECTOR REQUIRED","warn")}</div>
+  <p class="acq-note">The visual template and copy are real and generated automatically per signal. No server-side PNG export or social publish connector exists yet — DGL does not claim a post was published until that connector is built and configured.</p>
   <div class="acq-creative-grid">${designMeta().map(creativeCard).join("")}</div></section>`;
 }
 function landingCard(p){
@@ -184,9 +188,59 @@ async function leadRouting(c){
   icons();
 }
 
+/* ---------- Channels audit: function / status / input / output / connector / next action / blocker ---------- */
+function channelDetail(x){
+  const ready=x.status==="READY";
+  return `<article class="acq-channel-detail">
+    <div class="acq-channel-detail-top"><h3>${esc(x.name)}</h3>${badge(x.status,ready?"good":"warn")}</div>
+    <p class="acq-channel-fn">${esc(x.fn)}</p>
+    <div class="acq-channel-grid-mini">
+      <div><span>INPUT</span><strong>${esc(x.input)}</strong></div>
+      <div><span>OUTPUT</span><strong>${esc(x.output)}</strong></div>
+      <div><span>CONNECTOR</span><strong>${esc(x.connector)}</strong></div>
+      <div><span>NEXT AUTOMATIC ACTION</span><strong>${esc(x.nextAction)}</strong></div>
+    </div>
+    ${ready?"":`<div class="acq-channel-blocker"><strong>BLOCKER</strong><p>${esc(x.blocker)}</p></div>`}
+  </article>`;
+}
+function channelSpecs(h){
+  h=h||{};
+  return [
+    {key:"paidMedia",name:"Paid Media",fn:"Generates qualified paid traffic (Google / Meta) into the same automatic lead pipeline as every other channel.",input:"Campaign budget and targeting set in the ad platform",output:"Traffic → Landing Page → Lead Capture",connector:"ACQ_PAID_CONNECTOR",nextAction:"Connect the provider so spend, CPL and conversions can be reported truthfully",blocker:"ACQ_PAID_CONNECTOR is not configured. No spend, CPL or conversion number is shown until it is connected — DGL does not invent paid performance data."},
+    {key:"linkedin",name:"LinkedIn Acquisition",fn:"B2B lead generation and prospecting on LinkedIn, routed into the same New Business pipeline.",input:"LinkedIn Ads / Lead Gen Forms campaign",output:"Lead → Validate → Dedupe → Salesforce",connector:"ACQ_LINKEDIN_CONNECTOR",nextAction:"Connect LinkedIn Ads / Lead Gen so campaign and conversion data can be reported truthfully",blocker:"ACQ_LINKEDIN_CONNECTOR is not configured. No LinkedIn spend or lead count is shown until it is connected."},
+    {key:"outbound",name:"Outbound / Lead Nurture",fn:"Cold prospecting and lead nurture for new prospects only — never existing DGL accounts.",input:"Prospect list from an approved outbound provider (not AM/AURA accounts)",output:"Reply / Meeting → New Business lead",connector:"ACQ_OUTBOUND_CONNECTOR",nextAction:"Connect an approved bulk provider; deduplicate against Salesforce before any send",blocker:"ACQ_OUTBOUND_CONNECTOR is not configured. No outbound send happens until a provider is connected and dedupe against existing accounts is verified."},
+    {key:"leadIntake",name:"Lead Capture",fn:"Public landing forms (EN/ES/PT-BR) write directly to the private Data Hub — never to GitHub.",input:"Landing form submission",output:"New row in MKT_ACQ_LEADS (private)",connector:"AcquisitionPublicRuntime.gs (public web app)",nextAction:"Validate → Deduplicate → Qualify → Route to Salesforce",blocker:"ACQ_PUBLIC_LANDING_BASE_URL is not configured. Landing pages exist as a governed design system but cannot capture real leads until the public runtime is deployed."},
+    {key:"attribution",name:"Acquisition Attribution",fn:"Closes the loop from source to new-business revenue: source → landing → lead → opportunity → customer.",input:"Routed Salesforce leads and their outcomes",output:"Opportunity / Customer / New Business revenue",connector:"ACQ_ATTRIBUTION_CONNECTOR",nextAction:"Connect the Salesforce outcome sync so revenue can be attributed truthfully",blocker:"ACQ_ATTRIBUTION_CONNECTOR is not configured. Revenue is shown as — rather than a fabricated number."}
+  ].map(spec=>({...spec,status:(h[spec.key]||"NOT CONFIGURED")==="READY"?"READY":"NOT CONFIGURED"}));
+}
+async function channelOrchestration(c){
+  c.innerHTML=head("NEW BUSINESS ACQUISITION","Channel Orchestration","Every acquisition channel funnels into one lead pipeline. No channel keeps its own manual list or its own owner.")+`<div class="acq-empty"><i data-lucide="loader-circle"></i><strong>Loading channel health…</strong></div>`;
+  icons();
+  const d=await statusData(),h=(d.status||{}).health||{};
+  c.innerHTML=head("NEW BUSINESS ACQUISITION","Channel Orchestration","Every acquisition channel funnels into one lead pipeline. No channel keeps its own manual list or its own owner.")+
+    `<div class="acq-channel-detail-grid">${channelSpecs(h).map(channelDetail).join("")}</div>`+
+    (d.error?`<p class="acq-note">${esc(d.error)}</p>`:"");
+  icons();
+}
+async function channelPage(c,key,title,sub){
+  c.innerHTML=head("NEW BUSINESS ACQUISITION",title,sub)+`<div class="acq-empty"><i data-lucide="loader-circle"></i><strong>Loading channel health…</strong></div>`;
+  icons();
+  const d=await statusData(),h=(d.status||{}).health||{},spec=channelSpecs(h).find(x=>x.key===key);
+  c.innerHTML=head("NEW BUSINESS ACQUISITION",title,sub)+
+    `<div class="acq-channel-detail-grid">${channelDetail(spec)}</div>`+
+    (d.error?`<p class="acq-note">${esc(d.error)}</p>`:"");
+  icons();
+}
+
 R["acquisition-command-center"]=commandCenter;
 R["landing-pages"]=landingPages;
 R["lead-routing"]=leadRouting;
+R["channel-orchestration"]=channelOrchestration;
+R["paid-media"]=c=>channelPage(c,"paidMedia","Paid Media","Paid campaigns feed the same automatic lead pipeline; the UI never invents spend, CPL or conversions.");
+R["linkedin-acquisition"]=c=>channelPage(c,"linkedin","LinkedIn Acquisition","LinkedIn campaigns and Lead Gen enter the same automated lead pipeline as every other channel.");
+R["outbound-acquisition"]=c=>channelPage(c,"outbound","Outbound / Lead Nurture","Cold prospects only, deduplicated against Salesforce before any production send.");
+R["lead-capture"]=c=>channelPage(c,"leadIntake","Lead Capture","The single point where new leads from landing pages and forms enter the private Data Hub.");
+R["acquisition-attribution"]=c=>channelPage(c,"attribution","Acquisition Attribution","Closed loop from source to new-business revenue, never mixed with Existing Account Growth revenue.");
 
-g.DGL_ACQUISITION_VISUAL_V3={designMeta};
+g.DGL_ACQUISITION_VISUAL_V3={designMeta,channelSpecs};
 })(window);

@@ -24,6 +24,6 @@ assert(!requestsUi.includes("AMR-LOCAL"));
 assert(automation.includes('api.createCampaign({requestId:r.id,strategy:context})'));
 assert(automation.includes('await api.recordResponse(payload)'));
 assert(agent.includes("FUTURE AUTOMATION LAYER"));
-assert(index.includes('google-apps-script-bridge.js'));
-assert(index.includes('marketing-backend-adapter-v55.js?v=20260826-6'));
+assert(!index.includes('google-apps-script-bridge.js'),"legacy V5.5 status bridge is retired from the active load chain");
+assert(/marketing-backend-adapter-v55\.js\?v=\d{8}-\d+/.test(index),"backend adapter must still be loaded with a cache-busting version query");
 console.log("V5.5 private backend adapter contract: PASS");

@@ -15,6 +15,7 @@ ok(router.includes('v6AcqStatus')&&router.includes('v6AcqRun')&&router.includes(
 ok(adapter.includes('v6AcqLandingPages')&&adapter.includes('v6AcqRouteLeads'),'frontend adapter routes missing');
 ok(pub.includes('MKT_DATA_HUB_ID')&&pub.includes('doPost'),'public lead intake runtime missing');
 ok(pub.includes('website')&&pub.includes('LockService'),'public intake anti-spam/lock controls missing');
-ok(!engine.includes('DGLmarketing2026')&&!pub.includes('DGLmarketing2026'),'backend should not depend on GitHub for business data');
+ok(!engine.includes('DGLmarketing2026')&&!/dglmarketing2026/i.test(engine),'private engine must not depend on GitHub for business data');
+ok(!/UrlFetchApp\.fetch\([^)]*github/i.test(pub)&&!/api\.github\.com|githubusercontent\.com\/[^'"]*\/contents/i.test(pub),'public runtime must not fetch GitHub for business/data logic (the ACQ_PUBLIC_ASSET_BASE constant referencing the public GitHub Pages CDN is a documented exception used only for hero image URLs baked into generated HTML, never for spreadsheet/lead data)');
 if(failures.length){console.error('FAIL',failures);process.exit(1)}
 console.log('PASS acquisition-automation-v2-static',14,'checks');

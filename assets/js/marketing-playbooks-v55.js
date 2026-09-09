@@ -75,6 +75,7 @@ function validateRequest(r){
   if(!automatic&&!String(r.amOwner||"").trim())missing.push("amOwner");
   const objective=norm(r.objective);
   if((objective==="QUOTED NOT BOOKED"||objective==="QNB")&&!String(r.qnbWindow||r.window||"").trim())missing.push("qnbWindow");
+  if(objective==="LANE CAMPAIGN"&&!String(r.lane||"").trim())missing.push("lane");
   const playbook=getPlaybookForRequest(r);
   if(!playbook&&!missing.includes("objective"))missing.push("supported playbook");
   return{valid:missing.length===0,status:missing.length?"DATA / POLICY BLOCKED":"AUTOMATION READY",automationStatus:missing.length?"DATA / POLICY BLOCKED":"AUTOMATION READY",marketingStatus:missing.length?"DATA / POLICY BLOCKED":"AUTOMATION READY",missingFields:missing,playbookId:playbook&&playbook.id,policy:policyDecision(r)};
