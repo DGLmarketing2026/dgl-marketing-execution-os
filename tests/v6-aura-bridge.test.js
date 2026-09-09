@@ -219,6 +219,8 @@ function emptyReportTables(overrides){
 })();
 
 ['v6AuraEvaluateRetention:v6AuraEvaluateRetention_','v6AuraStatus:v6AuraStatus_','v6AuraEnsureCampaignScope:v6AuraEnsureCampaignScope_','v6AuraCreateAccountStop:v6AuraCreateAccountStop_','v6AuraCreateAmHandoff:v6AuraCreateAmHandoff_'].forEach(function(entry){
-  assert(routerSource.includes(entry),'router must expose '+entry);
+  var action=entry.split(':')[0],handler=entry.split(':')[1];
+  var caseRe=new RegExp("case '"+action+"'\\s*:[\\s\\S]{0,200}"+handler);
+  assert(routerSource.includes(entry)||caseRe.test(routerSource),'router must expose '+entry);
 });
 console.log('V6 AURA Retention Bridge: ALL PASS');

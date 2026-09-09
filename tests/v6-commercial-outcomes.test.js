@@ -109,5 +109,5 @@ function makeContext(tables){
   console.log('commercial outcomes test (multi-campaign concurrency preserves campaignId): PASS');
 })();
 
-assert(routerSource.includes('v6IngestCommercialOutcomes:v6IngestCommercialOutcomes_'),'router must expose v6IngestCommercialOutcomes');
+assert(routerSource.includes('v6IngestCommercialOutcomes:v6IngestCommercialOutcomes_')||/case 'v6IngestCommercialOutcomes'\s*:[\s\S]{0,200}v6IngestCommercialOutcomes_/.test(routerSource),'router must expose v6IngestCommercialOutcomes');
 console.log('V6 commercial outcomes ingestion: ALL PASS');
