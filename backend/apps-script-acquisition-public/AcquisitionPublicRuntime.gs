@@ -5,6 +5,7 @@
 
 var ACQ_PUBLIC_LP_SHEET='MKT_ACQ_LANDING_PAGES';
 var ACQ_PUBLIC_LEAD_SHEET='MKT_ACQ_LEADS';
+var ACQ_PUBLIC_QA_LEAD_SHEET='MKT_ACQ_QA_LEADS';
 var ACQ_PUBLIC_ASSET_BASE='https://dglmarketing2026.github.io/dgl-marketing-execution-os/';
 var ACQ_PUBLIC_LANGUAGES=['en','es','pt-BR'];
 var ACQ_PUBLIC_LANGUAGE_NAME={en:'English',es:'Español','pt-BR':'Português (Brasil)'};
@@ -50,8 +51,21 @@ function doPost(e){
   var landing=acqPubFindLanding_(p.slug);if(!landing)return HtmlService.createHtmlOutput(acqPubUnavailableHtml_()).setTitle('DGL');
   var email=acqPubText_(p.email).toLowerCase(),company=acqPubText_(p.company),service=acqPubText_(p.service||landing.service);
   if(!company||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||!service)return HtmlService.createHtmlOutput(acqPubErrorHtml_(landing));
-  var now=new Date().toISOString(),leadId='LEAD-'+Utilities.getUuid().replace(/-/g,'').slice(0,18).toUpperCase();
-  var record={leadId:leadId,landingPageId:landing.landingPageId,signalId:landing.signalId,createdAt:now,firstName:acqPubText_(p.firstName),lastName:acqPubText_(p.lastName),company:company,email:email,phone:acqPubText_(p.phone),country:acqPubText_(p.country),service:service,origin:acqPubText_(p.origin),destination:acqPubText_(p.destination),notes:acqPubText_(p.notes),utmSource:acqPubText_(p.utm_source||landing.utmSource),utmMedium:acqPubText_(p.utm_medium||landing.utmMedium),utmCampaign:acqPubText_(p.utm_campaign||landing.utmCampaign),validationStatus:'PENDING',dedupeStatus:'PENDING',existingContactId:'',existingAccountId:'',qualificationStatus:'PENDING',scoreStatus:'PENDING',routingStatus:'PENDING',salesforceLeadId:'',salesforceLeadOwner:'',routedAt:'',updatedAt:now};
+  var now=new Date().toISOString();
+  // A submission is treated as a QA synthetic lead ONLY when it explicitly
+  // requests qa=1 AND lands on a page whose signal was created by the QA
+  // runner (ACQ-QA- prefix). A real production landing's signalId can never
+  // start with that prefix, so a stray qa=1 on a real page has no effect —
+  // it still routes to the normal lead sheet. This keeps Salesforce routing
+  // and Existing Account Growth completely unreachable from a QA run.
+  var isQa=acqPubText_(p.qa)==='1'&&/^ACQ-QA-/.test(acqPubText_(landing.signalId));
+  if(isQa){
+    var qaRecord={leadId:'QALEAD-'+Utilities.getUuid().replace(/-/g,'').slice(0,16).toUpperCase(),landingPageId:landing.landingPageId,signalId:landing.signalId,createdAt:now,company:company,email:email,service:service,utmSource:acqPubText_(p.utm_source||landing.utmSource),utmMedium:acqPubText_(p.utm_medium||landing.utmMedium),utmCampaign:acqPubText_(p.utm_campaign||landing.utmCampaign),qaRunId:acqPubText_(p.qaRunId)};
+    var qaLock=LockService.getScriptLock();qaLock.waitLock(10000);try{acqPubAppend_(ACQ_PUBLIC_QA_LEAD_SHEET,qaRecord);}finally{qaLock.releaseLock();}
+    return HtmlService.createHtmlOutput(acqPubThanksHtml_(landing)).setTitle('DGL').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+  var leadId='LEAD-'+Utilities.getUuid().replace(/-/g,'').slice(0,18).toUpperCase();
+  var record={leadId:leadId,landingPageId:landing.landingPageId,signalId:landing.signalId,createdAt:now,firstName:acqPubText_(p.firstName),lastName:acqPubText_(p.lastName),company:company,email:email,phone:acqPubText_(p.phone),country:acqPubText_(p.country),service:service,origin:acqPubText_(p.origin),destination:acqPubText_(p.destination),notes:acqPubText_(p.notes),utmSource:acqPubText_(p.utm_source||landing.utmSource),utmMedium:acqPubText_(p.utm_medium||landing.utmMedium),utmCampaign:acqPubText_(p.utm_campaign||landing.utmCampaign),validationStatus:'PENDING',dedupeStatus:'PENDING',existingContactId:'',existingAccountId:'',qualificationStatus:'PENDING',scoreStatus:'PENDING',routingStatus:'PENDING',salesforceLeadId:'',salesforceLeadOwner:'',cycleId:acqPubText_(landing.cycleId),routedAt:'',updatedAt:now};
   // Lead PII is appended only to the private Data Hub, guarded by a script
   // lock so concurrent submissions cannot race/overwrite each other. It is
   // never written to GitHub or any public-readable location.

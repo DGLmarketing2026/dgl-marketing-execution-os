@@ -63,9 +63,18 @@ async function commandCenter(c){
       <section class="acq-panel"><div class="acq-panel-head"><div><span>BOUNDARY</span><h3>Existing Accounts stay separate</h3></div>${badge("CANONICAL","good")}</div>
       <div class="acq-callout"><strong>NOVA / SALESFORCE → AM INTELLIGENCE → AURA → MARKETING OS</strong><p>Retention, Reactivation, QNB and Cross-Sell remain Existing Account Growth. This loop never depends on AM.</p></div></section>
     </div>`+
+    cyclePanel(s)+
     (d.error?`<p class="acq-note">${esc(d.error)}</p><div class="acq-callout"><strong>AUTOMATION RUNS SERVER-SIDE</strong><p>The acquisition engine does not depend on this browser. Connect the private backend only to inspect live status; scheduled automation continues in Apps Script.</p></div>`:"");
   c.querySelector("[data-acq-run]")?.addEventListener("click",()=>runQa(c));
   icons();
+}
+function cyclePanel(s){
+  const cycle=s.cycle;
+  if(!cycle)return "";
+  const inSync=cycle.gateInSync,current=cycle.current;
+  return `<section class="acq-panel"><div class="acq-panel-head"><div><span>BIMONTHLY PUBLISHING CYCLE</span><h3>${esc(cycle.dueLabel||cycle.dueCycleId||"—")}</h3></div>${badge(inSync?"CYCLE OPEN":"AWAITING NEXT TICK",inSync?"good":"warn")}</div>
+    <div class="acq-callout"><strong>Sep → Nov → Jan → Mar → May → Jul, evergreen pages upserted, never duplicated</strong><p>${current?`Cycle ${esc(current.cycleId)} is ${esc(current.status||"OPEN")}${current.leads?`, ${esc(current.leads)} leads`:""}. The hourly heartbeat opens/closes cycles automatically — no manual scheduler run required.`:"No cycle has been opened yet; the next hourly tick will open the due cycle automatically."}</p></div>
+  </section>`;
 }
 async function runQa(c){
   const btn=c.querySelector("[data-acq-run]");
@@ -210,8 +219,10 @@ function channelSpecs(h){
     {key:"linkedin",name:"LinkedIn Acquisition",fn:"B2B lead generation and prospecting on LinkedIn, routed into the same New Business pipeline.",input:"LinkedIn Ads / Lead Gen Forms campaign",output:"Lead → Validate → Dedupe → Salesforce",connector:"ACQ_LINKEDIN_CONNECTOR",nextAction:"Connect LinkedIn Ads / Lead Gen so campaign and conversion data can be reported truthfully",blocker:"ACQ_LINKEDIN_CONNECTOR is not configured. No LinkedIn spend or lead count is shown until it is connected."},
     {key:"outbound",name:"Outbound / Lead Nurture",fn:"Cold prospecting and lead nurture for new prospects only — never existing DGL accounts.",input:"Prospect list from an approved outbound provider (not AM/AURA accounts)",output:"Reply / Meeting → New Business lead",connector:"ACQ_OUTBOUND_CONNECTOR",nextAction:"Connect an approved bulk provider; deduplicate against Salesforce before any send",blocker:"ACQ_OUTBOUND_CONNECTOR is not configured. No outbound send happens until a provider is connected and dedupe against existing accounts is verified."},
     {key:"leadIntake",name:"Lead Capture",fn:"Public landing forms (EN/ES/PT-BR) write directly to the private Data Hub — never to GitHub.",input:"Landing form submission",output:"New row in MKT_ACQ_LEADS (private)",connector:"AcquisitionPublicRuntime.gs (public web app)",nextAction:"Validate → Deduplicate → Qualify → Route to Salesforce",blocker:"ACQ_PUBLIC_LANDING_BASE_URL is not configured. Landing pages exist as a governed design system but cannot capture real leads until the public runtime is deployed."},
-    {key:"attribution",name:"Acquisition Attribution",fn:"Closes the loop from source to new-business revenue: source → landing → lead → opportunity → customer.",input:"Routed Salesforce leads and their outcomes",output:"Opportunity / Customer / New Business revenue",connector:"ACQ_ATTRIBUTION_CONNECTOR",nextAction:"Connect the Salesforce outcome sync so revenue can be attributed truthfully",blocker:"ACQ_ATTRIBUTION_CONNECTOR is not configured. Revenue is shown as — rather than a fabricated number."}
-  ].map(spec=>({...spec,status:(h[spec.key]||"NOT CONFIGURED")==="READY"?"READY":"NOT CONFIGURED"}));
+    {key:"attribution",name:"Acquisition Attribution",fn:"Closes the loop from source to new-business revenue: source → landing → lead → opportunity → customer.",input:"Routed Salesforce leads and their outcomes",output:"Opportunity / Customer / New Business revenue",connector:"ACQ_ATTRIBUTION_CONNECTOR",nextAction:"Connect the Salesforce outcome sync so revenue can be attributed truthfully",blocker:"ACQ_ATTRIBUTION_CONNECTOR is not configured. Revenue is shown as — rather than a fabricated number."},
+    {key:"wordpress",name:"WordPress Publisher",fn:"Upserts governed, DGL-branded landing pages (EN/ES/PT-BR) to dglus.com — evergreen pages updated in place, never duplicated.",input:"Generated landing variant (headline, copy, CTA, SEO, UTM)",output:"Published/updated WordPress page, form posts back into this same pipeline",connector:"ACQ_WP_BASE_URL / ACQ_WP_USERNAME / ACQ_WP_APP_PASSWORD",nextAction:"Create a WordPress application password and set the 3 Script Properties",blocker:"WordPress credentials are not configured. No page is published until all 3 are set."},
+    {key:"ga4",name:"GA4 Analytics",fn:"Connector contract only — decides whether traffic/conversion reporting can ever appear.",input:"GA4 property id",output:"Traffic/conversion metrics (once the Data API integration is built)",connector:"ACQ_GA4_PROPERTY_ID",nextAction:"Set the property id, then build the GA4 Data API integration",blocker:h.ga4==="CONNECTOR REQUIRED"?"Property id is set, but the GA4 Data API integration is not built yet — no traffic number is shown.":"ACQ_GA4_PROPERTY_ID is not configured."}
+  ].map(spec=>({...spec,status:spec.key==="ga4"?(h.ga4||"NOT CONFIGURED"):((h[spec.key]||"NOT CONFIGURED")==="READY"?"READY":"NOT CONFIGURED")}));
 }
 async function channelOrchestration(c){
   c.innerHTML=head("NEW BUSINESS ACQUISITION","Channel Orchestration","Every acquisition channel funnels into one lead pipeline. No channel keeps its own manual list or its own owner.")+`<div class="acq-empty"><i data-lucide="loader-circle"></i><strong>Loading channel health…</strong></div>`;
