@@ -91,49 +91,56 @@
       descriptor:"Full Truckload",proof:["53' Dry Van","Nationwide Capacity","Bilingual Support"],
       label:"FTL · U.S. GROUND CAPACITY",
       headlineES:"CAPACIDAD FTL PARA SU PRÓXIMO MOVIMIENTO.",
-      headlineEN:"FTL CAPACITY FOR YOUR NEXT MOVE.",asset:"assets/creative/dgl-ftl-truck.webp",visual:"DGL 53' dry van · highway / inland"
+      headlineEN:"FTL CAPACITY FOR YOUR NEXT MOVE.",
+      headlinePT:"CAPACIDADE FTL PARA SEU PRÓXIMO EMBARQUE.",asset:"assets/creative/dgl-ftl-truck.webp",visual:"DGL 53' dry van · highway / inland"
     },
     "LTL":{
       name:"LTL",
       descriptor:"Less Than Truckload",proof:["LTL Coverage","Shipment Visibility","Operational Support"],
       label:"LTL · FLEXIBLE GROUND CAPACITY",
       headlineES:"LTL QUE TRABAJA DE FORMA MÁS INTELIGENTE.",
-      headlineEN:"LTL THAT WORKS SMARTER.",asset:"assets/creative/dgl-ltl-terminal.png",visual:"Pallet freight · terminal / partial shipment"
+      headlineEN:"LTL THAT WORKS SMARTER.",
+      headlinePT:"LTL QUE TRABALHA DE FORMA MAIS INTELIGENTE.",asset:"assets/creative/dgl-ltl-terminal.png",visual:"Pallet freight · terminal / partial shipment"
     },
     "Drayage":{
       name:"Drayage",
       descriptor:"Port & Inland",proof:["Port-to-Inland","Container Drayage","Major U.S. Ports"],
       label:"DRAYAGE · PORT TO INLAND",
       headlineES:"DEL PUERTO AL SIGUIENTE MOVIMIENTO.",
-      headlineEN:"FROM PORT TO NEXT MOVE.",asset:"assets/creative/dgl-container-transload.jpg",visual:"Container + transload · port / inland"
+      headlineEN:"FROM PORT TO NEXT MOVE.",
+      headlinePT:"DO PORTO PARA O PRÓXIMO MOVIMENTO.",asset:"assets/creative/dgl-container-transload.jpg",visual:"Container + transload · port / inland"
     },
     "Cross Border":{
       name:"Cross Border",
       descriptor:"Mexico · USA · Canada",proof:["Cross-Border Coordination","Inland Capacity","Bilingual Support"],
       label:"MEXICO · USA · CANADA",
       headlineES:"PRECISIÓN SIN FRONTERAS.",
-      headlineEN:"PRECISION WITHOUT BORDERS.",asset:"assets/creative/dgl-ftl-truck.webp",visual:"DGL truck · Mexico · USA · Canada corridor"
+      headlineEN:"PRECISION WITHOUT BORDERS.",
+      headlinePT:"PRECISÃO SEM FRONTEIRAS.",asset:"assets/creative/dgl-ftl-truck.webp",visual:"DGL truck · Mexico · USA · Canada corridor"
     },
     "Reefer":{
       name:"Reefer",
       descriptor:"Temperature Controlled",proof:["Reefer Capacity","Produce & Food","Operational Visibility"],
       label:"TEMPERATURE CONTROLLED",
       headlineES:"TEMPERATURA CONTROLADA. EJECUCIÓN CONTROLADA.",
-      headlineEN:"CONTROLLED TEMPERATURE. CONTROLLED EXECUTION.",asset:"assets/creative/dgl-ftl-truck.webp",visual:"Photography-based temperature-controlled freight"
+      headlineEN:"CONTROLLED TEMPERATURE. CONTROLLED EXECUTION.",
+      headlinePT:"TEMPERATURA CONTROLADA. EXECUÇÃO CONTROLADA.",asset:"assets/creative/dgl-ftl-truck.webp",visual:"Photography-based temperature-controlled freight"
     },
     "Intermodal":{
       name:"Intermodal",
       descriptor:"Rail & Inland",proof:["Intermodal Options","Rail & Inland","Network Coverage"],
       label:"RAIL · RAMP · INLAND",
       headlineES:"MÁS FORMAS DE MOVER SU CARGA.",
-      headlineEN:"MORE WAYS TO MOVE YOUR FREIGHT.",asset:"assets/creative/dgl-container-transload.jpg",visual:"Container · ramp · inland"
+      headlineEN:"MORE WAYS TO MOVE YOUR FREIGHT.",
+      headlinePT:"MAIS FORMAS DE MOVER SUA CARGA.",asset:"assets/creative/dgl-container-transload.jpg",visual:"Container · ramp · inland"
     },
     "Multiservicio":{
       name:"Multiservicio",
       descriptor:"DGL Ground Solutions",proof:["FTL","LTL","Drayage"],
       label:"DGL GROUND SOLUTIONS",
       headlineES:"UNA RELACIÓN. MÁS OPCIONES.",
-      headlineEN:"ONE RELATIONSHIP. MORE OPTIONS.",asset:"assets/creative/dgl-ftl-truck.webp",visual:"DGL ground network"
+      headlineEN:"ONE RELATIONSHIP. MORE OPTIONS.",
+      headlinePT:"UM RELACIONAMENTO. MAIS OPÇÕES.",asset:"assets/creative/dgl-ftl-truck.webp",visual:"DGL ground network"
     }
   };
 
@@ -177,11 +184,11 @@
   }
 
   const CTA={
-    "Generate Quote":{es:"ENVIAR MOVIMIENTO",en:"SEND A SHIPMENT"},
-    "Recover Quote":{es:"ACTUALIZAR COTIZACIÓN",en:"UPDATE QUOTE"},
-    "Reply":{es:"RESPONDER A DGL",en:"REPLY TO DGL"},
-    "Meeting":{es:"AGENDAR CONVERSACIÓN",en:"SCHEDULE A CONVERSATION"},
-    "Review Service":{es:"REVISAR SERVICIO",en:"REVIEW SERVICE"}
+    "Generate Quote":{es:"ENVIAR MOVIMIENTO",en:"SEND A SHIPMENT",pt:"ENVIAR EMBARQUE"},
+    "Recover Quote":{es:"ACTUALIZAR COTIZACIÓN",en:"UPDATE QUOTE",pt:"ATUALIZAR COTAÇÃO"},
+    "Reply":{es:"RESPONDER A DGL",en:"REPLY TO DGL",pt:"RESPONDER À DGL"},
+    "Meeting":{es:"AGENDAR CONVERSACIÓN",en:"SCHEDULE A CONVERSATION",pt:"AGENDAR CONVERSA"},
+    "Review Service":{es:"REVISAR SERVICIO",en:"REVIEW SERVICE",pt:"REVISAR SERVIÇO"}
   };
 
   global.DGL_CREATIVE_LIBRARY_V5={VERSION,CREATIVE_SYSTEMS,OBJECTIVES,SERVICES,CTA,resolveAsset};
