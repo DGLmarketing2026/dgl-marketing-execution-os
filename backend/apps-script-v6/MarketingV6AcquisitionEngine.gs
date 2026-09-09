@@ -6,8 +6,8 @@
 
 var MKT_V6_ACQ_SCHEMA={
   MKT_ACQ_SIGNALS:['signalId','source','channel','market','service','objective','campaignBrief','priority','languageOverride','status','sourceUpdatedAt','createdAt','processedAt','updatedAt'],
-  MKT_ACQ_LANDING_PAGES:['landingPageId','signalId','variantKey','language','defaultForMarket','campaignKey','channel','market','service','objective','designSystem','assetPath','slug','headline','subheadline','supportingCopy','ctaLabel','seoTitle','seoDescription','formVariant','utmSource','utmMedium','utmCampaign','status','publishedUrl','createdAt','updatedAt'],
-  MKT_ACQ_LEADS:['leadId','landingPageId','signalId','createdAt','firstName','lastName','company','email','phone','country','service','origin','destination','notes','utmSource','utmMedium','utmCampaign','validationStatus','dedupeStatus','existingContactId','existingAccountId','qualificationStatus','scoreStatus','routingStatus','salesforceLeadId','salesforceLeadOwner','routedAt','updatedAt'],
+  MKT_ACQ_LANDING_PAGES:['landingPageId','signalId','variantKey','language','defaultForMarket','campaignKey','channel','market','service','objective','designSystem','assetPath','slug','headline','subheadline','supportingCopy','ctaLabel','seoTitle','seoDescription','formVariant','utmSource','utmMedium','utmCampaign','status','publishedUrl','wpPageId','wpUrl','cycleId','createdAt','updatedAt'],
+  MKT_ACQ_LEADS:['leadId','landingPageId','signalId','createdAt','firstName','lastName','company','email','phone','country','service','origin','destination','notes','utmSource','utmMedium','utmCampaign','validationStatus','dedupeStatus','existingContactId','existingAccountId','qualificationStatus','scoreStatus','routingStatus','salesforceLeadId','salesforceLeadOwner','cycleId','routedAt','updatedAt'],
   MKT_ACQ_RUNS:['runId','startedAt','finishedAt','signalsEvaluated','landingsGenerated','landingsReady','leadsEvaluated','leadsQualified','leadsDeduped','salesforceRouted','blocked','status','updatedAt']
 };
 
@@ -202,17 +202,22 @@ function v6AcqRouteLeads_(){
   return {evaluated:evaluated,qualified:qualified,deduped:deduped,routed:routed,blocked:blocked};
 }
 function v6AcqAutomationTick_(){
-  v6AcqSetupSheetsOnly_();var runId=v6AcqId_('RUN'),start=v6AcqNow_(),signals=v6AcqEvaluateSignals_(),leads=v6AcqRouteLeads_(),end=v6AcqNow_(),row={runId:runId,startedAt:start,finishedAt:end,signalsEvaluated:signals.evaluated,landingsGenerated:signals.generated,landingsReady:signals.ready,leadsEvaluated:leads.evaluated,leadsQualified:leads.qualified,leadsDeduped:leads.deduped,salesforceRouted:leads.routed,blocked:leads.blocked,status:'COMPLETED',updatedAt:end};v6AcqUpsert_('MKT_ACQ_RUNS',['runId'],row);return row;
+  v6AcqSetupSheetsOnly_();var runId=v6AcqId_('RUN'),start=v6AcqNow_(),signals=v6AcqEvaluateSignals_(),leads=v6AcqRouteLeads_(),end=v6AcqNow_(),row={runId:runId,startedAt:start,finishedAt:end,signalsEvaluated:signals.evaluated,landingsGenerated:signals.generated,landingsReady:signals.ready,leadsEvaluated:leads.evaluated,leadsQualified:leads.qualified,leadsDeduped:leads.deduped,salesforceRouted:leads.routed,blocked:leads.blocked,status:'COMPLETED',updatedAt:end};v6AcqUpsert_('MKT_ACQ_RUNS',['runId'],row);
+  // WordPress publishing + the bimonthly cycle gate + (optional) automated
+  // QA all live in MarketingV6AcquisitionWordPress.gs and run inside this
+  // SAME hourly heartbeat — no separate manual workflow is ever required.
+  if(typeof v6AcqWordPressTick_==='function'){try{row.wordpress=v6AcqWordPressTick_();}catch(err){row.wordpress={status:'ERROR',error:String(err&&err.message||err)};}}
+  return row;
 }
 function v6AcqSetupSheetsOnly_(){Object.keys(MKT_V6_ACQ_SCHEMA).forEach(function(name){v6AcqEnsureSheet_(name,MKT_V6_ACQ_SCHEMA[name]);});return true;}
 function v6AcqInstallAutomationTrigger_(){
   var fn='v6AcqAutomationTick_',triggers=ScriptApp.getProjectTriggers(),found=false;triggers.forEach(function(t){if(t.getHandlerFunction()===fn){if(!found)found=true;else ScriptApp.deleteTrigger(t);}});if(!found)ScriptApp.newTrigger(fn).timeBased().everyHours(1).create();return {status:found?'TRIGGER EXISTS':'TRIGGER INSTALLED',handler:fn,cadence:'HOURLY'};
 }
-function v6AcqLandingPages_(){return {records:v6AcqRows_('MKT_ACQ_LANDING_PAGES').map(function(r){return {landingPageId:r.landingPageId,signalId:r.signalId,variantKey:r.variantKey,language:r.language,defaultForMarket:r.defaultForMarket,campaignKey:r.campaignKey,channel:r.channel,market:r.market,service:r.service,objective:r.objective,designSystem:r.designSystem,assetPath:r.assetPath,slug:r.slug,headline:r.headline,subheadline:r.subheadline,supportingCopy:r.supportingCopy,ctaLabel:r.ctaLabel,seoTitle:r.seoTitle,seoDescription:r.seoDescription,utmSource:r.utmSource,utmMedium:r.utmMedium,utmCampaign:r.utmCampaign,status:r.status,publishedUrl:r.publishedUrl,createdAt:r.createdAt,updatedAt:r.updatedAt};})};}
+function v6AcqLandingPages_(){return {records:v6AcqRows_('MKT_ACQ_LANDING_PAGES').map(function(r){return {landingPageId:r.landingPageId,signalId:r.signalId,variantKey:r.variantKey,language:r.language,defaultForMarket:r.defaultForMarket,campaignKey:r.campaignKey,channel:r.channel,market:r.market,service:r.service,objective:r.objective,designSystem:r.designSystem,assetPath:r.assetPath,slug:r.slug,headline:r.headline,subheadline:r.subheadline,supportingCopy:r.supportingCopy,ctaLabel:r.ctaLabel,seoTitle:r.seoTitle,seoDescription:r.seoDescription,utmSource:r.utmSource,utmMedium:r.utmMedium,utmCampaign:r.utmCampaign,status:r.status,publishedUrl:r.publishedUrl,wpPageId:r.wpPageId,wpUrl:r.wpUrl,cycleId:r.cycleId,createdAt:r.createdAt,updatedAt:r.updatedAt};})};}
 function v6AcqSignals_(){return {records:v6AcqRows_('MKT_ACQ_SIGNALS').map(function(r){return {signalId:r.signalId,source:r.source,channel:r.channel,market:r.market,service:r.service,objective:r.objective,priority:r.priority,status:r.status,sourceUpdatedAt:r.sourceUpdatedAt,processedAt:r.processedAt};})};}
 function v6AcqStatus_(){
   v6AcqSetupSheetsOnly_();var signals=v6AcqRows_('MKT_ACQ_SIGNALS'),pages=v6AcqRows_('MKT_ACQ_LANDING_PAGES'),leads=v6AcqRows_('MKT_ACQ_LEADS'),runs=v6AcqRows_('MKT_ACQ_RUNS'),props=PropertiesService.getScriptProperties(),last=runs.sort(function(a,b){return v6AcqText_(b.finishedAt).localeCompare(v6AcqText_(a.finishedAt));})[0]||{};
-  var health={landingRuntime:v6AcqPublicBase_()?'READY':'NOT CONFIGURED',leadIntake:v6AcqPublicBase_()?'READY':'NOT CONFIGURED',salesforceRouting:props.getProperty('ACQ_SALESFORCE_LEAD_ENDPOINT')?'READY':'NOT CONFIGURED',paidMedia:props.getProperty('ACQ_PAID_CONNECTOR')?'READY':'NOT CONFIGURED',linkedin:props.getProperty('ACQ_LINKEDIN_CONNECTOR')?'READY':'NOT CONFIGURED',outbound:props.getProperty('ACQ_OUTBOUND_CONNECTOR')?'READY':'NOT CONFIGURED',attribution:props.getProperty('ACQ_ATTRIBUTION_CONNECTOR')?'READY':'NOT CONFIGURED'};
+  var health={landingRuntime:v6AcqPublicBase_()?'READY':'NOT CONFIGURED',leadIntake:v6AcqPublicBase_()?'READY':'NOT CONFIGURED',salesforceRouting:props.getProperty('ACQ_SALESFORCE_LEAD_ENDPOINT')?'READY':'NOT CONFIGURED',paidMedia:props.getProperty('ACQ_PAID_CONNECTOR')?'READY':'NOT CONFIGURED',linkedin:props.getProperty('ACQ_LINKEDIN_CONNECTOR')?'READY':'NOT CONFIGURED',outbound:props.getProperty('ACQ_OUTBOUND_CONNECTOR')?'READY':'NOT CONFIGURED',attribution:props.getProperty('ACQ_ATTRIBUTION_CONNECTOR')?'READY':'NOT CONFIGURED',wordpress:(props.getProperty('ACQ_WP_BASE_URL')&&props.getProperty('ACQ_WP_USERNAME')&&props.getProperty('ACQ_WP_APP_PASSWORD'))?'READY':'NOT CONFIGURED',ga4:props.getProperty('ACQ_GA4_PROPERTY_ID')?'CONNECTOR REQUIRED':'NOT CONFIGURED'};
   var routedLeadsWithOwner=leads.filter(function(r){return v6AcqText_(r.routingStatus)==='ROUTED_TO_SALESFORCE'&&v6AcqText_(r.salesforceLeadOwner);}).sort(function(a,b){return v6AcqText_(b.routedAt).localeCompare(v6AcqText_(a.routedAt));});
   var languageCoverage={};MKT_V6_ACQ_LANGUAGES.forEach(function(l){languageCoverage[l]=pages.filter(function(r){return v6AcqText_(r.language)===l;}).length;});
   return {
@@ -225,7 +230,8 @@ function v6AcqStatus_(){
     existingMatches:leads.filter(function(r){return v6AcqText_(r.routingStatus)==='EXISTING_ACCOUNT_POLICY';}).length,
     // Never invented: empty unless a real Salesforce response supplied an owner.
     newBusinessOwner:routedLeadsWithOwner.length?v6AcqText_(routedLeadsWithOwner[0].salesforceLeadOwner):'',
-    lastRunAt:last.finishedAt||'',nextCadence:'HOURLY',health:health
+    lastRunAt:last.finishedAt||'',nextCadence:'HOURLY',health:health,
+    cycle:(typeof v6AcqCycleStatus_==='function')?v6AcqCycleStatus_():null
   };
 }
 function v6AcqRun_(){return {run:v6AcqAutomationTick_(),status:v6AcqStatus_()};}

@@ -90,5 +90,5 @@ function makeContext(){
   console.log('response events test (CLICK/OTHER -> IGNORED, no side effects): PASS');
 })();
 
-assert(routerSource.includes('v6ClassifyResponseEvent:v6ClassifyResponseEvent_'),'router must expose v6ClassifyResponseEvent');
+assert(routerSource.includes('v6ClassifyResponseEvent:v6ClassifyResponseEvent_')||/case 'v6ClassifyResponseEvent'\s*:[\s\S]{0,200}v6ClassifyResponseEvent_/.test(routerSource),'router must expose v6ClassifyResponseEvent');
 console.log('V6 response event classifier: ALL PASS');

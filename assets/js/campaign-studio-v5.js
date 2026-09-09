@@ -297,9 +297,20 @@
     if(frame)frame.srcdoc=emailHtml();
     if(sub)sub.textContent=sample(c.subjectA,s)||"Generate campaign to preview.";
     const source=document.getElementById("v5SourceValue");
-    if(source)source.textContent=state.incoming?`${state.incoming.sourceType} · ${state.incoming.sourceLabel}`:"Manual / Marketing";
+    if(source){
+      const inc=state.incoming;
+      if(inc&&(inc.sourceType||inc.sourceLabel))source.textContent=[inc.sourceType,inc.sourceLabel].filter(Boolean).join(" · ");
+      else if(inc&&(inc.source||inc.opportunitySource))source.textContent=inc.source||inc.opportunitySource;
+      else source.textContent="Manual / Marketing";
+    }
     const audience=document.getElementById("v5AudienceValue");
-    if(audience)audience.textContent=value("v5Audience")||"Not selected";
+    if(audience){
+      const audSel=document.getElementById("v5Audience"),selected=audSel?.options?.[audSel.selectedIndex];
+      const eligibleContacts=Number(state.incoming?.eligibleContactCount||0);
+      if(!value("v5Audience"))audience.textContent="Not selected";
+      else if(eligibleContacts<1)audience.textContent="Contacts pending";
+      else audience.textContent=(selected&&selected.textContent!==selected.value)?selected.textContent:value("v5Audience");
+    }
     const service=document.getElementById("v5ServiceValue");
     if(service)service.textContent=s.service;
     const objective=document.getElementById("v5ObjectiveValue");
