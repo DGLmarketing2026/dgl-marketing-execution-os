@@ -189,12 +189,26 @@ function v6AuraPrepareExecution_(scope, campaign) {
 // honestly (no bulk provider connected yet); Replies/RFQs/Quotes/Loads are
 // real counts from MKT_ACCOUNT_PIPELINE (populated by v6ClassifyResponseEvent_
 // as real inbound events arrive) — never fabricated.
-function v6AuraReportRow_(scope, campaign, prep) {
+// Reads MKT_CONTACTS_SECURE exactly ONCE per tick (not once per account) --
+// v6Rows_ does a fresh full-sheet read every call, so calling it inside a
+// per-account loop across many scopes/families would re-read the entire
+// contacts sheet once per account and turn an hourly tick into a multi-minute
+// (or longer) run against real production data volume.
+function v6AuraInvalidContactCountsByAccount_() {
+  var counts = {};
+  v6Rows_('MKT_CONTACTS_SECURE').forEach(function (c) {
+    if (v6AuraText_(c.emailStatus).toUpperCase() !== 'INVALID') return;
+    var accountId = v6AuraText_(c.accountId);
+    counts[accountId] = (counts[accountId] || 0) + 1;
+  });
+  return counts;
+}
+function v6AuraReportRow_(scope, campaign, prep, invalidCountsByAccount) {
   var pipeline = v6Rows_('MKT_ACCOUNT_PIPELINE').filter(function (r) { return v6AuraText_(r.campaignId) === campaign.campaignId; });
+  var counts = invalidCountsByAccount || {};
   var bounced = 0;
   (scope.accountIds || []).forEach(function (accountId) {
-    var contacts = v6Rows_('MKT_CONTACTS_SECURE').filter(function (c) { return v6AuraText_(c.accountId) === accountId && v6AuraText_(c.emailStatus).toUpperCase() === 'INVALID'; });
-    bounced += contacts.length;
+    bounced += counts[accountId] || 0;
   });
   var replies = pipeline.filter(function (r) { return !!r.responseAt; }).length;
   var rfqs = pipeline.filter(function (r) { return !!r.rfqAt; }).length;
@@ -241,6 +255,7 @@ function v6AuraArchiveReports_(rows) {
 function v6AuraAutomationTick_() {
   v6AuraEnsureSheet_('MKT_CAMPAIGNS'); v6AuraEnsureSheet_('MKT_AURA_EXECUTION_REPORT');
   var refresh = v6RefreshOpportunitiesFromReports_();
+  var invalidCountsByAccount = v6AuraInvalidContactCountsByAccount_();
   var families = {}, campaignsProcessed = 0, blockedOnProvider = 0, reportRows = [];
   MKT_V6_AURA_FAMILIES.forEach(function (opportunityType) {
     var built = v6AuraAutoBuildScopesForFamily_(opportunityType);
@@ -248,7 +263,7 @@ function v6AuraAutomationTick_() {
     built.scopes.forEach(function (scope) {
       var campaign = v6AuraEnsureCampaign_(scope);
       var prep = v6AuraPrepareExecution_(scope, campaign);
-      var reportRow = v6AuraReportRow_(scope, campaign, prep);
+      var reportRow = v6AuraReportRow_(scope, campaign, prep, invalidCountsByAccount);
       reportRows.push(reportRow);
       campaignsProcessed++;
       if (prep.queue && prep.queue.status === 'BLOCKED' && (prep.queue.reasons || []).indexOf('BULK PROVIDER NOT CONFIGURED') >= 0) blockedOnProvider++;
