@@ -102,6 +102,8 @@ function routeMarketingV6_(action, payload) {
       return typeof v6AuraAutomaticReportStatus_ === 'function' ? v6AuraAutomaticReportStatus_(p) : v6RouteMissing_(a, 'v6AuraAutomaticReportStatus_');
     case 'v6AuraExecutionReport':
       return typeof v6AuraExecutionReport_ === 'function' ? v6AuraExecutionReport_(p) : v6RouteMissing_(a, 'v6AuraExecutionReport_');
+    case 'v6AuraGmailFreshness':
+      return typeof v6AuraGmailFreshnessStatus_ === 'function' ? v6AuraGmailFreshnessStatus_(p) : v6RouteMissing_(a, 'v6AuraGmailFreshnessStatus_');
     default:
       return null;
   }

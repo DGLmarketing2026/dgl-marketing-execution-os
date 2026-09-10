@@ -221,6 +221,21 @@ function v6AcqAutomationTick_(){
   if(typeof v6AcqWordPressTick_==='function'){try{row.wordpress=v6AcqWordPressTick_();}catch(err){row.wordpress={status:'ERROR',error:String(err&&err.message||err)};}}
   // Automatic landing report + CSV archive every tick — no manual export.
   try{row.landingReport=v6AcqLandingReport_();}catch(err){row.landingReport={status:'ERROR',error:String(err&&err.message||err)};}
+  // Gmail is the recurring INPUT source for Existing Account Growth: Luis
+  // Simoes's AM report (sent to the governed AURA_GMAIL_SOURCE_MAILBOX
+  // script property) is ingested and normalized into
+  // MKT_AURA_GMAIL_OPPORTUNITIES here, BEFORE v6AuraAutomationTick_ below
+  // (which itself calls v6RefreshOpportunitiesFromReports_ and now folds
+  // those Gmail-sourced rows into the same governed MKT_OPPORTUNITIES table
+  // the NOVA/AM-Intelligence report source already feeds). No separate
+  // trigger, no manual upload by Cristian.
+  if (typeof v6AuraGmailIngestTick_ === 'function') {
+    try {
+      row.auraGmailIngest = v6AuraGmailIngestTick_();
+    } catch (err) {
+      row.auraGmailIngest = {status:'ERROR', error:String(err && err.message || err)};
+    }
+  }
   // AURA (Existing Account Growth: Retention/Reactivation/QNB/Cross-Sell)
   // runs inside this SAME hourly heartbeat — one trigger drives both
   // Acquisition and Existing Account Growth automation, never a second

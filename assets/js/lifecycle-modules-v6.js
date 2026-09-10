@@ -123,7 +123,7 @@ let cache={groups:null,summary:null,pipe:null,ts:0};
 // projection for this browser session (never demo data — only ever set from
 // a real v6AuraExecutionReport response), current in-memory filter state and
 // the auto-refresh interval handle for #/account-campaign-reports.
-let auraCache=null,auraFilters={owner:"ALL",family:"ALL",status:"ALL",search:""},auraTimer=null;
+let auraCache=null,auraFilters={owner:"ALL",family:"ALL",status:"ALL",search:""},auraTimer=null,auraGmailCache=null;
 async function live(force=false){
   if(!C())return{groups:[],summary:null,pipe:null};
   if(!force&&cache.groups&&Date.now()-cache.ts<12000)return cache;
@@ -503,10 +503,25 @@ function auraBannerHtml(summary,opts){
 function auraProviderNoticeHtml(){
   return`<div class="life-status-strip warn"><div><span>EMAIL EXECUTION</span><strong>READY TO SEND · SEND PROVIDER REQUIRED</strong></div><p>AURA has already detected, segmented, assigned owner, resolved eligible recipients, created campaigns and executions, and generated this report. Sending is the only step still pending a configured bulk email provider.</p></div>`;
 }
-function auraPaint(c,data,opts={}){
+// Gmail is the recurring INPUT source for Existing Account Growth (Luis
+// Simoes's AM report to the governed AURA_GMAIL_SOURCE_MAILBOX, ingested
+// automatically server-side — see MarketingV6AuraGmailIngest.gs). This
+// strip is informational only: if
+// the freshness check fails, the rest of the AURA report still renders from
+// MKT_AURA_EXECUTION_REPORT as usual.
+function auraGmailSourceHtml(gmail){
+  if(!gmail||gmail.status==="NO_REPORT_RECEIVED"){
+    return`<div class="life-status-strip warn"><div><span>DATA SOURCE</span><strong>GMAIL · ACCOUNT MANAGEMENT</strong></div><p>No AM report has been ingested yet from Gmail.</p></div>`;
+  }
+  if(gmail.status!=="OK")return"";
+  const tone=gmail.freshness==="STALE"?"blocked":gmail.freshness==="AGING"?"warn":"";
+  return`<div class="life-status-strip ${tone}"><div><span>DATA SOURCE</span><strong>${E(gmail.source||"GMAIL · ACCOUNT MANAGEMENT")}</strong></div><p>Latest report: ${E(auraFmtDate(gmail.lastReportReceivedAt))} · Processed: ${E(auraFmtDate(gmail.lastReportProcessedAt))} · Freshness: ${E(gmail.freshness||"—")} · ${N(gmail.rowsAccepted)} rows accepted · ${N(gmail.opportunitiesUpdated)} opportunities updated</p></div>`;
+}
+function auraPaint(c,data,opts={},gmail){
   const summary=data.summary||{},records=data.records||[];
   c.innerHTML=header("AURA · Campaign Activity & Reports","Live execution activity generated automatically by AURA from the governed DGL Data Hub.","AURA · REPORTING")+
     auraBannerHtml(summary,opts)+
+    (opts.disconnected?"":auraGmailSourceHtml(gmail))+
     (opts.disconnected?"":auraProviderNoticeHtml())+
     kpis([["TOTAL CAMPAIGNS",summary.campaigns],["READY TO SEND",summary.readyToSend],["BLOCKED",summary.blocked],["RECIPIENTS",summary.recipients],["ELIGIBLE ACCOUNTS",summary.eligibleAccounts],["OWNERS",summary.owners],["SENT",summary.sent],["REPLIES",summary.replies],["RFQs",summary.rfqs],["LOADS",summary.loads]])+
     `<div id="auraFilterBar">${auraFilterBar(records)}</div>`+
@@ -520,10 +535,18 @@ async function auraLoad(){
     return{ok:false,disconnected:false,data:auraCache};
   }catch(_){return{ok:false,disconnected:false,data:auraCache};}
 }
+async function auraGmailLoad(){
+  if(!C())return auraGmailCache;
+  try{
+    const res=await A().v6AuraGmailFreshness();
+    if(res&&res.status){auraGmailCache=res;return res;}
+    return auraGmailCache;
+  }catch(_){return auraGmailCache;}
+}
 async function auraRenderPage(c){
-  const res=await auraLoad();
-  if(res.ok)return auraPaint(c,res.data,{});
-  if(res.data)return auraPaint(c,res.data,{stale:!res.disconnected,disconnected:res.disconnected});
+  const[res,gmail]=await Promise.all([auraLoad(),auraGmailLoad()]);
+  if(res.ok)return auraPaint(c,res.data,{},gmail);
+  if(res.data)return auraPaint(c,res.data,{stale:!res.disconnected,disconnected:res.disconnected},gmail);
   if(res.disconnected)return required(c,"AURA · Campaign Activity & Reports","Live execution activity generated automatically by AURA from the governed DGL Data Hub.");
   c.innerHTML=header("AURA · Campaign Activity & Reports","Live execution activity generated automatically by AURA from the governed DGL Data Hub.","AURA · REPORTING")+
     `<div class="life-empty"><strong>AURA REPORT TEMPORARILY UNAVAILABLE</strong><p>The private backend did not return a valid AURA report this time. No number is ever shown as zero unless it is real — retry shortly or refresh the view.</p></div>`;

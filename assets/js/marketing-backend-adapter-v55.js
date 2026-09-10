@@ -187,7 +187,8 @@
     v6RecordCopyUsage:data=>mutate("v6RecordCopyUsage",data||{},false),
     v6CreativeUsage:data=>mutate("v6CreativeUsage",data||{},false),
     v6RecordCreativeUsage:data=>mutate("v6RecordCreativeUsage",data||{},false),
-    v6AuraExecutionReport:()=>mutate("v6AuraExecutionReport",{},false)
+    v6AuraExecutionReport:()=>mutate("v6AuraExecutionReport",{},false),
+    v6AuraGmailFreshness:()=>mutate("v6AuraGmailFreshness",{},false)
   };
   Object.defineProperty(adapter,"mode",{enumerable:true,get:()=>state===STATES.PRIVATE_BACKEND?"PRIVATE_BACKEND":"LOCAL_DEMO"});
   global.DGL_MARKETING_BACKEND_ADAPTER_V55=adapter;

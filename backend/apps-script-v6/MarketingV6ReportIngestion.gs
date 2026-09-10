@@ -202,6 +202,11 @@ function v6RefreshOpportunitiesFromReports_(){
   rows=rows.concat(v6BuildReactivationOpportunities_(nowIso,ficha));
   rows=rows.concat(v6BuildCrossSellOpportunities_(nowIso));
   rows=rows.concat(v6BuildNurtureOpportunities_(nowIso,ficha));
+  // Gmail-sourced AM signals (MarketingV6AuraGmailIngest.gs) join the SAME
+  // pipeline as the NOVA/AM-Intelligence report source above, so a Gmail and
+  // a NOVA signal for the same account are reconciled by the one existing
+  // v6ApplyPrioritySuppression_ rule instead of two competing sources.
+  if(typeof v6BuildGmailOpportunities_==='function')rows=rows.concat(v6BuildGmailOpportunities_(nowIso));
   rows=v6ApplyPrioritySuppression_(rows);
   v6WriteOpportunities_(rows);
   return {status:'REPORT_SOURCE_SYNCED',sourceSpreadsheetId:MKT_V6_REPORT_SOURCE_ID,metrics:v6OpportunityMetrics_(rows),retentionCuentasJoinCoverage:v6RetentionCuentasJoinCoverage_(retentionRows,cuentas),syncedAt:nowIso};
