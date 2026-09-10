@@ -9,6 +9,8 @@ const N=n=>Number(n||0).toLocaleString("en-US");
 const C=()=>!!A()?.isConnected?.();
 const CS=()=>A()?.getConnectionState?.()?.state||"DISCONNECTED";
 const CONNECTING=()=>CS()==="CONNECTING";
+const AUTH_ERROR=()=>CS()==="AUTH_ERROR";
+const BACKEND_ERROR=()=>CS()==="BACKEND_ERROR";
 const P=()=>g.DGL_CAMPAIGN_EXECUTION_V6?.providerStatus||"BULK PROVIDER NOT CONFIGURED";
 const OWNER_KEY="dgl_v6_owner_filter";
 
@@ -176,15 +178,34 @@ async function liveWithRecovery(force=false){
 }
 
 const badge=(t,k="info")=>`<span class="life-badge ${k}">${E(t)}</span>`;
-const headerBadge=()=>C()?badge("PRIVATE BACKEND / LIVE","live"):CONNECTING()?badge("AUTHENTICATING","warn"):badge("PRIVATE BACKEND REQUIRED","warn");
-const headerAction=()=>C()?'<button class="btn btn-secondary" data-life-refresh>REFRESH VIEW</button>':CONNECTING()?'<button class="btn btn-secondary" disabled>AUTHENTICATING…</button>':'<button class="btn btn-primary" data-life-connect>CONNECT PRIVATE BACKEND</button>';
+// Every state renders its own truthful badge/button — never a generic
+// "REQUIRED" after a token has actually been submitted and rejected or
+// timed out. AUTH_ERROR means the backend explicitly rejected the token
+// (it has already been cleared). BACKEND_ERROR means V6 could not be
+// reached/parsed for any other reason — the stored token is untouched, so
+// the button re-tries the SAME token instead of re-prompting for one.
+const headerBadge=()=>{
+  if(C())return badge("PRIVATE BACKEND · LIVE","live");
+  if(CONNECTING())return badge("CONNECTING TO AURA...","warn");
+  if(AUTH_ERROR())return badge("PRIVATE BACKEND AUTHENTICATION FAILED","blocked");
+  if(BACKEND_ERROR())return badge("AURA BACKEND TEMPORARILY UNAVAILABLE","warn");
+  return badge("PRIVATE BACKEND REQUIRED","warn");
+};
+const headerAction=()=>{
+  if(C())return'<button class="btn btn-secondary" data-life-refresh>REFRESH VIEW</button>';
+  if(CONNECTING())return'<button class="btn btn-secondary" disabled>CONNECTING…</button>';
+  if(BACKEND_ERROR())return'<button class="btn btn-primary" data-life-connect>RETRY CONNECTION</button>';
+  return'<button class="btn btn-primary" data-life-connect>CONNECT PRIVATE BACKEND</button>';
+};
 const header=(title,sub,eye="AUTOMATION LIFECYCLE · V6")=>`<div class="page-head"><div><div class="eyebrow">${E(eye)}</div><h2>${E(title)}</h2><p class="lede">${E(sub)}</p></div><div class="page-head-actions">${headerBadge()}${headerAction()}</div></div>`;
 const kpis=a=>`<div class="kpi-grid">${a.map(([l,v,f])=>`<div class="kpi-card"><div class="kpi-content"><div class="kpi-label">${E(l)}</div><div class="kpi-value">${f===false?E(v):N(v)}</div></div></div>`).join("")}</div>`;
 
 function required(c,title,sub){
-  const body=CONNECTING()
-    ?`<div class="life-empty"><strong>CONNECTING TO AURA...</strong><p>Authenticating with the governed private backend. This resolves automatically — no action needed.</p></div>`
-    :`<div class="life-empty"><strong>Private backend required</strong><p>No sample data is used. Connect the governed backend to load live lifecycle data.</p></div>`;
+  let body;
+  if(CONNECTING())body=`<div class="life-empty"><strong>CONNECTING TO AURA...</strong><p>Authenticating with the governed private backend. This resolves automatically — no action needed.</p></div>`;
+  else if(AUTH_ERROR())body=`<div class="life-empty"><strong>PRIVATE BACKEND AUTHENTICATION FAILED</strong><p>The token was rejected by the private backend and has been cleared. Click CONNECT PRIVATE BACKEND and paste it again.</p></div>`;
+  else if(BACKEND_ERROR())body=`<div class="life-empty"><strong>AURA BACKEND TEMPORARILY UNAVAILABLE</strong><p>The stored token is still valid and has not been cleared. The V6/AURA backend did not respond this time — click RETRY CONNECTION.</p></div>`;
+  else body=`<div class="life-empty"><strong>Private backend required</strong><p>No sample data is used. Connect the governed backend to load live lifecycle data.</p></div>`;
   c.innerHTML=header(title,sub)+body;
 }
 function ownerToolbar(groups){
@@ -237,7 +258,7 @@ function card(x){
   </article>`;
 }
 async function scopeView(c,{title,sub,fams=null,service=null,eye="CAMPAIGN ENGINE · LIVE"}){
-  if(CONNECTING())return required(c,title,sub);
+  if(CONNECTING()||AUTH_ERROR()||BACKEND_ERROR())return required(c,title,sub);
   // Retention/Reactivation/QNB/Cross-Sell must never show a false empty
   // state: fall back to the same Safe Data Hub Recovery snapshot Campaign
   // Opportunities uses whenever live V6 is disconnected or returns an
@@ -249,7 +270,7 @@ async function scopeView(c,{title,sub,fams=null,service=null,eye="CAMPAIGN ENGIN
   const visible=filterOwner(base).sort((a,b)=>(+a.priority||99)-(+b.priority||99)||(+b.eligibleAccounts||0)-(+a.eligibleAccounts||0));
   const det=visible.reduce((s,x)=>s+(+x.detectedAccounts||0),0),eli=visible.reduce((s,x)=>s+(+x.eligibleAccounts||0),0),sup=visible.reduce((s,x)=>s+(+x.suppressedAccounts||0),0);
   g.__DGL_LIFE_GROUPS=Object.fromEntries(all.map(x=>[scopeId(x),x]));
-  const statusBadge=recovered?badge("SAFE DATA HUB RECOVERY","warn"):badge("PRIVATE BACKEND / LIVE","live");
+  const statusBadge=recovered?badge("SAFE DATA HUB RECOVERY","warn"):badge("PRIVATE BACKEND · LIVE","live");
   const head=`<div class="page-head"><div><div class="eyebrow">${E(eye)}</div><h2>${E(title)}</h2><p class="lede">${E(sub)}</p></div><div class="page-head-actions">${statusBadge}${C()?'<button class="btn btn-secondary" data-life-refresh>REFRESH VIEW</button>':'<button class="btn btn-primary" data-life-connect>CONNECT PRIVATE BACKEND</button>'}</div></div>`;
   const recoveryNotice=recovered?`<div class="life-status-strip warn"><div><span>DATA SOURCE</span><strong>SAFE DATA HUB RECOVERY</strong></div><p>Live V6 routing is not responding; owner and opportunity aggregates are restored from the governed Data Hub snapshot (${E(RECOVERY_SNAPSHOT_AT)}). Only owner-level counts are shown — no account, contact or quote identifier is included.</p></div>`:"";
   c.innerHTML=head+ownerToolbar(base)+recoveryNotice+
@@ -259,12 +280,12 @@ async function scopeView(c,{title,sub,fams=null,service=null,eye="CAMPAIGN ENGIN
 }
 async function campaignOpportunitiesView(c){
   const title="Campaign Opportunities",sub="All report-derived opportunities grouped into automatic governed scopes.";
-  if(CONNECTING())return required(c,title,sub);
+  if(CONNECTING()||AUTH_ERROR()||BACKEND_ERROR())return required(c,title,sub);
   const {groups:all,recovered}=await liveWithRecovery();
   const visible=filterOwner(all).sort((a,b)=>(+a.priority||99)-(+b.priority||99)||(+b.eligibleAccounts||0)-(+a.eligibleAccounts||0));
   const det=visible.reduce((s,x)=>s+(+x.detectedAccounts||0),0),eli=visible.reduce((s,x)=>s+(+x.eligibleAccounts||0),0),sup=visible.reduce((s,x)=>s+(+x.suppressedAccounts||0),0);
   g.__DGL_LIFE_GROUPS=Object.fromEntries(all.map(x=>[scopeId(x),x]));
-  const statusBadge=recovered?badge("SAFE DATA HUB RECOVERY","warn"):badge("PRIVATE BACKEND / LIVE","live");
+  const statusBadge=recovered?badge("SAFE DATA HUB RECOVERY","warn"):badge("PRIVATE BACKEND · LIVE","live");
   const head=`<div class="page-head"><div><div class="eyebrow">OPPORTUNITY ENGINE · ${recovered?"RECOVERY":"LIVE"}</div><h2>${E(title)}</h2><p class="lede">${E(sub)}</p></div><div class="page-head-actions">${statusBadge}${C()?'<button class="btn btn-secondary" data-life-refresh>REFRESH VIEW</button>':'<button class="btn btn-primary" data-life-connect>CONNECT PRIVATE BACKEND</button>'}</div></div>`;
   const recoveryNotice=recovered?`<div class="life-status-strip warn"><div><span>DATA SOURCE</span><strong>SAFE DATA HUB RECOVERY</strong></div><p>Live V6 routing is not responding; owner and opportunity aggregates are restored from the governed Data Hub snapshot (${E(RECOVERY_SNAPSHOT_AT)}). Only owner-level counts are shown — no account, contact or quote identifier is included.</p></div>`:"";
   c.innerHTML=head+ownerToolbar(all)+recoveryNotice+
@@ -740,7 +761,7 @@ function rerender(){
 document.addEventListener("click",async e=>{
   const b=e.target.closest("[data-life-prepare]");
   if(b){const x=(g.__DGL_LIFE_GROUPS||{})[b.dataset.lifePrepare];if(x)openStudio(x);return;}
-  if(e.target.closest("[data-life-connect]")){try{await A().connect();rerender();}catch(err){console.error(err)}return;}
+  if(e.target.closest("[data-life-connect]")){try{await A().connect();}catch(_){/* adapter already recorded AUTH_ERROR/BACKEND_ERROR and re-rendered via setState */}finally{rerender();}return;}
   if(e.target.closest("[data-life-refresh]"))rerender();
 });
 document.addEventListener("change",e=>{

@@ -6,11 +6,27 @@
   // every reopen. The token itself never leaves this device — it lives only
   // in the browser's own localStorage, is never written to GitHub source,
   // never appears in a URL, and is redacted from every logged/thrown error
-  // (see safeError/activityError below).
+  // (see classifyError/activityError below).
   const TOKEN_KEY="dgl_mkt_v55_token_session";
   const LEGACY_TOKEN_KEY="dgl_mkt_v55_token_session"; // pre-persistence sessionStorage key (same name, different store)
-  const STATES={DISCONNECTED:"DISCONNECTED",CONNECTING:"CONNECTING",PRIVATE_BACKEND:"PRIVATE_BACKEND",ERROR:"ERROR"};
+  // V6/AURA is the connection authority. AUTH_ERROR means the backend
+  // explicitly rejected the token (it is cleared). BACKEND_ERROR means V6
+  // itself could not be reached/parsed for any other reason (network,
+  // timeout, malformed response, missing route) — the token is preserved,
+  // since the credential itself was never shown to be invalid.
+  const STATES={DISCONNECTED:"DISCONNECTED",CONNECTING:"CONNECTING",PRIVATE_BACKEND:"PRIVATE_BACKEND",AUTH_ERROR:"AUTH_ERROR",BACKEND_ERROR:"BACKEND_ERROR"};
   let state=STATES.DISCONNECTED,lastError="",requests=[],campaigns=[],activity=[],requestSequence=0;
+  const diag={
+    state:STATES.DISCONNECTED,endpointReachable:null,v6Authenticated:false,
+    v6OpportunitiesStatus:"UNKNOWN",auraReportStatus:"UNKNOWN",
+    legacyRequestsStatus:"UNKNOWN",legacyCampaignsStatus:"UNKNOWN",legacyActivityStatus:"UNKNOWN",
+    lastErrorCode:"",lastErrorMessage:""
+  };
+  function publishDiagnostic(){
+    diag.state=state;
+    try{global.DGL_BACKEND_DIAGNOSTIC=Object.freeze({...diag});}catch(_){global.DGL_BACKEND_DIAGNOSTIC={...diag};}
+  }
+  publishDiagnostic();
   function migrateLegacySessionToken(){
     try{
       const legacy=sessionStorage.getItem(LEGACY_TOKEN_KEY);
@@ -43,12 +59,19 @@
     global.dispatchEvent(new CustomEvent("dgl:v55-backend-change",{detail:getConnectionState()}));
     rerenderCurrentModule();
   }
-  function setState(next,error=""){state=next;lastError=error;emit();}
-  function safeError(error){
-    const message=String(error&&error.message||error||"Backend request failed");
-    if(/unauthoriz/i.test(message))return "Private backend authorization failed.";
-    if(/timeout/i.test(message))return "Private backend connection timed out.";
-    const secret=token();return secret?message.replaceAll(secret,"[redacted]"):message;
+  function setState(next,error=""){state=next;lastError=error;publishDiagnostic();emit();}
+  // Distinguishes a genuine credential rejection (AUTH — token is cleared)
+  // from every other failure (BACKEND — token is preserved: network hiccup,
+  // timeout, malformed response, a route that is temporarily missing). Only
+  // AUTH ever clears the stored token.
+  function classifyError(error,code){
+    const raw=String(error&&error.message||error||"Backend request failed");
+    const secret=token(),safe=secret?raw.replaceAll(secret,"[redacted]"):raw;
+    if(/unauthoriz|forbidden|invalid token|token required/i.test(raw))
+      return {kind:"AUTH",code:code||"AUTH_REJECTED",text:"PRIVATE BACKEND AUTHENTICATION FAILED"};
+    if(/timeout/i.test(raw))
+      return {kind:"BACKEND",code:code||"TIMEOUT",text:"AURA BACKEND TEMPORARILY UNAVAILABLE"};
+    return {kind:"BACKEND",code:code||"UNREACHABLE",text:"AURA BACKEND TEMPORARILY UNAVAILABLE",detail:safe.slice(0,200)};
   }
   function unwrap(result){
     if(result&&result.ok===false)throw new Error(result.error||result.message||"Backend request failed");
@@ -82,25 +105,49 @@
 
   async function health(){return jsonp("v55Health",undefined,false);}
 
+  async function probe(action,payload,requiresToken=true){
+    try{const value=await jsonp(action,payload,requiresToken);return {ok:true,value};}
+    catch(error){
+      const msg=String(error&&error.message||error||"");
+      return {ok:false,error,reached:!/unavailable|timeout/i.test(msg)};
+    }
+  }
+
   async function refresh(){
     if(!token())throw new Error("Private backend token required");
-    try{
-      const [r,c,a]=await Promise.all([
-        jsonp("v55Requests",{}),
-        jsonp("v55Campaigns",{}),
-        jsonp("v55Activity",{})
-      ]);
-      requests=arrayFrom(r,["requests","records"]).map(normalizeRequest);
-      campaigns=arrayFrom(c,["campaigns","records"]).map(normalizeCampaign);
-      activity=arrayFrom(a,["activity","records"]);
-      setState(STATES.PRIVATE_BACKEND);
-      return getConnectionState();
-    }catch(error){
-      const message=safeError(error);
-      if(message==="Private backend authorization failed.")clearToken();
-      setState(STATES.ERROR,message);
-      throw new Error(message);
+    // V6/AURA is the connection authority: a live Marketing OS only needs
+    // one authenticated V6 read to prove the backend and the token are both
+    // good. Legacy V5.5 datasets are optional context fetched afterward —
+    // any of them failing must never disconnect a healthy V6 backend.
+    const v6=await probe("v6Opportunities",{});
+    diag.endpointReachable=v6.ok||!!v6.reached;
+    if(!v6.ok){
+      diag.v6OpportunitiesStatus="FAILED";
+      diag.v6Authenticated=false;
+      const c=classifyError(v6.error,v6.reached===false?"UNREACHABLE":undefined);
+      diag.lastErrorCode=c.code;diag.lastErrorMessage=c.text;
+      if(c.kind==="AUTH")clearToken();
+      setState(c.kind==="AUTH"?STATES.AUTH_ERROR:STATES.BACKEND_ERROR,c.text);
+      throw new Error(c.text);
     }
+    diag.v6OpportunitiesStatus="OK";diag.v6Authenticated=true;
+    diag.lastErrorCode="";diag.lastErrorMessage="";
+
+    const [r,c,a,report]=await Promise.allSettled([
+      jsonp("v55Requests",{}),
+      jsonp("v55Campaigns",{}),
+      jsonp("v55Activity",{}),
+      jsonp("v6AuraExecutionReport",{})
+    ]);
+    requests=r.status==="fulfilled"?arrayFrom(r.value,["requests","records"]).map(normalizeRequest):[];
+    campaigns=c.status==="fulfilled"?arrayFrom(c.value,["campaigns","records"]).map(normalizeCampaign):[];
+    activity=a.status==="fulfilled"?arrayFrom(a.value,["activity","records"]):[];
+    diag.legacyRequestsStatus=r.status==="fulfilled"?"OK":"FAILED";
+    diag.legacyCampaignsStatus=c.status==="fulfilled"?"OK":"FAILED";
+    diag.legacyActivityStatus=a.status==="fulfilled"?"OK":"FAILED";
+    diag.auraReportStatus=report.status==="fulfilled"?"OK":"FAILED";
+    setState(STATES.PRIVATE_BACKEND);
+    return getConnectionState();
   }
 
   async function connect(){
@@ -111,25 +158,26 @@
       setToken(value);
     }
     setState(STATES.CONNECTING);
-    try{
-      return await refresh();
-    }catch(error){
-      const message=safeError(error);
-      if(message==="Private backend authorization failed.")clearToken();
-      setState(STATES.ERROR,message);
-      throw new Error(message);
-    }
+    return refresh();
   }
 
-  function disconnect(){clearToken();requests=[];campaigns=[];activity=[];setState(STATES.DISCONNECTED);return getConnectionState();}
+  function disconnect(){
+    clearToken();requests=[];campaigns=[];activity=[];
+    diag.v6Authenticated=false;diag.endpointReachable=null;
+    diag.v6OpportunitiesStatus="UNKNOWN";diag.auraReportStatus="UNKNOWN";
+    diag.legacyRequestsStatus="UNKNOWN";diag.legacyCampaignsStatus="UNKNOWN";diag.legacyActivityStatus="UNKNOWN";
+    diag.lastErrorCode="";diag.lastErrorMessage="";
+    setState(STATES.DISCONNECTED);
+    return getConnectionState();
+  }
   function getConnectionState(){return {state,mode:state===STATES.PRIVATE_BACKEND?"PRIVATE_BACKEND":"LOCAL_DEMO",connected:state===STATES.PRIVATE_BACKEND,error:lastError,requestCount:requests.length,campaignCount:campaigns.length,activityCount:activity.length};}
 
   async function mutate(action,payload,refreshAfter=true){
     try{const result=await jsonp(action,payload);if(refreshAfter)await refresh();return result;}
     catch(error){
-      const message=safeError(error);
-      if(message==="Private backend authorization failed."){clearToken();setState(STATES.ERROR,message);}
-      throw new Error(message);
+      const c=classifyError(error);
+      if(c.kind==="AUTH"){clearToken();setState(STATES.AUTH_ERROR,c.text);}
+      throw new Error(c.text);
     }
   }
 

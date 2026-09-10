@@ -49,7 +49,7 @@ function load(){
 // payload.") ---
 (function testRecoveryCoversAllAmRoutes(){
   assert(source.includes('R["campaign-opportunities"]=campaignOpportunitiesView'),'campaign-opportunities must use the dedicated recovery-aware view');
-  assert(/function scopeView\([^)]*\)\{[\s\S]{0,400}liveWithRecovery\(\)/.test(source),'scopeView (used by retention/reactivation/quoted-not-booked/growth) must also use liveWithRecovery, not the plain "private backend required" empty state');
+  assert(/function scopeView\([^)]*\)\{[\s\S]{0,700}liveWithRecovery\(\)/.test(source),'scopeView (used by retention/reactivation/quoted-not-booked/growth) must also use liveWithRecovery, not the plain "private backend required" empty state');
   console.log('PASS: Safe Data Hub recovery covers every Existing Account Growth route (scopeView included)');
 })();
 
