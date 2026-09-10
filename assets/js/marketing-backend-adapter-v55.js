@@ -1,14 +1,34 @@
 (function(global){
   "use strict";
   const ENDPOINT="https://script.google.com/macros/s/AKfycbw1lzTl7iwqYNp_sp_y2So7rtTt-yUsTmb9DEtRy3tsrF9tUGxHy-exI6Vo8Qmy66GH/exec";
+  // Persistent (not session-only) storage: a one-time manual token entry
+  // survives browser/tab restarts so Cristian never has to re-paste it on
+  // every reopen. The token itself never leaves this device — it lives only
+  // in the browser's own localStorage, is never written to GitHub source,
+  // never appears in a URL, and is redacted from every logged/thrown error
+  // (see safeError/activityError below).
   const TOKEN_KEY="dgl_mkt_v55_token_session";
+  const LEGACY_TOKEN_KEY="dgl_mkt_v55_token_session"; // pre-persistence sessionStorage key (same name, different store)
   const STATES={DISCONNECTED:"DISCONNECTED",CONNECTING:"CONNECTING",PRIVATE_BACKEND:"PRIVATE_BACKEND",ERROR:"ERROR"};
   let state=STATES.DISCONNECTED,lastError="",requests=[],campaigns=[],activity=[],requestSequence=0;
-  const token=()=>sessionStorage.getItem(TOKEN_KEY)||"";
+  function migrateLegacySessionToken(){
+    try{
+      const legacy=sessionStorage.getItem(LEGACY_TOKEN_KEY);
+      if(legacy&&!localStorage.getItem(TOKEN_KEY))localStorage.setItem(TOKEN_KEY,legacy);
+      sessionStorage.removeItem(LEGACY_TOKEN_KEY);
+    }catch(_){/* storage unavailable — falls back to re-prompting */}
+  }
+  migrateLegacySessionToken();
+  const token=()=>{try{return localStorage.getItem(TOKEN_KEY)||"";}catch(_){return "";}};
+  const setToken=value=>{try{localStorage.setItem(TOKEN_KEY,value);}catch(_){/* storage unavailable */}};
+  const clearToken=()=>{try{localStorage.removeItem(TOKEN_KEY);}catch(_){/* storage unavailable */}};
   const clone=v=>JSON.parse(JSON.stringify(v==null?null:v));
 
   function rerenderCurrentModule(){
-    if(state!==STATES.PRIVATE_BACKEND)return;
+    // Re-render on every state transition (not just once connected) so a
+    // module already on screen flips from "PRIVATE BACKEND REQUIRED" to
+    // "CONNECTING TO AURA..." to real live data as auto-connect progresses,
+    // instead of freezing on whatever state existed at initial page render.
     setTimeout(()=>{
       try{
         const id=(global.location.hash||"#/command-center").replace("#/","").trim()||"command-center";
@@ -77,7 +97,7 @@
       return getConnectionState();
     }catch(error){
       const message=safeError(error);
-      if(message==="Private backend authorization failed.")sessionStorage.removeItem(TOKEN_KEY);
+      if(message==="Private backend authorization failed.")clearToken();
       setState(STATES.ERROR,message);
       throw new Error(message);
     }
@@ -86,29 +106,29 @@
   async function connect(){
     let value=token();
     if(!value){
-      value=(global.prompt("Pega el token privado de DGL Marketing OS. Se guardará solo durante esta pestaña y nunca en GitHub.")||"").trim();
+      value=(global.prompt("Pega el token privado de DGL Marketing OS. Se guardará en este navegador (no en esta pestaña únicamente) y nunca en GitHub. Solo se pide una vez por navegador.")||"").trim();
       if(!value){setState(STATES.DISCONNECTED);return getConnectionState();}
-      sessionStorage.setItem(TOKEN_KEY,value);
+      setToken(value);
     }
     setState(STATES.CONNECTING);
     try{
       return await refresh();
     }catch(error){
       const message=safeError(error);
-      if(message==="Private backend authorization failed.")sessionStorage.removeItem(TOKEN_KEY);
+      if(message==="Private backend authorization failed.")clearToken();
       setState(STATES.ERROR,message);
       throw new Error(message);
     }
   }
 
-  function disconnect(){sessionStorage.removeItem(TOKEN_KEY);requests=[];campaigns=[];activity=[];setState(STATES.DISCONNECTED);return getConnectionState();}
+  function disconnect(){clearToken();requests=[];campaigns=[];activity=[];setState(STATES.DISCONNECTED);return getConnectionState();}
   function getConnectionState(){return {state,mode:state===STATES.PRIVATE_BACKEND?"PRIVATE_BACKEND":"LOCAL_DEMO",connected:state===STATES.PRIVATE_BACKEND,error:lastError,requestCount:requests.length,campaignCount:campaigns.length,activityCount:activity.length};}
 
   async function mutate(action,payload,refreshAfter=true){
     try{const result=await jsonp(action,payload);if(refreshAfter)await refresh();return result;}
     catch(error){
       const message=safeError(error);
-      if(message==="Private backend authorization failed."){sessionStorage.removeItem(TOKEN_KEY);setState(STATES.ERROR,message);}
+      if(message==="Private backend authorization failed."){clearToken();setState(STATES.ERROR,message);}
       throw new Error(message);
     }
   }

@@ -10,7 +10,12 @@ assert(source.includes("__dglV55Jsonp_"));
 assert(source.includes('jsonp("v55Health",undefined,false)'));
 assert(source.includes('if(requiresToken&&!token())'));
 assert(!source.includes("fetch("));
-assert(!/localStorage\.(?:setItem|getItem).*token/i.test(source));
+// Token persistence is intentional: it survives browser/tab restarts so a
+// one-time manual entry never has to be repeated. It still never leaves
+// this device, is never written to source, never appears in a commit, and
+// is redacted from every logged/thrown error via safeError/activityError.
+assert(/localStorage\.(?:setItem|getItem).*token/i.test(source),"token must persist across browser restarts via localStorage");
+assert(!/localStorage\.setItem\(\s*TOKEN_KEY\s*,\s*["']/.test(source),"the token value itself must never be a literal in source");
 assert(source.includes('params.set("payload",JSON.stringify(payload))'));
 assert(source.includes('mutate("v55CreateCampaign",{requestId:payload.requestId,strategy:'));
 for(const action of ["v55Requests","v55CreateRequest","v55UpdateRequest","v55Campaigns","v55CreateCampaign","v55RequestApproval","v55RecordApproval","v55ActivateCampaign","v55PauseCampaign","v55CreateTestDraft","v55ResolveRecipients","v55AudienceStatus","v55RecordResponse","v55StopAccount","v55Handoff","v55RecordOutcome","v55Activity"])assert(source.includes(`"${action}"`),`Missing ${action}`);

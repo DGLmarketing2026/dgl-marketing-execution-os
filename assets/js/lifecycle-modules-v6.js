@@ -7,6 +7,8 @@ const E=v=>String(v==null?"":v).replaceAll("&","&amp;").replaceAll("<","&lt;").r
 const U=v=>String(v||"").trim().toUpperCase();
 const N=n=>Number(n||0).toLocaleString("en-US");
 const C=()=>!!A()?.isConnected?.();
+const CS=()=>A()?.getConnectionState?.()?.state||"DISCONNECTED";
+const CONNECTING=()=>CS()==="CONNECTING";
 const P=()=>g.DGL_CAMPAIGN_EXECUTION_V6?.providerStatus||"BULK PROVIDER NOT CONFIGURED";
 const OWNER_KEY="dgl_v6_owner_filter";
 
@@ -174,11 +176,16 @@ async function liveWithRecovery(force=false){
 }
 
 const badge=(t,k="info")=>`<span class="life-badge ${k}">${E(t)}</span>`;
-const header=(title,sub,eye="AUTOMATION LIFECYCLE · V6")=>`<div class="page-head"><div><div class="eyebrow">${E(eye)}</div><h2>${E(title)}</h2><p class="lede">${E(sub)}</p></div><div class="page-head-actions">${C()?badge("PRIVATE BACKEND / LIVE","live"):badge("PRIVATE BACKEND REQUIRED","warn")}${C()?'<button class="btn btn-secondary" data-life-refresh>REFRESH VIEW</button>':'<button class="btn btn-primary" data-life-connect>CONNECT PRIVATE BACKEND</button>'}</div></div>`;
+const headerBadge=()=>C()?badge("PRIVATE BACKEND / LIVE","live"):CONNECTING()?badge("AUTHENTICATING","warn"):badge("PRIVATE BACKEND REQUIRED","warn");
+const headerAction=()=>C()?'<button class="btn btn-secondary" data-life-refresh>REFRESH VIEW</button>':CONNECTING()?'<button class="btn btn-secondary" disabled>AUTHENTICATING…</button>':'<button class="btn btn-primary" data-life-connect>CONNECT PRIVATE BACKEND</button>';
+const header=(title,sub,eye="AUTOMATION LIFECYCLE · V6")=>`<div class="page-head"><div><div class="eyebrow">${E(eye)}</div><h2>${E(title)}</h2><p class="lede">${E(sub)}</p></div><div class="page-head-actions">${headerBadge()}${headerAction()}</div></div>`;
 const kpis=a=>`<div class="kpi-grid">${a.map(([l,v,f])=>`<div class="kpi-card"><div class="kpi-content"><div class="kpi-label">${E(l)}</div><div class="kpi-value">${f===false?E(v):N(v)}</div></div></div>`).join("")}</div>`;
 
 function required(c,title,sub){
-  c.innerHTML=header(title,sub)+`<div class="life-empty"><strong>Private backend required</strong><p>No sample data is used. Connect the governed backend to load live lifecycle data.</p></div>`;
+  const body=CONNECTING()
+    ?`<div class="life-empty"><strong>CONNECTING TO AURA...</strong><p>Authenticating with the governed private backend. This resolves automatically — no action needed.</p></div>`
+    :`<div class="life-empty"><strong>Private backend required</strong><p>No sample data is used. Connect the governed backend to load live lifecycle data.</p></div>`;
+  c.innerHTML=header(title,sub)+body;
 }
 function ownerToolbar(groups){
   const owners=ownerList(groups),sel=selectedOwner();
@@ -230,6 +237,7 @@ function card(x){
   </article>`;
 }
 async function scopeView(c,{title,sub,fams=null,service=null,eye="CAMPAIGN ENGINE · LIVE"}){
+  if(CONNECTING())return required(c,title,sub);
   // Retention/Reactivation/QNB/Cross-Sell must never show a false empty
   // state: fall back to the same Safe Data Hub Recovery snapshot Campaign
   // Opportunities uses whenever live V6 is disconnected or returns an
@@ -251,6 +259,7 @@ async function scopeView(c,{title,sub,fams=null,service=null,eye="CAMPAIGN ENGIN
 }
 async function campaignOpportunitiesView(c){
   const title="Campaign Opportunities",sub="All report-derived opportunities grouped into automatic governed scopes.";
+  if(CONNECTING())return required(c,title,sub);
   const {groups:all,recovered}=await liveWithRecovery();
   const visible=filterOwner(all).sort((a,b)=>(+a.priority||99)-(+b.priority||99)||(+b.eligibleAccounts||0)-(+a.eligibleAccounts||0));
   const det=visible.reduce((s,x)=>s+(+x.detectedAccounts||0),0),eli=visible.reduce((s,x)=>s+(+x.eligibleAccounts||0),0),sup=visible.reduce((s,x)=>s+(+x.suppressedAccounts||0),0);
