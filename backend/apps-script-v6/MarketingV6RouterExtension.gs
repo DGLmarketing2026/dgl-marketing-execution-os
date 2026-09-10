@@ -104,6 +104,12 @@ function routeMarketingV6_(action, payload) {
       return typeof v6AuraExecutionReport_ === 'function' ? v6AuraExecutionReport_(p) : v6RouteMissing_(a, 'v6AuraExecutionReport_');
     case 'v6AuraGmailFreshness':
       return typeof v6AuraGmailFreshnessStatus_ === 'function' ? v6AuraGmailFreshnessStatus_(p) : v6RouteMissing_(a, 'v6AuraGmailFreshnessStatus_');
+    case 'v6AuraGmailPanel':
+      return typeof v6AuraGmailPanelStatus_ === 'function' ? v6AuraGmailPanelStatus_(p) : v6RouteMissing_(a, 'v6AuraGmailPanelStatus_');
+    case 'v6AuraIngestHistory':
+      return typeof v6AuraIngestHistory_ === 'function' ? v6AuraIngestHistory_(p) : v6RouteMissing_(a, 'v6AuraIngestHistory_');
+    case 'v6AuraSourceBreakdown':
+      return typeof v6AuraGmailSourceBreakdown_ === 'function' ? v6AuraGmailSourceBreakdown_(p) : v6RouteMissing_(a, 'v6AuraGmailSourceBreakdown_');
     default:
       return null;
   }

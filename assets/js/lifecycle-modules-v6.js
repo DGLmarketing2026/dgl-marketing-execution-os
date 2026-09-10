@@ -123,7 +123,7 @@ let cache={groups:null,summary:null,pipe:null,ts:0};
 // projection for this browser session (never demo data — only ever set from
 // a real v6AuraExecutionReport response), current in-memory filter state and
 // the auto-refresh interval handle for #/account-campaign-reports.
-let auraCache=null,auraFilters={owner:"ALL",family:"ALL",status:"ALL",search:""},auraTimer=null,auraGmailCache=null;
+let auraCache=null,auraFilters={owner:"ALL",family:"ALL",service:"ALL",status:"ALL",source:"ALL",search:""},auraTimer=null,auraGmailCache=null,auraGmailPanelCache=null,auraHistoryCache=null,auraBreakdownCache=null;
 async function live(force=false){
   if(!C())return{groups:[],summary:null,pipe:null};
   if(!force&&cache.groups&&Date.now()-cache.ts<12000)return cache;
@@ -279,11 +279,12 @@ function auraCommandCardHtml(summary){
 async function commandCenter(c){
   if(!C())return required(c,"Marketing Campaign Command Center","Automatic decision system from commercial signal to retained revenue.");
   const d=await live(true),groups=d.groups||[],base=filterOwner(groups),by=d.pipe?.byCurrentStage||d.pipe?.byStage||{},fs={},rd=readiness(groups);
-  const auraRes=await auraLoad();
+  const[auraRes,gmailPanel]=await Promise.all([auraLoad(),auraGmailPanelLoad()]);
   base.forEach(x=>{const f=family(x.opportunityType);fs[f]=fs[f]||{d:0,e:0,s:0};fs[f].d+=+x.detectedAccounts||0;fs[f].e+=+x.eligibleAccounts||0;fs[f].s+=+x.suppressedAccounts||0;});
   const det=base.reduce((s,x)=>s+(+x.detectedAccounts||0),0),eli=base.reduce((s,x)=>s+(+x.eligibleAccounts||0),0),sup=base.reduce((s,x)=>s+(+x.suppressedAccounts||0),0);
   c.innerHTML=header("Marketing Campaign Command Center","Reports → Opportunity Engine → rules → contacts → campaign → response → attribution.","AUTOMATION COMMAND · LIVE")+
     ownerToolbar(groups)+kpis([["SIGNALS",det],["ELIGIBLE",eli],["SUPPRESSED",sup],["AUTOMATIC SCOPES",base.length]])+
+    auraGmailPanelHtml(gmailPanel)+
     auraCommandCardHtml(auraRes.data?.summary)+
     `<section class="auto-panel"><div class="auto-panel-head"><div><span>AUTOMATION READINESS</span><h3>Decision engines</h3></div>${badge("AUTOMATION FIRST","live")}</div>
       <div class="auto-engine-grid">
@@ -409,7 +410,9 @@ function auraFilterRecords(records){
     const owner=String(r.owner||"Unassigned").trim()||"Unassigned";
     if(f.owner!=="ALL"&&owner!==f.owner)return false;
     if(f.family!=="ALL"&&String(r.campaignFamily||"")!==f.family)return false;
+    if(f.service!=="ALL"&&String(r.service||"")!==f.service)return false;
     if(f.status!=="ALL"&&auraStatusBucket(r.status)!==f.status)return false;
+    if(f.source!=="ALL"&&String(r.source||"")!==f.source)return false;
     if(q&&!U(`${owner} ${r.campaignId||""} ${r.executionId||""}`).includes(q))return false;
     return true;
   });
@@ -438,6 +441,7 @@ function auraFamilySummary(records){
   });
   return Object.keys(by).map(f=>by[f]);
 }
+const AURA_SOURCES=["GMAIL AM REPORT","NOVA / EXISTING SOURCE","MIXED"];
 function auraFilterBar(records){
   const owners=[...new Set((records||[]).map(r=>String(r.owner||"Unassigned").trim()||"Unassigned"))].sort((a,b)=>a.localeCompare(b));
   const f=auraFilters;
@@ -449,6 +453,14 @@ function auraFilterBar(records){
     <div class="aura-filter"><span>CAMPAIGN FAMILY</span><select data-aura-family class="auto-owner-select">
       <option value="ALL" ${f.family==="ALL"?"selected":""}>All families</option>
       ${AURA_FAMILIES.map(x=>`<option value="${E(x)}" ${f.family===x?"selected":""}>${E(x)}</option>`).join("")}
+    </select></div>
+    <div class="aura-filter"><span>SERVICE</span><select data-aura-service class="auto-owner-select">
+      <option value="ALL" ${(f.service||"ALL")==="ALL"?"selected":""}>All services</option>
+      ${[...new Set((records||[]).map(r=>String(r.service||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b)).map(s=>`<option value="${E(s)}" ${f.service===s?"selected":""}>${E(s)}</option>`).join("")}
+    </select></div>
+    <div class="aura-filter"><span>SOURCE</span><select data-aura-source class="auto-owner-select">
+      <option value="ALL" ${f.source==="ALL"?"selected":""}>All sources</option>
+      ${AURA_SOURCES.map(x=>`<option value="${E(x)}" ${f.source===x?"selected":""}>${E(x)}</option>`).join("")}
     </select></div>
     <div class="aura-filter"><span>STATUS</span><select data-aura-status class="auto-owner-select">
       <option value="ALL" ${f.status==="ALL"?"selected":""}>All</option>
@@ -467,10 +479,40 @@ function auraReadyBlockedRows(records,bucket){return records.filter(r=>auraStatu
 const AURA_RB_COLS=[["Owner",r=>E(r.owner||"Unassigned")],["Campaign",auraCampaignCell],["Service",r=>E(r.service||"—")],["Detected",r=>N(r.detectedAccounts)],["Eligible",r=>N(r.eligibleAccounts)],["Recipients",r=>N(r.recipients)],["Status",r=>auraStatusPill(r.status)],["Last Updated",r=>E(auraFmtDate(r.updatedAt))]];
 function auraReadyTableHtml(records){return auraTable(auraReadyBlockedRows(records,"READY"),AURA_RB_COLS,["No campaigns ready to send yet","AURA will surface a campaign here the moment recipient resolution and every execution gate clear except the bulk send provider."]);}
 function auraBlockedTableHtml(records){return auraTable(auraReadyBlockedRows(records,"BLOCKED"),AURA_RB_COLS,["Nothing blocked right now","Blocked means AURA found the campaign opportunity but could not resolve a safe, eligible recipient, or another execution gate prevented progress. It is not an error, and recipients are never invented to clear it."]);}
+// Engagement (delivered/opened/clicked/spam complaints) is only ever a real
+// measured count once a send actually happened. When sent===0 there is
+// nothing to measure yet, so showing a literal 0 there would look like a
+// measured "zero engagement" outcome instead of "never sent" — this renders
+// the honest "NOT SENT YET" label in that case instead.
+function auraEngagementCell(sentCount,value){
+  if(!Number(sentCount))return`<span class="aura-muted">NOT SENT YET</span>`;
+  return N(value);
+}
 function auraResultsTableHtml(records){
   const rows=[...records].sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
-  return auraTable(rows,[["Owner",r=>E(r.owner||"Unassigned")],["Campaign",auraCampaignCell],["Service",r=>E(r.service||"—")],["Recipients",r=>N(r.recipients)],["Sent",r=>N(r.sent)],["Delivered",r=>N(r.delivered)],["Bounced",r=>N(r.bounced)],["Clicks",r=>N(r.clicks)],["Replies",r=>N(r.replies)],["RFQs",r=>N(r.rfqs)],["Quotes",r=>N(r.quotes)],["Loads",r=>N(r.loads)]],
-    ["No campaign results yet","Sent, delivered, click and reply counts populate automatically as campaigns execute and response events are classified. Zero is shown honestly, never fabricated."]);
+  return auraTable(rows,[
+    ["Owner",r=>E(r.owner||"Unassigned")],
+    ["Campaign",auraCampaignCell],
+    ["Service",r=>E(r.service||"—")],
+    ["Source",r=>E(r.source||"—")],
+    ["Detected",r=>N(r.detectedAccounts)],
+    ["Eligible",r=>N(r.eligibleAccounts)],
+    ["Suppressed",r=>N(r.suppressedAccounts)],
+    ["Recipients",r=>N(r.recipients)],
+    ["Email Generated",r=>r.emailGenerated===true||U(r.emailGenerated)==="TRUE"?"YES":"NO"],
+    ["Execution Status",r=>auraStatusPill(r.status)],
+    ["Sent",r=>N(r.sent)],
+    ["Delivered",r=>auraEngagementCell(r.sent,r.delivered)],
+    ["Opened",r=>auraEngagementCell(r.sent,r.opened)],
+    ["Clicked",r=>auraEngagementCell(r.sent,r.clicks)],
+    ["Bounced",r=>N(r.bounced)],
+    ["Spam Complaints",r=>auraEngagementCell(r.sent,r.spamComplaints)],
+    ["Replies",r=>N(r.replies)],
+    ["RFQs",r=>N(r.rfqs)],
+    ["Quotes",r=>N(r.quotes)],
+    ["Loads",r=>N(r.loads)],
+    ["Last Updated",r=>E(auraFmtDate(r.updatedAt))]
+  ],["No campaign results yet","Sent, delivered, click and reply counts populate automatically as campaigns execute and response events are classified. Zero is shown honestly, never fabricated."]);
 }
 function auraOwnerTableHtml(records){
   return auraTable(auraOwnerSummary(records),[["Owner",r=>E(r.owner)],["Campaigns",r=>N(r.campaigns)],["Eligible",r=>N(r.eligibleAccounts)],["Recipients",r=>N(r.recipients)],["Ready",r=>N(r.ready)],["Blocked",r=>N(r.blocked)],["Sent",r=>N(r.sent)],["Replies",r=>N(r.replies)],["RFQs",r=>N(r.rfqs)],["Quotes",r=>N(r.quotes)],["Loads",r=>N(r.loads)]],
@@ -517,13 +559,78 @@ function auraGmailSourceHtml(gmail){
   const tone=gmail.freshness==="STALE"?"blocked":gmail.freshness==="AGING"?"warn":"";
   return`<div class="life-status-strip ${tone}"><div><span>DATA SOURCE</span><strong>${E(gmail.source||"GMAIL · ACCOUNT MANAGEMENT")}</strong></div><p>Latest report: ${E(auraFmtDate(gmail.lastReportReceivedAt))} · Processed: ${E(auraFmtDate(gmail.lastReportProcessedAt))} · Freshness: ${E(gmail.freshness||"—")} · ${N(gmail.rowsAccepted)} rows accepted · ${N(gmail.opportunitiesUpdated)} opportunities updated</p></div>`;
 }
-function auraPaint(c,data,opts={},gmail){
-  const summary=data.summary||{},records=data.records||[];
+// Compact "AURA · ACCOUNT MANAGEMENT INGESTION" panel — a read-only
+// projection of MKT_AURA_INGEST_LOG (see v6AuraGmailPanelStatus_ in
+// MarketingV6AuraAutomation.gs). Luis's name is shown because it is the
+// authorized AM source of this data; his personal address is never
+// printed here, only the governed mailbox the report is ingested from.
+function auraGmailPanelHtml(panel){
+  if(!panel)return"";
+  const live=panel.status==="OK";
+  const body=live?`<div class="aura-gmail-grid">
+      <div><span>Source</span><strong>Gmail · ${E(panel.mailbox||"—")}</strong></div>
+      <div><span>Authorized AM source</span><strong>${E(panel.amOwnerName||"Not configured")}</strong></div>
+      <div><span>Last ingest status</span><strong>${E(panel.lastIngestStatus||"—")}</strong></div>
+      <div><span>Last AM report received</span><strong>${E(auraFmtDate(panel.lastReceivedAt))}</strong></div>
+      <div><span>Last AM report processed</span><strong>${E(auraFmtDate(panel.lastProcessedAt))}</strong></div>
+      <div><span>Attachments processed</span><strong>${N(panel.attachmentsProcessed)}</strong></div>
+      <div><span>Rows parsed</span><strong>${N(panel.rowsParsed)}</strong></div>
+      <div><span>Rows accepted</span><strong>${N(panel.rowsAccepted)}</strong></div>
+      <div><span>Rows rejected</span><strong>${N(panel.rowsRejected)}</strong></div>
+      <div><span>Opportunities created</span><strong>${N(panel.opportunitiesCreated)}</strong></div>
+      <div><span>Opportunities updated</span><strong>${N(panel.opportunitiesUpdated)}</strong></div>
+    </div>`:`<div class="aura-gmail-grid">
+      <div><span>Source</span><strong>Gmail · ${E((panel&&panel.mailbox)||"—")}</strong></div>
+      <div><span>Authorized AM source</span><strong>${E((panel&&panel.amOwnerName)||"Not configured")}</strong></div>
+    </div><div class="aura-command-foot">No AM report has been ingested yet.</div>`;
+  return`<a href="#/account-campaign-reports" class="aura-command-card aura-gmail-panel">
+    <div class="aura-command-head"><span>AURA · ACCOUNT MANAGEMENT INGESTION</span>${badge(live?"LIVE":"NO REPORT YET",live?"live":"warn")}</div>
+    ${body}
+  </a>`;
+}
+function auraSourceBreakdownHtml(breakdown){
+  if(!breakdown)return"";
+  const rows=[breakdown.gmail,breakdown.nova].filter(Boolean);
+  if(!rows.length)return"";
+  return`<section class="life-panel"><div class="life-panel-head"><div><span>SOURCE</span><h3>Source Breakdown</h3></div></div>
+    <div class="life-family-grid aura-family-grid">
+      ${rows.map(r=>`<div class="life-family-card"><span>${E(r.label)}</span><strong>${N(r.opportunities)}</strong><small>Last updated ${E(auraFmtDate(r.lastUpdated))} · ${E(r.status)}</small></div>`).join("")}
+    </div>
+    <p class="aura-muted aura-source-note">QNB currently remains sourced from NOVA because Luis's latest AM report had no QNB-equivalent dataset.</p>
+  </section>`;
+}
+function auraIngestHistoryTableHtml(history){
+  const rows=(history&&history.rows)||[];
+  return auraTable(rows,[
+    ["Received",r=>E(auraFmtDate(r.receivedAt))],
+    ["Processed",r=>E(auraFmtDate(r.processedAt))],
+    ["Subject",r=>E(r.subject||"—")],
+    ["Files",r=>E(r.files||"—")],
+    ["Rows Parsed",r=>N(r.rowsParsed)],
+    ["Accepted",r=>N(r.rowsAccepted)],
+    ["Rejected",r=>N(r.rowsRejected)],
+    ["Opportunities",r=>N(r.opportunities)],
+    ["Status",r=>E(r.status||"—")]
+  ],["No ingestion history yet","AURA will list each processed AM report here automatically as Gmail ingestion runs."]);
+}
+function auraIngestHistorySectionHtml(history){
+  return`<section class="life-panel"><div class="life-panel-head"><div><span>INGESTION</span><h3>Ingest History</h3></div></div>${auraIngestHistoryTableHtml(history)}</section>`;
+}
+function auraPaint(c,data,opts={},gmail,breakdown,history){
+  const summary=data.summary||{},records=data.records||[],byFamily=summary.byFamily||{};
   c.innerHTML=header("AURA · Campaign Activity & Reports","Live execution activity generated automatically by AURA from the governed DGL Data Hub.","AURA · REPORTING")+
     auraBannerHtml(summary,opts)+
     (opts.disconnected?"":auraGmailSourceHtml(gmail))+
     (opts.disconnected?"":auraProviderNoticeHtml())+
-    kpis([["TOTAL CAMPAIGNS",summary.campaigns],["READY TO SEND",summary.readyToSend],["BLOCKED",summary.blocked],["RECIPIENTS",summary.recipients],["ELIGIBLE ACCOUNTS",summary.eligibleAccounts],["OWNERS",summary.owners],["SENT",summary.sent],["REPLIES",summary.replies],["RFQs",summary.rfqs],["LOADS",summary.loads]])+
+    kpis([
+      ["TOTAL CAMPAIGNS",summary.campaigns],["RETENTION",byFamily.Retention],["REACTIVATION",byFamily.Reactivation],["QNB",byFamily.QNB],["CROSS-SELL",byFamily["Cross-Sell"]],
+      ["ELIGIBLE ACCOUNTS",summary.eligibleAccounts],["RECIPIENTS",summary.recipients],["READY TO SEND",summary.readyToSend],["BLOCKED",summary.blocked],
+      ["SENT",summary.sent],["DELIVERED",summary.delivered],["OPENED",summary.opened],["CLICKED",summary.clicked],["BOUNCED",summary.bounced],["SPAM COMPLAINTS",summary.spamComplaints],
+      ["REPLIES",summary.replies],["RFQs",summary.rfqs],["QUOTES",summary.quotes],["LOADS",summary.loads],
+      ["LAST AURA RUN",auraFmtDate(summary.lastAuraRun||summary.lastUpdated),false]
+    ])+
+    (opts.disconnected?"":auraSourceBreakdownHtml(breakdown))+
+    (opts.disconnected?"":auraIngestHistorySectionHtml(history))+
     `<div id="auraFilterBar">${auraFilterBar(records)}</div>`+
     `<div id="auraResultsSection">${auraResultsSectionHtml(records)}</div>`;
 }
@@ -543,10 +650,34 @@ async function auraGmailLoad(){
     return auraGmailCache;
   }catch(_){return auraGmailCache;}
 }
+async function auraGmailPanelLoad(){
+  if(!C())return auraGmailPanelCache;
+  try{
+    const res=await A().v6AuraGmailPanel();
+    if(res&&res.status){auraGmailPanelCache=res;return res;}
+    return auraGmailPanelCache;
+  }catch(_){return auraGmailPanelCache;}
+}
+async function auraIngestHistoryLoad(){
+  if(!C())return auraHistoryCache;
+  try{
+    const res=await A().v6AuraIngestHistory();
+    if(res&&Array.isArray(res.rows)){auraHistoryCache=res;return res;}
+    return auraHistoryCache;
+  }catch(_){return auraHistoryCache;}
+}
+async function auraSourceBreakdownLoad(){
+  if(!C())return auraBreakdownCache;
+  try{
+    const res=await A().v6AuraSourceBreakdown();
+    if(res&&(res.gmail||res.nova)){auraBreakdownCache=res;return res;}
+    return auraBreakdownCache;
+  }catch(_){return auraBreakdownCache;}
+}
 async function auraRenderPage(c){
-  const[res,gmail]=await Promise.all([auraLoad(),auraGmailLoad()]);
-  if(res.ok)return auraPaint(c,res.data,{},gmail);
-  if(res.data)return auraPaint(c,res.data,{stale:!res.disconnected,disconnected:res.disconnected},gmail);
+  const[res,gmail,breakdown,history]=await Promise.all([auraLoad(),auraGmailLoad(),auraSourceBreakdownLoad(),auraIngestHistoryLoad()]);
+  if(res.ok)return auraPaint(c,res.data,{},gmail,breakdown,history);
+  if(res.data)return auraPaint(c,res.data,{stale:!res.disconnected,disconnected:res.disconnected},gmail,breakdown,history);
   if(res.disconnected)return required(c,"AURA · Campaign Activity & Reports","Live execution activity generated automatically by AURA from the governed DGL Data Hub.");
   c.innerHTML=header("AURA · Campaign Activity & Reports","Live execution activity generated automatically by AURA from the governed DGL Data Hub.","AURA · REPORTING")+
     `<div class="life-empty"><strong>AURA REPORT TEMPORARILY UNAVAILABLE</strong><p>The private backend did not return a valid AURA report this time. No number is ever shown as zero unless it is real — retry shortly or refresh the view.</p></div>`;
@@ -610,6 +741,10 @@ document.addEventListener("change",e=>{
   if(fo){auraFilters.owner=fo.value;auraRerenderResults();return;}
   const ff=e.target.closest("[data-aura-family]");
   if(ff){auraFilters.family=ff.value;auraRerenderResults();return;}
+  const fv=e.target.closest("[data-aura-service]");
+  if(fv){auraFilters.service=fv.value;auraRerenderResults();return;}
+  const fsrc=e.target.closest("[data-aura-source]");
+  if(fsrc){auraFilters.source=fsrc.value;auraRerenderResults();return;}
   const fs=e.target.closest("[data-aura-status]");
   if(fs){auraFilters.status=fs.value;auraRerenderResults();return;}
 });
@@ -655,7 +790,11 @@ style.textContent=`
 .aura-command-grid span{display:block;font-size:8px;color:#788399;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
 .aura-command-grid strong{display:block;margin-top:5px;color:#fff;font-size:18px}
 .aura-command-foot{color:#8994A7;font-size:10px}
-@media(max-width:900px){.aura-family-grid{grid-template-columns:1fr 1fr}}
+.aura-gmail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}
+.aura-gmail-grid span{display:block;font-size:8px;color:#788399;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
+.aura-gmail-grid strong{display:block;margin-top:5px;color:#fff;font-size:12px;font-weight:750}
+.aura-source-note{margin:10px 2px 0}
+@media(max-width:900px){.aura-family-grid{grid-template-columns:1fr 1fr}.aura-gmail-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:720px){.aura-filterbar{flex-direction:column}.aura-filter{min-width:0}.aura-command-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 `;
 document.head.appendChild(style);

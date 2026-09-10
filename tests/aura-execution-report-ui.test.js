@@ -75,8 +75,13 @@ function fakeEl(attrs,value){
 
 // 2. No hard-coded campaign totals in source — every KPI reads from the live summary object
 (function testNoHardcodedTotals(){
-  const kpiBlock=source.slice(source.indexOf('function auraPaint'),source.indexOf('function auraPaint')+1200);
-  ['summary.campaigns','summary.readyToSend','summary.blocked','summary.recipients','summary.eligibleAccounts','summary.owners','summary.sent','summary.replies','summary.rfqs','summary.loads'].forEach(f=>{
+  const kpiBlock=source.slice(source.indexOf('function auraPaint'),source.indexOf('function auraPaint')+2200);
+  [
+    'summary.campaigns','byFamily.Retention','byFamily.Reactivation','byFamily.QNB','byFamily["Cross-Sell"]',
+    'summary.eligibleAccounts','summary.recipients','summary.readyToSend','summary.blocked',
+    'summary.sent','summary.delivered','summary.opened','summary.clicked','summary.bounced','summary.spamComplaints',
+    'summary.replies','summary.rfqs','summary.quotes','summary.loads','summary.lastAuraRun'
+  ].forEach(f=>{
     assert(kpiBlock.includes(f),'AURA KPI grid must read '+f+' from the live summary, not a literal number');
   });
   console.log('PASS: every AURA KPI is sourced from the live summary object, never a hard-coded literal');

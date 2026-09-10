@@ -28,7 +28,7 @@
 
 var MKT_V6_AURA_SCHEMA = {
   MKT_CAMPAIGNS: ['campaignId', 'scopeId', 'campaignName', 'campaignType', 'objective', 'service', 'amOwner', 'language', 'status', 'createdAt', 'updatedAt'],
-  MKT_AURA_EXECUTION_REPORT: ['reportRowId', 'owner', 'campaignFamily', 'service', 'campaignId', 'executionId', 'detectedAccounts', 'eligibleAccounts', 'suppressedAccounts', 'recipients', 'sent', 'delivered', 'bounced', 'clicks', 'replies', 'rfqs', 'quotes', 'loads', 'campaignStart', 'campaignEnd', 'status', 'updatedAt']
+  MKT_AURA_EXECUTION_REPORT: ['reportRowId', 'owner', 'campaignFamily', 'service', 'campaignId', 'executionId', 'source', 'detectedAccounts', 'eligibleAccounts', 'suppressedAccounts', 'recipients', 'emailGenerated', 'sent', 'delivered', 'opened', 'bounced', 'clicks', 'spamComplaints', 'replies', 'rfqs', 'quotes', 'loads', 'campaignStart', 'campaignEnd', 'status', 'updatedAt']
 };
 
 var MKT_V6_AURA_FAMILIES = ['Retention', 'Reactivation', 'Cross-Sell', 'QNB'];
@@ -203,7 +203,35 @@ function v6AuraInvalidContactCountsByAccount_() {
   });
   return counts;
 }
-function v6AuraReportRow_(scope, campaign, prep, invalidCountsByAccount) {
+// Read-only, one pass per tick (same efficiency discipline as the invalid-
+// contact map above): maps accountId -> the sourceReport of its opportunity
+// row, so each campaign's Source can be reported without a per-account
+// lookup. 'GMAIL_AM_REPORT' comes from MarketingV6AuraGmailIngest.gs; every
+// other sourceReport value (LQS_SIN_RESPUESTA, MIGRACION_CAIDAS, CUENTAS,
+// FICHA_CLIENTES, MIGRACION_RECUPERADAS) is the pre-existing NOVA/AM-
+// Intelligence report source. This file only READS MKT_OPPORTUNITIES; it
+// never touches the Gmail ingestion pipeline itself.
+function v6AuraAccountSourceMap_() {
+  var map = {};
+  v6Rows_('MKT_OPPORTUNITIES').forEach(function (r) {
+    var accountId = v6AuraText_(r.accountId);
+    if (accountId) map[accountId] = v6AuraText_(r.sourceReport);
+  });
+  return map;
+}
+function v6AuraScopeSourceLabel_(scope, accountSourceByAccountId) {
+  var map = accountSourceByAccountId || {}, gmail = 0, nova = 0;
+  (scope.accountIds || []).forEach(function (accountId) {
+    var src = map[accountId];
+    if (src === 'GMAIL_AM_REPORT') gmail++;
+    else if (src) nova++;
+  });
+  if (gmail && nova) return 'MIXED';
+  if (gmail) return 'GMAIL AM REPORT';
+  if (nova) return 'NOVA / EXISTING SOURCE';
+  return 'UNKNOWN';
+}
+function v6AuraReportRow_(scope, campaign, prep, invalidCountsByAccount, accountSourceByAccountId) {
   var pipeline = v6Rows_('MKT_ACCOUNT_PIPELINE').filter(function (r) { return v6AuraText_(r.campaignId) === campaign.campaignId; });
   var counts = invalidCountsByAccount || {};
   var bounced = 0;
@@ -220,9 +248,12 @@ function v6AuraReportRow_(scope, campaign, prep, invalidCountsByAccount) {
   var now = v6AuraNow_();
   var row = {
     reportRowId: campaign.campaignId, owner: campaign.amOwner, campaignFamily: campaign.objective, service: campaign.service,
-    campaignId: campaign.campaignId, executionId: prep.executionId,
+    campaignId: campaign.campaignId, executionId: prep.executionId, source: v6AuraScopeSourceLabel_(scope, accountSourceByAccountId),
     detectedAccounts: (scope.accountIds || []).length, eligibleAccounts: (scope.accountIds || []).length, suppressedAccounts: 0,
-    recipients: prep.audience.eligibleContactCount || 0, sent: 0, delivered: 0, bounced: bounced, clicks: 0,
+    recipients: prep.audience.eligibleContactCount || 0, emailGenerated: !!prep.email,
+    // Delivered/Opened/Clicks/Spam Complaints stay honestly 0 until a bulk
+    // send provider is connected -- never fabricated engagement.
+    sent: 0, delivered: 0, opened: 0, bounced: bounced, clicks: 0, spamComplaints: 0,
     replies: replies, rfqs: rfqs, quotes: quotes, loads: loads,
     campaignStart: campaign.createdAt, campaignEnd: '', status: status, updatedAt: now
   };
@@ -256,6 +287,7 @@ function v6AuraAutomationTick_() {
   v6AuraEnsureSheet_('MKT_CAMPAIGNS'); v6AuraEnsureSheet_('MKT_AURA_EXECUTION_REPORT');
   var refresh = v6RefreshOpportunitiesFromReports_();
   var invalidCountsByAccount = v6AuraInvalidContactCountsByAccount_();
+  var accountSourceByAccountId = v6AuraAccountSourceMap_();
   var families = {}, campaignsProcessed = 0, blockedOnProvider = 0, reportRows = [];
   MKT_V6_AURA_FAMILIES.forEach(function (opportunityType) {
     var built = v6AuraAutoBuildScopesForFamily_(opportunityType);
@@ -263,7 +295,7 @@ function v6AuraAutomationTick_() {
     built.scopes.forEach(function (scope) {
       var campaign = v6AuraEnsureCampaign_(scope);
       var prep = v6AuraPrepareExecution_(scope, campaign);
-      var reportRow = v6AuraReportRow_(scope, campaign, prep, invalidCountsByAccount);
+      var reportRow = v6AuraReportRow_(scope, campaign, prep, invalidCountsByAccount, accountSourceByAccountId);
       reportRows.push(reportRow);
       campaignsProcessed++;
       if (prep.queue && prep.queue.status === 'BLOCKED' && (prep.queue.reasons || []).indexOf('BULK PROVIDER NOT CONFIGURED') >= 0) blockedOnProvider++;
@@ -293,7 +325,7 @@ function v6AuraAutomaticReportStatus_() {
 // same human-readable objective label v6AuraEnsureCampaign_ already writes
 // ('Retention' | 'Reactivation' | 'Quoted Not Booked' | 'Cross-Sell'), so the
 // Marketing OS can group/filter without any extra mapping.
-var MKT_V6_AURA_REPORT_SAFE_FIELDS = ['owner', 'campaignFamily', 'service', 'campaignId', 'executionId', 'detectedAccounts', 'eligibleAccounts', 'suppressedAccounts', 'recipients', 'sent', 'delivered', 'bounced', 'clicks', 'replies', 'rfqs', 'quotes', 'loads', 'campaignStart', 'campaignEnd', 'status', 'updatedAt'];
+var MKT_V6_AURA_REPORT_SAFE_FIELDS = ['owner', 'campaignFamily', 'service', 'campaignId', 'executionId', 'source', 'detectedAccounts', 'eligibleAccounts', 'suppressedAccounts', 'recipients', 'emailGenerated', 'sent', 'delivered', 'opened', 'bounced', 'clicks', 'spamComplaints', 'replies', 'rfqs', 'quotes', 'loads', 'campaignStart', 'campaignEnd', 'status', 'updatedAt'];
 function v6AuraExecutionReport_() {
   var rows = v6AuraRows_('MKT_AURA_EXECUTION_REPORT');
   var records = rows.map(function (r) {
@@ -301,16 +333,26 @@ function v6AuraExecutionReport_() {
     MKT_V6_AURA_REPORT_SAFE_FIELDS.forEach(function (f) { out[f] = r[f] === undefined || r[f] === null ? '' : r[f]; });
     return out;
   });
-  var owners = {}, campaigns = records.length, readyToSend = 0, blocked = 0, recipients = 0, eligibleAccounts = 0, suppressedAccounts = 0, sent = 0, replies = 0, rfqs = 0, quotes = 0, loads = 0, lastUpdated = '';
+  var owners = {}, campaigns = records.length, readyToSend = 0, blocked = 0, recipients = 0, eligibleAccounts = 0, suppressedAccounts = 0;
+  var sent = 0, delivered = 0, opened = 0, clicked = 0, bounced = 0, spamComplaints = 0, replies = 0, rfqs = 0, quotes = 0, loads = 0, lastUpdated = '';
+  var byFamily = { Retention: 0, Reactivation: 0, QNB: 0, 'Cross-Sell': 0 };
   records.forEach(function (r) {
     owners[v6AuraText_(r.owner) || 'Unassigned'] = true;
     var status = v6AuraText_(r.status).toUpperCase();
     if (status.indexOf('READY TO SEND') === 0) readyToSend++;
     else if (status === 'BLOCKED') blocked++;
+    var familyToken = v6AuraFamilyToken_(r.campaignFamily);
+    var familyLabel = familyToken === 'QNB' ? 'QNB' : familyToken === 'CROSS-SELL' ? 'Cross-Sell' : familyToken === 'REACTIVATION' ? 'Reactivation' : 'Retention';
+    byFamily[familyLabel] = (byFamily[familyLabel] || 0) + 1;
     recipients += Number(r.recipients) || 0;
     eligibleAccounts += Number(r.eligibleAccounts) || 0;
     suppressedAccounts += Number(r.suppressedAccounts) || 0;
     sent += Number(r.sent) || 0;
+    delivered += Number(r.delivered) || 0;
+    opened += Number(r.opened) || 0;
+    clicked += Number(r.clicks) || 0;
+    bounced += Number(r.bounced) || 0;
+    spamComplaints += Number(r.spamComplaints) || 0;
     replies += Number(r.replies) || 0;
     rfqs += Number(r.rfqs) || 0;
     quotes += Number(r.quotes) || 0;
@@ -321,8 +363,67 @@ function v6AuraExecutionReport_() {
     summary: {
       campaigns: campaigns, readyToSend: readyToSend, blocked: blocked, recipients: recipients,
       eligibleAccounts: eligibleAccounts, suppressedAccounts: suppressedAccounts, owners: Object.keys(owners).length,
-      sent: sent, replies: replies, rfqs: rfqs, quotes: quotes, loads: loads, lastUpdated: lastUpdated
+      byFamily: byFamily,
+      sent: sent, delivered: delivered, opened: opened, clicked: clicked, bounced: bounced, spamComplaints: spamComplaints,
+      replies: replies, rfqs: rfqs, quotes: quotes, loads: loads, lastUpdated: lastUpdated, lastAuraRun: lastUpdated
     },
     records: records
+  };
+}
+
+// --- Gmail Data Source panel (read-only projection over MKT_AURA_INGEST_LOG) -
+// Never modifies MarketingV6AuraGmailIngest.gs or its ingestion logic -- this
+// only reads the log table that file already writes, via its existing
+// v6AuraGmailRows_/v6AuraGmailSourceMailbox_ helpers.
+function v6AuraGmailAmOwnerName_() {
+  return v6AuraText_(PropertiesService.getScriptProperties().getProperty('AURA_GMAIL_AM_OWNER_NAME'));
+}
+function v6AuraGmailPanelStatus_() {
+  var log = v6AuraGmailRows_('MKT_AURA_INGEST_LOG');
+  var mailbox = v6AuraGmailSourceMailbox_(), amOwnerName = v6AuraGmailAmOwnerName_();
+  if (!log.length) {
+    return { status: 'NO_REPORT_RECEIVED', mailbox: mailbox, amOwnerName: amOwnerName };
+  }
+  var latest = log.reduce(function (a, b) { return v6AuraText_(b.receivedAt) > v6AuraText_(a.receivedAt) ? b : a; });
+  return {
+    status: 'OK', mailbox: mailbox, amOwnerName: amOwnerName,
+    lastReceivedAt: latest.receivedAt, lastProcessedAt: latest.processedAt,
+    attachmentsProcessed: Number(latest.attachmentCount) || 0,
+    rowsParsed: Number(latest.rowsParsed) || 0, rowsAccepted: Number(latest.rowsAccepted) || 0, rowsRejected: Number(latest.rowsRejected) || 0,
+    opportunitiesCreated: Number(latest.opportunitiesCreated) || 0, opportunitiesUpdated: Number(latest.opportunitiesUpdated) || 0,
+    lastIngestStatus: v6AuraGmailText_(latest.status)
+  };
+}
+
+// --- Ingest history table (safe columns only: no messageId/threadId/senderHash/errorCode) ---
+var MKT_V6_AURA_INGEST_HISTORY_LIMIT = 50;
+function v6AuraIngestHistory_() {
+  var log = v6AuraGmailRows_('MKT_AURA_INGEST_LOG');
+  var rows = log.slice().sort(function (a, b) { return v6AuraGmailText_(b.receivedAt).localeCompare(v6AuraGmailText_(a.receivedAt)); }).slice(0, MKT_V6_AURA_INGEST_HISTORY_LIMIT);
+  return {
+    rows: rows.map(function (r) {
+      return {
+        receivedAt: r.receivedAt, processedAt: r.processedAt, subject: r.subject, files: r.sourceFiles,
+        rowsParsed: Number(r.rowsParsed) || 0, rowsAccepted: Number(r.rowsAccepted) || 0, rowsRejected: Number(r.rowsRejected) || 0,
+        opportunities: (Number(r.opportunitiesCreated) || 0) + (Number(r.opportunitiesUpdated) || 0),
+        status: r.status
+      };
+    })
+  };
+}
+
+// --- Source breakdown: Gmail AM Report vs NOVA / Existing source ------------
+function v6AuraGmailSourceBreakdown_() {
+  var rows = v6Rows_('MKT_OPPORTUNITIES');
+  var gmail = { opportunities: 0, lastUpdated: '' }, nova = { opportunities: 0, lastUpdated: '' };
+  rows.forEach(function (r) {
+    var bucket = v6AuraText_(r.sourceReport) === 'GMAIL_AM_REPORT' ? gmail : nova;
+    bucket.opportunities++;
+    var updatedAt = v6AuraText_(r.updatedAt) || v6AuraText_(r.detectedAt);
+    if (updatedAt > bucket.lastUpdated) bucket.lastUpdated = updatedAt;
+  });
+  return {
+    gmail: { label: 'GMAIL AM REPORT', opportunities: gmail.opportunities, lastUpdated: gmail.lastUpdated, status: gmail.opportunities ? 'ACTIVE' : 'NO DATA' },
+    nova: { label: 'NOVA / EXISTING SOURCE', opportunities: nova.opportunities, lastUpdated: nova.lastUpdated, status: nova.opportunities ? 'ACTIVE' : 'NO DATA' }
   };
 }

@@ -17,7 +17,7 @@ function makeContext(tables){
   return ctx;
 }
 
-var SAFE_FIELDS=['owner','campaignFamily','service','campaignId','executionId','detectedAccounts','eligibleAccounts','suppressedAccounts','recipients','sent','delivered','bounced','clicks','replies','rfqs','quotes','loads','campaignStart','campaignEnd','status','updatedAt'];
+var SAFE_FIELDS=['owner','campaignFamily','service','campaignId','executionId','source','detectedAccounts','eligibleAccounts','suppressedAccounts','recipients','emailGenerated','sent','delivered','opened','bounced','clicks','spamComplaints','replies','rfqs','quotes','loads','campaignStart','campaignEnd','status','updatedAt'];
 
 function row(overrides){
   return Object.assign({
