@@ -231,10 +231,14 @@ function v6AuraGmailProcessMessage_(msg, thread) {
 // --- Main tick -----------------------------------------------------------------
 // Runs from the SAME hourly heartbeat as v6AcqAutomationTick_ / v6AuraAutomationTick_
 // (see MarketingV6AcquisitionEngine.gs). Idempotent per Gmail messageId: a
-// message already present in MKT_AURA_INGEST_LOG is never reprocessed. On the
-// very first run only, the search is bounded to the last 30 days so a mailbox
-// with years of history is never endlessly rescanned; every run after that is
-// unbounded but still cheap because already-seen messages are skipped by id.
+// message already present in MKT_AURA_INGEST_LOG is never reprocessed. The
+// search is ALWAYS bounded to the last 45 days (not just on the first run) so
+// GmailApp.search never has to walk the full mailbox history on every hourly
+// tick -- confirmed live: an unbounded search on ticks after the first one
+// caused v6AcqAutomationTick_ to take ~30 minutes per run against a mailbox
+// with years of unrelated correspondence between the AM lead and this inbox.
+// 45 days safely covers Luis's periodic AM report cadence while keeping every
+// tick fast; already-seen messages are still skipped by id regardless.
 function v6AuraGmailIngestTick_() {
   var allowed = v6AuraGmailAllowedSenders_();
   if (!allowed.length) return { status: 'NO_ALLOWED_SENDERS', messagesFound: 0, messagesProcessed: 0 };
@@ -242,7 +246,7 @@ function v6AuraGmailIngestTick_() {
   var initializedAt = props.getProperty('AURA_GMAIL_INITIALIZED_AT');
   var mailbox = v6AuraGmailSourceMailbox_();
   var senderClause = '(' + allowed.map(function (a) { return 'from:' + a; }).join(' OR ') + ')';
-  var query = 'to:' + mailbox + ' ' + senderClause + (initializedAt ? '' : ' newer_than:30d');
+  var query = 'to:' + mailbox + ' ' + senderClause + ' newer_than:45d';
   var threads = GmailApp.search(query, 0, 50);
   var alreadySeen = {};
   v6AuraGmailRows_('MKT_AURA_INGEST_LOG').forEach(function (r) { alreadySeen[v6AuraGmailText_(r.gmailMessageId)] = true; });
