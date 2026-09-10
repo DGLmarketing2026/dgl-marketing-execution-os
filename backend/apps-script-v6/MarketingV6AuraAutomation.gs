@@ -283,3 +283,46 @@ function v6AuraAutomaticReportStatus_() {
   rows.forEach(function (r) { byOwner[r.owner] = (byOwner[r.owner] || 0) + 1; });
   return { status: 'OK', totalCampaigns: rows.length, owners: Object.keys(byOwner).length, byOwner: byOwner };
 }
+
+// --- Live AURA reporting for Marketing OS -----------------------------------
+// Read-only projection of MKT_AURA_EXECUTION_REPORT (the real source of truth
+// for what AURA has actually done). Returns ONLY safe operational fields --
+// never an account name, contact name, email, phone, price or credit value --
+// matching the same safe-aggregate discipline already used by
+// v6SafeOpportunityResponse_ / v6Opportunities_. campaignFamily here is the
+// same human-readable objective label v6AuraEnsureCampaign_ already writes
+// ('Retention' | 'Reactivation' | 'Quoted Not Booked' | 'Cross-Sell'), so the
+// Marketing OS can group/filter without any extra mapping.
+var MKT_V6_AURA_REPORT_SAFE_FIELDS = ['owner', 'campaignFamily', 'service', 'campaignId', 'executionId', 'detectedAccounts', 'eligibleAccounts', 'suppressedAccounts', 'recipients', 'sent', 'delivered', 'bounced', 'clicks', 'replies', 'rfqs', 'quotes', 'loads', 'campaignStart', 'campaignEnd', 'status', 'updatedAt'];
+function v6AuraExecutionReport_() {
+  var rows = v6AuraRows_('MKT_AURA_EXECUTION_REPORT');
+  var records = rows.map(function (r) {
+    var out = {};
+    MKT_V6_AURA_REPORT_SAFE_FIELDS.forEach(function (f) { out[f] = r[f] === undefined || r[f] === null ? '' : r[f]; });
+    return out;
+  });
+  var owners = {}, campaigns = records.length, readyToSend = 0, blocked = 0, recipients = 0, eligibleAccounts = 0, suppressedAccounts = 0, sent = 0, replies = 0, rfqs = 0, quotes = 0, loads = 0, lastUpdated = '';
+  records.forEach(function (r) {
+    owners[v6AuraText_(r.owner) || 'Unassigned'] = true;
+    var status = v6AuraText_(r.status).toUpperCase();
+    if (status.indexOf('READY TO SEND') === 0) readyToSend++;
+    else if (status === 'BLOCKED') blocked++;
+    recipients += Number(r.recipients) || 0;
+    eligibleAccounts += Number(r.eligibleAccounts) || 0;
+    suppressedAccounts += Number(r.suppressedAccounts) || 0;
+    sent += Number(r.sent) || 0;
+    replies += Number(r.replies) || 0;
+    rfqs += Number(r.rfqs) || 0;
+    quotes += Number(r.quotes) || 0;
+    loads += Number(r.loads) || 0;
+    if (r.updatedAt && String(r.updatedAt) > lastUpdated) lastUpdated = String(r.updatedAt);
+  });
+  return {
+    summary: {
+      campaigns: campaigns, readyToSend: readyToSend, blocked: blocked, recipients: recipients,
+      eligibleAccounts: eligibleAccounts, suppressedAccounts: suppressedAccounts, owners: Object.keys(owners).length,
+      sent: sent, replies: replies, rfqs: rfqs, quotes: quotes, loads: loads, lastUpdated: lastUpdated
+    },
+    records: records
+  };
+}

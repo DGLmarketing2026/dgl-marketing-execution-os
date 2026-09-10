@@ -100,6 +100,8 @@ function routeMarketingV6_(action, payload) {
       return typeof v6AuraAutomationTick_ === 'function' ? v6AuraAutomationTick_(p) : v6RouteMissing_(a, 'v6AuraAutomationTick_');
     case 'v6AuraAutomaticReportStatus':
       return typeof v6AuraAutomaticReportStatus_ === 'function' ? v6AuraAutomaticReportStatus_(p) : v6RouteMissing_(a, 'v6AuraAutomaticReportStatus_');
+    case 'v6AuraExecutionReport':
+      return typeof v6AuraExecutionReport_ === 'function' ? v6AuraExecutionReport_(p) : v6RouteMissing_(a, 'v6AuraExecutionReport_');
     default:
       return null;
   }

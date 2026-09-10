@@ -119,6 +119,11 @@ function openStudio(x){
 }
 
 let cache={groups:null,summary:null,pipe:null,ts:0};
+// AURA live reporting: last successfully loaded MKT_AURA_EXECUTION_REPORT
+// projection for this browser session (never demo data — only ever set from
+// a real v6AuraExecutionReport response), current in-memory filter state and
+// the auto-refresh interval handle for #/account-campaign-reports.
+let auraCache=null,auraFilters={owner:"ALL",family:"ALL",status:"ALL",search:""},auraTimer=null;
 async function live(force=false){
   if(!C())return{groups:[],summary:null,pipe:null};
   if(!force&&cache.groups&&Date.now()-cache.ts<12000)return cache;
@@ -258,13 +263,28 @@ async function campaignOpportunitiesView(c){
     `<div class="life-status-strip"><div><span>Operating rule</span><strong>AUTOMATIC SCOPE GENERATION</strong></div><p>No recurring manual account selection. Rules decide eligibility, suppression, pressure and routing.</p></div>
      <div class="life-scope-stack">${visible.length?visible.map(card).join(""):`<div class="life-empty"><strong>No scopes for ${E(selectedOwner())}</strong></div>`}</div>`;
 }
+function auraCommandCardHtml(summary){
+  if(!summary)return"";
+  return`<a href="#/account-campaign-reports" class="aura-command-card">
+    <div class="aura-command-head"><span>AURA · CAMPAIGN ACTIVITY</span>${badge("LIVE","live")}</div>
+    <div class="aura-command-grid">
+      <div><span>Live campaigns</span><strong>${N(summary.campaigns)}</strong></div>
+      <div><span>Ready to send</span><strong>${N(summary.readyToSend)}</strong></div>
+      <div><span>Blocked</span><strong>${N(summary.blocked)}</strong></div>
+      <div><span>Recipients</span><strong>${N(summary.recipients)}</strong></div>
+    </div>
+    <div class="aura-command-foot">Last activity: ${E(auraFmtDate(summary.lastUpdated))}</div>
+  </a>`;
+}
 async function commandCenter(c){
   if(!C())return required(c,"Marketing Campaign Command Center","Automatic decision system from commercial signal to retained revenue.");
   const d=await live(true),groups=d.groups||[],base=filterOwner(groups),by=d.pipe?.byCurrentStage||d.pipe?.byStage||{},fs={},rd=readiness(groups);
+  const auraRes=await auraLoad();
   base.forEach(x=>{const f=family(x.opportunityType);fs[f]=fs[f]||{d:0,e:0,s:0};fs[f].d+=+x.detectedAccounts||0;fs[f].e+=+x.eligibleAccounts||0;fs[f].s+=+x.suppressedAccounts||0;});
   const det=base.reduce((s,x)=>s+(+x.detectedAccounts||0),0),eli=base.reduce((s,x)=>s+(+x.eligibleAccounts||0),0),sup=base.reduce((s,x)=>s+(+x.suppressedAccounts||0),0);
   c.innerHTML=header("Marketing Campaign Command Center","Reports → Opportunity Engine → rules → contacts → campaign → response → attribution.","AUTOMATION COMMAND · LIVE")+
     ownerToolbar(groups)+kpis([["SIGNALS",det],["ELIGIBLE",eli],["SUPPRESSED",sup],["AUTOMATIC SCOPES",base.length]])+
+    auraCommandCardHtml(auraRes.data?.summary)+
     `<section class="auto-panel"><div class="auto-panel-head"><div><span>AUTOMATION READINESS</span><h3>Decision engines</h3></div>${badge("AUTOMATION FIRST","live")}</div>
       <div class="auto-engine-grid">
         ${engineBadge("Signal ingestion","LIVE","good")}
@@ -353,11 +373,168 @@ function content(c){
   c.innerHTML=header("Content & Landing Assets","Approved creative systems governed by memory and cooldown.","CREATIVE · AUTOMATED LIBRARY")+
     kpis([["CREATIVE SYSTEMS",systems.length],["COPY MEMORY","90 DAYS / ACCOUNT",false],["ASSET COOLDOWN","90 DAYS / ACCOUNT",false],["GLOBAL COOLDOWN","60 DAYS",false]]);
 }
+// --- AURA live reporting (#/account-campaign-reports) -----------------------
+// Reads ONLY the safe operational projection of MKT_AURA_EXECUTION_REPORT via
+// v6AuraExecutionReport (backend/apps-script-v6/MarketingV6AuraAutomation.gs).
+// No account/contact identity, price or credit field ever reaches this file —
+// see MKT_V6_AURA_REPORT_SAFE_FIELDS on the backend. Numbers here are never
+// hard-coded and never fabricated: every KPI, table row and grouping is
+// derived at render time from the live response (or, if a refresh fails,
+// from the last successfully loaded response for this browser session).
+const AURA_FAMILIES=["Retention","Reactivation","Quoted Not Booked","Cross-Sell"];
+function auraFmtDate(v){
+  if(!v)return"—";
+  const d=new Date(v);
+  if(isNaN(d.getTime()))return String(v);
+  return d.toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+}
+function auraStatusBucket(status){
+  const s=U(status);
+  if(s.indexOf("READY TO SEND")===0)return"READY";
+  if(s==="BLOCKED")return"BLOCKED";
+  return"OTHER";
+}
+function auraStatusPill(status){
+  const bucket=auraStatusBucket(status),raw=String(status||"");
+  if(bucket==="READY"){
+    const sub=raw.replace(/^READY TO SEND\s*[·-]?\s*/i,"").trim();
+    return`<div class="aura-pill ready">READY TO SEND${sub&&U(sub)!=="READY TO SEND"?`<small>${E(sub)}</small>`:""}</div>`;
+  }
+  if(bucket==="BLOCKED")return`<div class="aura-pill blocked">BLOCKED</div>`;
+  return`<div class="aura-pill other">${E(raw||"PREPARING")}</div>`;
+}
+function auraFilterRecords(records){
+  const f=auraFilters,q=U(f.search);
+  return(records||[]).filter(r=>{
+    const owner=String(r.owner||"Unassigned").trim()||"Unassigned";
+    if(f.owner!=="ALL"&&owner!==f.owner)return false;
+    if(f.family!=="ALL"&&String(r.campaignFamily||"")!==f.family)return false;
+    if(f.status!=="ALL"&&auraStatusBucket(r.status)!==f.status)return false;
+    if(q&&!U(`${owner} ${r.campaignId||""} ${r.executionId||""}`).includes(q))return false;
+    return true;
+  });
+}
+function auraOwnerSummary(records){
+  const by={};
+  (records||[]).forEach(r=>{
+    const o=String(r.owner||"Unassigned").trim()||"Unassigned";
+    const b=by[o]=by[o]||{owner:o,campaigns:0,eligibleAccounts:0,recipients:0,ready:0,blocked:0,sent:0,replies:0,rfqs:0,quotes:0,loads:0};
+    b.campaigns++;b.eligibleAccounts+=+r.eligibleAccounts||0;b.recipients+=+r.recipients||0;b.sent+=+r.sent||0;b.replies+=+r.replies||0;b.rfqs+=+r.rfqs||0;b.quotes+=+r.quotes||0;b.loads+=+r.loads||0;
+    const bucket=auraStatusBucket(r.status);
+    if(bucket==="READY")b.ready++;else if(bucket==="BLOCKED")b.blocked++;
+  });
+  return Object.values(by).sort((a,b)=>b.campaigns-a.campaigns||a.owner.localeCompare(b.owner));
+}
+function auraFamilySummary(records){
+  const by={};
+  AURA_FAMILIES.forEach(f=>by[f]={family:f,count:0,eligibleAccounts:0,recipients:0,ready:0,blocked:0});
+  (records||[]).forEach(r=>{
+    const f=String(r.campaignFamily||"")||"Unclassified";
+    if(!by[f])by[f]={family:f,count:0,eligibleAccounts:0,recipients:0,ready:0,blocked:0};
+    const b=by[f];
+    b.count++;b.eligibleAccounts+=+r.eligibleAccounts||0;b.recipients+=+r.recipients||0;
+    const bucket=auraStatusBucket(r.status);
+    if(bucket==="READY")b.ready++;else if(bucket==="BLOCKED")b.blocked++;
+  });
+  return Object.keys(by).map(f=>by[f]);
+}
+function auraFilterBar(records){
+  const owners=[...new Set((records||[]).map(r=>String(r.owner||"Unassigned").trim()||"Unassigned"))].sort((a,b)=>a.localeCompare(b));
+  const f=auraFilters;
+  return`<div class="aura-filterbar">
+    <div class="aura-filter"><span>OWNER</span><select data-aura-owner class="auto-owner-select">
+      <option value="ALL" ${f.owner==="ALL"?"selected":""}>All owners</option>
+      ${owners.map(o=>`<option value="${E(o)}" ${f.owner===o?"selected":""}>${E(o)}</option>`).join("")}
+    </select></div>
+    <div class="aura-filter"><span>CAMPAIGN FAMILY</span><select data-aura-family class="auto-owner-select">
+      <option value="ALL" ${f.family==="ALL"?"selected":""}>All families</option>
+      ${AURA_FAMILIES.map(x=>`<option value="${E(x)}" ${f.family===x?"selected":""}>${E(x)}</option>`).join("")}
+    </select></div>
+    <div class="aura-filter"><span>STATUS</span><select data-aura-status class="auto-owner-select">
+      <option value="ALL" ${f.status==="ALL"?"selected":""}>All</option>
+      <option value="READY" ${f.status==="READY"?"selected":""}>Ready to send</option>
+      <option value="BLOCKED" ${f.status==="BLOCKED"?"selected":""}>Blocked</option>
+    </select></div>
+    <div class="aura-filter aura-filter-search"><span>SEARCH</span><input type="text" data-aura-search class="aura-search-input" placeholder="Owner, campaign ID or execution ID" value="${E(f.search)}"/></div>
+  </div>`;
+}
+function auraTable(rows,cols,empty){
+  if(!rows.length)return`<div class="life-empty"><strong>${E(empty[0])}</strong><p>${E(empty[1])}</p></div>`;
+  return`<div class="table-wrap"><table class="data-table"><thead><tr>${cols.map(cl=>`<th>${E(cl[0])}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(cl=>`<td>${cl[1](r)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+function auraCampaignCell(r){return`<strong>${E(r.campaignFamily||"—")}</strong><br><small class="aura-muted">${E(r.campaignId||"")}</small>`;}
+function auraReadyBlockedRows(records,bucket){return records.filter(r=>auraStatusBucket(r.status)===bucket).sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));}
+const AURA_RB_COLS=[["Owner",r=>E(r.owner||"Unassigned")],["Campaign",auraCampaignCell],["Service",r=>E(r.service||"—")],["Detected",r=>N(r.detectedAccounts)],["Eligible",r=>N(r.eligibleAccounts)],["Recipients",r=>N(r.recipients)],["Status",r=>auraStatusPill(r.status)],["Last Updated",r=>E(auraFmtDate(r.updatedAt))]];
+function auraReadyTableHtml(records){return auraTable(auraReadyBlockedRows(records,"READY"),AURA_RB_COLS,["No campaigns ready to send yet","AURA will surface a campaign here the moment recipient resolution and every execution gate clear except the bulk send provider."]);}
+function auraBlockedTableHtml(records){return auraTable(auraReadyBlockedRows(records,"BLOCKED"),AURA_RB_COLS,["Nothing blocked right now","Blocked means AURA found the campaign opportunity but could not resolve a safe, eligible recipient, or another execution gate prevented progress. It is not an error, and recipients are never invented to clear it."]);}
+function auraResultsTableHtml(records){
+  const rows=[...records].sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
+  return auraTable(rows,[["Owner",r=>E(r.owner||"Unassigned")],["Campaign",auraCampaignCell],["Service",r=>E(r.service||"—")],["Recipients",r=>N(r.recipients)],["Sent",r=>N(r.sent)],["Delivered",r=>N(r.delivered)],["Bounced",r=>N(r.bounced)],["Clicks",r=>N(r.clicks)],["Replies",r=>N(r.replies)],["RFQs",r=>N(r.rfqs)],["Quotes",r=>N(r.quotes)],["Loads",r=>N(r.loads)]],
+    ["No campaign results yet","Sent, delivered, click and reply counts populate automatically as campaigns execute and response events are classified. Zero is shown honestly, never fabricated."]);
+}
+function auraOwnerTableHtml(records){
+  return auraTable(auraOwnerSummary(records),[["Owner",r=>E(r.owner)],["Campaigns",r=>N(r.campaigns)],["Eligible",r=>N(r.eligibleAccounts)],["Recipients",r=>N(r.recipients)],["Ready",r=>N(r.ready)],["Blocked",r=>N(r.blocked)],["Sent",r=>N(r.sent)],["Replies",r=>N(r.replies)],["RFQs",r=>N(r.rfqs)],["Quotes",r=>N(r.quotes)],["Loads",r=>N(r.loads)]],
+    ["No owner activity yet","Owner performance populates automatically once AURA creates campaigns for that owner's accounts."]);
+}
+function auraFamilyGridHtml(records){
+  return`<div class="life-family-grid aura-family-grid">${auraFamilySummary(records).map(r=>`<div class="life-family-card"><span>${E(r.family)}</span><strong>${N(r.count)}</strong><small>${N(r.eligibleAccounts)} eligible · ${N(r.recipients)} recipients · ${N(r.ready)} ready · ${N(r.blocked)} blocked</small></div>`).join("")}</div>`;
+}
+function auraResultsSectionHtml(allRecords){
+  const filtered=auraFilterRecords(allRecords);
+  return`<section class="life-panel"><div class="life-panel-head"><div><span>ACTIVE</span><h3>Ready to Send</h3></div>${badge(String(auraReadyBlockedRows(filtered,"READY").length),"live")}</div>${auraReadyTableHtml(filtered)}</section>
+    <section class="life-panel"><div class="life-panel-head"><div><span>NEEDS ATTENTION</span><h3>Blocked / Needs Data</h3></div>${badge(String(auraReadyBlockedRows(filtered,"BLOCKED").length),"warn")}</div>${auraBlockedTableHtml(filtered)}</section>
+    <section class="life-panel"><div class="life-panel-head"><div><span>OUTCOMES</span><h3>Campaign Results</h3></div></div>${auraResultsTableHtml(filtered)}</section>
+    <div class="life-grid-2">
+      <section class="life-panel"><h3>Owner Performance</h3>${auraOwnerTableHtml(filtered)}</section>
+      <section class="life-panel"><h3>Campaign Family</h3>${auraFamilyGridHtml(filtered)}</section>
+    </div>`;
+}
+function auraRerenderResults(){
+  const el=document.getElementById("auraResultsSection");
+  if(!el||!auraCache)return;
+  el.innerHTML=auraResultsSectionHtml(auraCache.records||[]);
+}
+function auraBannerHtml(summary,opts){
+  const activity=`Last activity: ${auraFmtDate(summary.lastUpdated)}`;
+  if(opts.disconnected)return`<div class="life-status-strip blocked"><div><span>AURA AUTOMATION</span><strong>DISCONNECTED</strong></div><p>Showing the last report successfully loaded in this browser session. Reconnect the private backend to resume live updates.</p></div>`;
+  if(opts.stale)return`<div class="life-status-strip warn"><div><span>AURA AUTOMATION</span><strong>LIVE · SHOWING LAST KNOWN DATA</strong></div><p>${E("The most recent refresh did not return a valid report — showing the last successfully loaded data. "+activity)}</p></div>`;
+  return`<div class="life-status-strip"><div><span>AURA AUTOMATION</span><strong>LIVE</strong></div><p>${E(activity)} ${badge("LIVE DATA · AUTO REFRESH 60s","live")}</p></div>`;
+}
+function auraProviderNoticeHtml(){
+  return`<div class="life-status-strip warn"><div><span>EMAIL EXECUTION</span><strong>READY TO SEND · SEND PROVIDER REQUIRED</strong></div><p>AURA has already detected, segmented, assigned owner, resolved eligible recipients, created campaigns and executions, and generated this report. Sending is the only step still pending a configured bulk email provider.</p></div>`;
+}
+function auraPaint(c,data,opts={}){
+  const summary=data.summary||{},records=data.records||[];
+  c.innerHTML=header("AURA · Campaign Activity & Reports","Live execution activity generated automatically by AURA from the governed DGL Data Hub.","AURA · REPORTING")+
+    auraBannerHtml(summary,opts)+
+    (opts.disconnected?"":auraProviderNoticeHtml())+
+    kpis([["TOTAL CAMPAIGNS",summary.campaigns],["READY TO SEND",summary.readyToSend],["BLOCKED",summary.blocked],["RECIPIENTS",summary.recipients],["ELIGIBLE ACCOUNTS",summary.eligibleAccounts],["OWNERS",summary.owners],["SENT",summary.sent],["REPLIES",summary.replies],["RFQs",summary.rfqs],["LOADS",summary.loads]])+
+    `<div id="auraFilterBar">${auraFilterBar(records)}</div>`+
+    `<div id="auraResultsSection">${auraResultsSectionHtml(records)}</div>`;
+}
+async function auraLoad(){
+  if(!C())return{ok:false,disconnected:true,data:auraCache};
+  try{
+    const res=await A().v6AuraExecutionReport();
+    if(res&&res.summary&&Array.isArray(res.records)){auraCache=res;return{ok:true,disconnected:false,data:res};}
+    return{ok:false,disconnected:false,data:auraCache};
+  }catch(_){return{ok:false,disconnected:false,data:auraCache};}
+}
+async function auraRenderPage(c){
+  const res=await auraLoad();
+  if(res.ok)return auraPaint(c,res.data,{});
+  if(res.data)return auraPaint(c,res.data,{stale:!res.disconnected,disconnected:res.disconnected});
+  if(res.disconnected)return required(c,"AURA · Campaign Activity & Reports","Live execution activity generated automatically by AURA from the governed DGL Data Hub.");
+  c.innerHTML=header("AURA · Campaign Activity & Reports","Live execution activity generated automatically by AURA from the governed DGL Data Hub.","AURA · REPORTING")+
+    `<div class="life-empty"><strong>AURA REPORT TEMPORARILY UNAVAILABLE</strong><p>The private backend did not return a valid AURA report this time. No number is ever shown as zero unless it is real — retry shortly or refresh the view.</p></div>`;
+}
 async function reports(c){
-  if(!C())return required(c,"Account & Campaign Reports","Execution, audit and archive status.");
-  const d=await live(true),campaigns=A().getCampaigns?.()||[];
-  c.innerHTML=header("Account & Campaign Reports","Auditable outputs from opportunity, policy, execution and commercial outcome ledgers.","REPORTING · LIVE")+
-    kpis([["OPPORTUNITY GROUPS",(d.groups||[]).length],["CAMPAIGNS",campaigns.length],["PIPELINE ACCOUNTS",d.pipe?.total||0],["ARCHIVE","PENDING LIVE EXECUTION",false]]);
+  if(auraTimer){clearInterval(auraTimer);auraTimer=null;}
+  await auraRenderPage(c);
+  auraTimer=setInterval(()=>{
+    if(location.hash!=="#/account-campaign-reports"){clearInterval(auraTimer);auraTimer=null;return;}
+    auraRenderPage(c);
+  },60000);
 }
 function governance(c){
   staticView(c,"Governance & Approvals","Governance is encoded as automatic policy; humans handle exceptions.","ADMIN · AUTOMATION POLICY",[
@@ -405,7 +582,20 @@ document.addEventListener("click",async e=>{
 });
 document.addEventListener("change",e=>{
   const s=e.target.closest("[data-life-owner-select]");
-  if(s){setOwner(s.value);rerender();}
+  if(s){setOwner(s.value);rerender();return;}
+  const fo=e.target.closest("[data-aura-owner]");
+  if(fo){auraFilters.owner=fo.value;auraRerenderResults();return;}
+  const ff=e.target.closest("[data-aura-family]");
+  if(ff){auraFilters.family=ff.value;auraRerenderResults();return;}
+  const fs=e.target.closest("[data-aura-status]");
+  if(fs){auraFilters.status=fs.value;auraRerenderResults();return;}
+});
+document.addEventListener("input",e=>{
+  const q=e.target.closest("[data-aura-search]");
+  if(q){auraFilters.search=q.value;auraRerenderResults();}
+});
+g.addEventListener?.("hashchange",()=>{
+  if(location.hash!=="#/account-campaign-reports"&&auraTimer){clearInterval(auraTimer);auraTimer=null;}
 });
 
 const style=document.createElement("style");
@@ -423,6 +613,27 @@ style.textContent=`
 .auto-cadence{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:15px}.auto-cadence>div{padding:12px;border-radius:11px;background:#0d1221;border:1px solid rgba(255,255,255,.06)}.auto-cadence span{display:block;color:#7d8799;font-size:9px}.auto-cadence strong{display:block;margin-top:6px;color:#fff;font-size:11px}
 @media(max-width:1100px){.auto-engine-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.auto-rule-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.auto-signal-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.auto-cadence{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:720px){.auto-ownerbar{align-items:stretch;flex-direction:column}.auto-owner-select{width:100%}.auto-engine-grid,.auto-rule-grid,.auto-signal-grid,.auto-cadence{grid-template-columns:1fr}.auto-signal-grid>div{border-right:0;border-bottom:1px solid rgba(255,255,255,.06)}}
+.aura-filterbar{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 18px;padding:14px;border:1px solid rgba(255,255,255,.08);border-radius:13px;background:rgba(255,255,255,.02)}
+.aura-filter{display:flex;flex-direction:column;gap:6px;min-width:170px}.aura-filter span{font-size:8px;letter-spacing:.08em;color:#788399;font-weight:850;text-transform:uppercase}
+.aura-filter-search{flex:1;min-width:240px}
+.aura-search-input{min-height:42px;padding:0 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#111827;color:#fff;font-size:11px;font-weight:600}
+.aura-muted{color:#6F7A8F;font-size:10px}
+.aura-pill{display:inline-flex;flex-direction:column;align-items:flex-start;gap:2px;padding:6px 10px;border-radius:10px;font-size:9px;font-weight:850;letter-spacing:.04em;text-transform:uppercase}
+.aura-pill small{font-size:8px;font-weight:700;letter-spacing:.02em;text-transform:none;opacity:.85}
+.aura-pill.ready{background:rgba(119,184,42,.12);color:#A8D879;border:1px solid rgba(119,184,42,.3)}
+.aura-pill.blocked{background:rgba(239,68,68,.10);color:#FCA5A5;border:1px solid rgba(239,68,68,.28)}
+.aura-pill.other{background:rgba(148,163,184,.10);color:#CBD5E1;border:1px solid rgba(148,163,184,.25)}
+.aura-family-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+.aura-command-card{display:block;margin:16px 0;padding:16px 18px;border-radius:16px;border:1px solid rgba(119,184,42,.22);background:linear-gradient(145deg,#182136,#111827);text-decoration:none;transition:transform .15s ease,border-color .15s ease}
+.aura-command-card:hover{transform:translateY(-2px);border-color:rgba(119,184,42,.45)}
+.aura-command-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.aura-command-head span{font-size:9px;letter-spacing:.08em;color:#8FD43D;font-weight:850;text-transform:uppercase}
+.aura-command-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0}
+.aura-command-grid span{display:block;font-size:8px;color:#788399;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
+.aura-command-grid strong{display:block;margin-top:5px;color:#fff;font-size:18px}
+.aura-command-foot{color:#8994A7;font-size:10px}
+@media(max-width:900px){.aura-family-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:720px){.aura-filterbar{flex-direction:column}.aura-filter{min-width:0}.aura-command-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 `;
 document.head.appendChild(style);
 
