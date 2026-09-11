@@ -2,6 +2,63 @@
 
 Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
+## Pass 6 — Source arbitration (NOVA -> AM Intelligence Gmail fallback), extended response events
+
+Root cause of the real production incident this pass fixes: the canonical NOVA report
+source (`v6AuraCheckReportFreshness_`) was genuinely stale (confirmed live: 16+ days), but
+a separate, already-deployed AM Intelligence pipeline (`MarketingV6AuraGmailIngest.gs`,
+brought into this repo for the first time this pass -- it previously existed live-only)
+had already validated a current AM report (`GMAIL_AM_REPORT`, 948 rows accepted, 0
+rejected, received 2026-09-10) into `MKT_AURA_GMAIL_OPPORTUNITIES`. Nothing arbitrated
+between the two sources, and `v6BuildGmailOpportunities_` (already written, live-only,
+never wired in) was never actually called by `v6RefreshOpportunitiesFromReports_` despite
+its own header comment claiming it was -- so a valid, current AM signal sat unused while
+the cycle correctly (but unnecessarily) refused to run.
+
+Fixed:
+- `MarketingV6DataFreshness.gs`: new `v6AuraResolveFreshnessSource_()` -- NOVA canonical
+  first; falls back to the Gmail AM Intelligence source only when it is present
+  (`typeof`-guarded), `status:'OK'`, `freshness:'CURRENT'` (the ingestion engine's own
+  <=8-day threshold, reused verbatim, not redefined) and `rowsAccepted>0`. No numeric cap
+  on `rowsRejected` -- no such policy is documented anywhere, and none is invented.
+  Returns `STALE_SOURCE` (renamed from the old bare `'STALE'`) only when neither source
+  qualifies. All three freshness call sites (`MarketingV6AuraBridge.gs`,
+  `MarketingV6RetentionReport.gs`, `MarketingV6AuraBootstrap.gs`) updated to this
+  function and the new status literal.
+- `MarketingV6ReportIngestion.gs`: `v6RefreshOpportunitiesFromReports_` now folds in
+  `v6BuildGmailOpportunities_(nowIso)` (typeof-guarded) alongside the existing five
+  `v6Build*Opportunities_` sources. Gmail rows use the same `accountId` hash scheme as
+  every other source, so the existing `v6ApplyPrioritySuppression_` reconciles a
+  Gmail-sourced and a NOVA-sourced signal for the same account with zero new mechanism
+  (verified: a QNB/NOVA row still outranks a Gmail/Retention row for the same account).
+- `MarketingV6ResponseEvents.gs`: extended vocabulary -- `HARD_BOUNCE` aliases onto the
+  existing `BOUNCE` handling; `SPAM_COMPLAINT` registers its own exclusion reason (new
+  `v6RegisterSpamComplaintExclusion_`, distinct `SPAM:` key so existing `UNSUB:` exclusion
+  rows are untouched); `SENT`/`DELIVERED`/`OPEN`/`SOFT_BOUNCE` are recognized, documented
+  no-ops (`MKT_V6_RESPONSE_EVENT_NO_OP_`) -- `SOFT_BOUNCE` specifically must NOT invalidate
+  the contact the way `HARD_BOUNCE` does, since the address may still be reachable.
+- `MarketingV6AuraGmailIngest.gs` brought into this repo for the first time (previously
+  live-only): read fully before doing so, confirmed no customer/contact PII -- only
+  the DGL AM-report inbox address (a company mailbox, not an individual
+  contact's PII), which `tests/v6-no-pii-in-repo.test.js` now allowlists strictly for that
+  one file only.
+
+Tests: new `tests/v6-source-arbitration.test.js` (9 cases: NOVA-fresh short-circuit,
+NOVA-stale+Gmail-current fallback, rowsRejected not gating, NOVA-stale+Gmail-AGING fail
+closed, NOVA-stale+zero-accepted-rows fail closed, no-report-received fail closed,
+Gmail-not-deployed fail closed with no crash, opportunity fold-in, cross-source priority
+suppression). `tests/v6-response-events.test.js` extended (+3 cases: extended no-op set,
+HARD_BOUNCE, SPAM_COMPLAINT). `tests/v6-aura-bridge.test.js` and
+`tests/v6-aura-bootstrap.test.js` updated for the `STALE_SOURCE` rename.
+`tests/v6-no-pii-in-repo.test.js` updated for the DGL AM-report-inbox operational allowlist
+entry, restricted to `MarketingV6AuraGmailIngest.gs` only.
+
+Full suite: 34 files, 34 pass, 0 fail.
+
+Deployed live (same fixes pushed to `C:\Users\DGL\Desktop\AURA_DEPLOY` and the real Apps
+Script project) -- see final status report in the conversation for verified evidence
+(Drive/Data Hub modification timestamps) of what actually ran.
+
 ## Pass 5 — Single-shot bootstrap, no-hardcoded-Drive-folder, Handoffs CSV
 
 Goal: remove every remaining manual one-time setup step (tab creation, Drive folder creation, folder-ID paste) and replace it with one idempotent function, `v6AuraBootstrapAndRun_()`, so the only human action left is: copy files, save, run it once, accept the Google permissions prompt. Also adds a second, AM-actionable CSV (Handoffs) alongside the existing full AM CSV, reusing the same join instead of rebuilding it. Real `clasp`/deployment access remains unavailable from this environment (confirmed by the user beforehand, not re-verified here) — no `clasp login`/`clasp push`/deployment action of any kind was attempted in this pass.

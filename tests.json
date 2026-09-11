@@ -254,18 +254,59 @@
           "guarantee": "GitHub stores code only: no customer/contact PII (email addresses) is ever committed to this public repo, checked by content scan (fs), not by trusting prior review alone"
         },
         {
-          "name": "the user's own commit-authorship email address never appears in the content of any tracked file in those locations",
-          "guarantee": "author identity belongs only in git commit authorship metadata, never inside a committed file"
+          "name": "the user's own commit-authorship email address never appears in the content of any tracked file in those locations, except MarketingV6AuraGmailIngest.gs (the DGL AM-report inbox address -- an approved operational identifier, not customer/contact PII, and not the author's identity)",
+          "guarantee": "author identity belongs only in git commit authorship metadata, never inside a committed file; the one narrow, named exception is a company mailbox address with a genuine functional need, not a leaked identity"
+        }
+      ]
+    },
+    {
+      "file": "tests/v6-source-arbitration.test.js",
+      "cases": [
+        {
+          "name": "NOVA canonical source FRESH -> selected immediately, AM Intelligence Gmail source never even consulted",
+          "guarantee": "arbitration never does unnecessary work or second-guesses an already-fresh canonical source"
+        },
+        {
+          "name": "NOVA STALE, Gmail AM Intelligence source status OK / freshness CURRENT / rowsAccepted>0 -> AM_INTELLIGENCE_GMAIL selected, FRESH",
+          "guarantee": "root-cause fix: a real, already-validated, current AM report is no longer ignored just because the separate NOVA snapshot is stale"
+        },
+        {
+          "name": "rowsRejected>0 on the Gmail source does not block arbitration (no documented reject-rate policy exists anywhere in this codebase)",
+          "guarantee": "never invent a threshold that isn't documented -- only rowsAccepted>0 gates, rowsRejected is surfaced for visibility only"
+        },
+        {
+          "name": "NOVA STALE + Gmail present but freshness AGING (not CURRENT) -> STALE_SOURCE",
+          "guarantee": "fail-closed: the ingestion engine's own aging classification is honored, not loosened"
+        },
+        {
+          "name": "NOVA STALE + Gmail CURRENT but rowsAccepted=0 -> STALE_SOURCE",
+          "guarantee": "fail-closed: a report that produced zero usable rows never counts as a valid source"
+        },
+        {
+          "name": "NOVA STALE + Gmail NO_REPORT_RECEIVED -> STALE_SOURCE",
+          "guarantee": "fail-closed: no report ever received means no fallback source exists, full stop"
+        },
+        {
+          "name": "NOVA STALE + Gmail ingestion file not deployed at all (typeof-guarded) -> STALE_SOURCE, no crash",
+          "guarantee": "this codebase must not assume every deployment includes the Gmail ingestion file; its absence is a safe, non-fatal fallback to fail-closed"
+        },
+        {
+          "name": "v6RefreshOpportunitiesFromReports_ folds in v6BuildGmailOpportunities_ rows into MKT_OPPORTUNITIES alongside the five existing NOVA-sourced builders",
+          "guarantee": "closes the actual root-cause gap: a function that already existed and already claimed to do this was never actually wired in until now"
+        },
+        {
+          "name": "a Gmail-sourced Retention row and a NOVA-sourced QNB row for the SAME account (same accountId hash) are reconciled by the existing v6ApplyPrioritySuppression_ -- QNB wins, Gmail-Retention is SUPPRESSED / HIGHER PRIORITY SIGNAL",
+          "guarantee": "cross-source signals for one account never both stay active; the existing priority engine handles two sources exactly like it already handles two families from one source, no new mechanism"
         }
       ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full suite re-run after every change in this branch, most recently after the single-shot bootstrap / no-hardcoded-Drive-folder / Handoffs CSV pass (Pass 5). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) are no longer present in the current tree -- the full suite is green.",
-    "totalFiles": 33,
-    "passed": 33,
+    "description": "Full suite re-run after every change in this branch, most recently after the source-arbitration / Gmail AM Intelligence fallback / extended response-event vocabulary pass (Pass 6). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
+    "totalFiles": 34,
+    "passed": 34,
     "failed": 0,
-    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of this pass's run (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in this pass touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (31 pre-existing files + 2 new this pass: tests/v6-aura-bootstrap.test.js, tests/v6-no-pii-in-repo.test.js).",
+    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5/6's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in either pass touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (33 pre-existing files + 1 new this pass: tests/v6-source-arbitration.test.js; tests/v6-response-events.test.js, tests/v6-aura-bridge.test.js, tests/v6-aura-bootstrap.test.js and tests/v6-no-pii-in-repo.test.js were extended/updated in place rather than added).",
     "failedFiles": []
   }
 }

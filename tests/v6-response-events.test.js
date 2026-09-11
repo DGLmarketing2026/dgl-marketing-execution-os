@@ -76,18 +76,44 @@ function makeContext(){
   console.log('response events test (UNSUBSCRIBE -> active exclusion, pipeline untouched): PASS');
 })();
 
-// CLICK / OTHER -> IGNORED, sin efectos secundarios
+// CLICK / OTHER / SENT / DELIVERED / OPEN / SOFT_BOUNCE -> IGNORED, sin efectos secundarios.
+// SOFT_BOUNCE specifically must NOT mark the contact invalid -- only HARD_BOUNCE does that.
 (function ignoredTest(){
   var ctx=makeContext();
-  ['CLICK','OTHER','SOMETHING_UNKNOWN'].forEach(function(eventType){
+  ['CLICK','OTHER','SOMETHING_UNKNOWN','SENT','DELIVERED','OPEN','SOFT_BOUNCE'].forEach(function(eventType){
     var out=ctx.v6ClassifyResponseEvent_({eventType:eventType,accountId:'ACC-5',eventId:'EVT-5-'+eventType});
-    assert.equal(out.action,'IGNORED');
+    assert.equal(out.action,'IGNORED',eventType+' must be IGNORED');
     assert.equal(out.result,null);
   });
   assert.equal(ctx.__tables.MKT_ACCOUNT_PIPELINE.length,0);
   assert.equal(ctx.__tables.MKT_CONTACTS_SECURE.length,0);
   assert.equal(ctx.__tables.MKT_EXCLUSIONS.length,0);
-  console.log('response events test (CLICK/OTHER -> IGNORED, no side effects): PASS');
+  console.log('response events test (CLICK/OTHER/SENT/DELIVERED/OPEN/SOFT_BOUNCE -> IGNORED, no side effects): PASS');
+})();
+
+// HARD_BOUNCE -> aliases onto the existing BOUNCE handling verbatim (mark contact invalid)
+(function hardBounceTest(){
+  var ctx=makeContext();
+  ctx.__tables.MKT_CONTACTS_SECURE.push({contactId:'CON-6',accountId:'ACC-6',email:'old2@example.invalid',emailStatus:'VALID'});
+  var out=ctx.v6ClassifyResponseEvent_({eventType:'HARD_BOUNCE',accountId:'ACC-6',contactId:'CON-6',email:'old2@example.invalid',eventId:'EVT-6'});
+  assert.equal(out.action,'CONTACT_MARKED_INVALID');
+  var contact=ctx.__tables.MKT_CONTACTS_SECURE.filter(function(r){return r.contactId==='CON-6';})[0];
+  assert.equal(contact.emailStatus,'INVALID');
+  assert.equal(ctx.__tables.MKT_ACCOUNT_PIPELINE.length,0,'HARD_BOUNCE must not touch pipeline');
+  console.log('response events test (HARD_BOUNCE aliases onto BOUNCE handling): PASS');
+})();
+
+// SPAM_COMPLAINT -> its own exclusion reason, distinct key from UNSUBSCRIBE, pipeline untouched
+(function spamComplaintTest(){
+  var ctx=makeContext();
+  var out=ctx.v6ClassifyResponseEvent_({eventType:'SPAM_COMPLAINT',accountId:'ACC-7',contactId:'CON-7',eventId:'EVT-7'});
+  assert.equal(out.action,'EXCLUSION_REGISTERED');
+  var exclusion=ctx.__tables.MKT_EXCLUSIONS.filter(function(r){return r.exclusionId==='SPAM:CON-7';})[0];
+  assert(exclusion,'a SPAM: exclusion must be registered, distinct from an UNSUB: one');
+  assert.equal(exclusion.reasonCode,'SPAM_COMPLAINT');
+  assert.equal(exclusion.status,'ACTIVE');
+  assert.equal(ctx.__tables.MKT_ACCOUNT_PIPELINE.length,0,'SPAM_COMPLAINT must not touch pipeline');
+  console.log('response events test (SPAM_COMPLAINT registers its own exclusion reason): PASS');
 })();
 
 assert(routerSource.includes('v6ClassifyResponseEvent:v6ClassifyResponseEvent_')||/case 'v6ClassifyResponseEvent'\s*:[\s\S]{0,200}v6ClassifyResponseEvent_/.test(routerSource),'router must expose v6ClassifyResponseEvent');

@@ -279,7 +279,8 @@ function makeContext(opts){
   ctx.v6ReportRows_=function(){throw new Error('must never read reports when the bootstrap freshness gate is STALE');};
   var result=ctx.v6AuraBootstrapAndRun_();
   assert.equal(result.status,'BOOTSTRAP_BLOCKED_STALE_DATA');
-  assert.equal(result.freshness.status,'STALE');
+  assert.equal(result.freshness.status,'STALE_SOURCE');
+  assert.equal(result.freshness.nova.status,'STALE');
   assert.equal(result.retentionCycle,null,'no cycle result when blocked by staleness');
   // Everything upstream of the freshness gate must still have run and been reported.
   assert.equal(result.schema.ensureResult.status,'SCHEMA READY');

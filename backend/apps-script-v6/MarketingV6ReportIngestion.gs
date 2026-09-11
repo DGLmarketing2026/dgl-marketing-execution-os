@@ -203,6 +203,18 @@ function v6RefreshOpportunitiesFromReports_(){
   rows=rows.concat(v6BuildReactivationOpportunities_(nowIso,ficha));
   rows=rows.concat(v6BuildCrossSellOpportunities_(nowIso));
   rows=rows.concat(v6BuildNurtureOpportunities_(nowIso,ficha));
+  // Fold in the AM Intelligence Gmail source (MarketingV6AuraGmailIngest.gs), when deployed:
+  // v6BuildGmailOpportunities_ already exists there and already emits rows in this exact
+  // MKT_OPPORTUNITIES shape (same pattern as every v6Build*Opportunities_ above) -- it was
+  // simply never wired into this refresh, which is the root cause of a real production
+  // incident (a validated, current AM report sat in MKT_AURA_GMAIL_OPPORTUNITIES and was
+  // never folded into detection/suppression/scope-build). typeof-guarded because this file
+  // must not assume the Gmail ingestion file is present in every deployment; when it is
+  // absent, this is a no-op and behavior is unchanged. Gmail rows use the same
+  // accountId/accountName hash scheme as every other source, so v6ApplyPrioritySuppression_
+  // below reconciles a Gmail-sourced and a NOVA-sourced signal for the same account exactly
+  // like it already reconciles any other two families -- no new suppression mechanism.
+  if(typeof v6BuildGmailOpportunities_==='function')rows=rows.concat(v6BuildGmailOpportunities_(nowIso));
   rows=v6ApplyPrioritySuppression_(rows);
   v6WriteOpportunities_(rows);
   return {status:'REPORT_SOURCE_SYNCED',sourceSpreadsheetId:MKT_V6_REPORT_SOURCE_ID,metrics:v6OpportunityMetrics_(rows),retentionCuentasJoinCoverage:v6RetentionCuentasJoinCoverage_(retentionRows,cuentas),syncedAt:nowIso};

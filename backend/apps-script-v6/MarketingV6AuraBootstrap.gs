@@ -61,9 +61,11 @@ function v6AuraBootstrapAndRun_(){
   // aggregates only, no PII; MarketingV6CanonicalIdentity.gs, unchanged).
   result.canonicalIds=v6AuraAuditCanonicalIds_();
 
-  // Step 7 -- fail-closed data-freshness check (MarketingV6DataFreshness.gs, unchanged). Used
-  // again at step 12 below to decide whether to run the Retention cycle.
-  result.freshness=v6AuraCheckReportFreshness_();
+  // Step 7 -- fail-closed data-freshness check via source arbitration
+  // (v6AuraResolveFreshnessSource_, MarketingV6DataFreshness.gs): NOVA canonical first, the
+  // AM Intelligence Gmail source as a validated fallback, STALE_SOURCE only if neither
+  // qualifies. Used again at step 12 below to decide whether to run the Retention cycle.
+  result.freshness=v6AuraResolveFreshnessSource_();
 
   // Step 8 -- trivial confirmation that the AM CONTEXT REQUIRED gate is present in the
   // deployed code (v6RetentionAmActivityReason_ is the actual gate, inside
@@ -99,7 +101,7 @@ function v6AuraBootstrapAndRun_(){
   // Step 12 -- never run a Retention cycle against data the freshness gate already knows is
   // stale. Everything accumulated so far is still returned for visibility (folder/sheet/
   // trigger/schema/canonical-id state), but retentionCycle stays null.
-  if(result.freshness.status==='STALE'){
+  if(result.freshness.status==='STALE_SOURCE'){
     result.status='BOOTSTRAP_BLOCKED_STALE_DATA';
     return result;
   }

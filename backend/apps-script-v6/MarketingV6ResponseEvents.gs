@@ -15,10 +15,35 @@ function v6RegisterExclusion_(payload){
   });
 }
 
+// Separate from v6RegisterExclusion_ (UNSUBSCRIBE) on purpose, with its own exclusionId
+// prefix ('SPAM:' vs 'UNSUB:') rather than a parametrized reasonCode on the same key --
+// this keeps every already-written UNSUBSCRIBE exclusion row's key format byte-for-byte
+// unchanged (no risk to existing production MKT_EXCLUSIONS data) while still recording a
+// spam complaint as its own governed, idempotent exclusion reason.
+function v6RegisterSpamComplaintExclusion_(payload){
+  var p=payload||{},contactId=String(p.contactId||'').trim(),accountId=String(p.accountId||'').trim();
+  var exclusionId='SPAM:'+(contactId||accountId);
+  return v6UpsertByKey_('MKT_EXCLUSIONS',['exclusionId'],{
+    exclusionId:exclusionId,accountId:accountId,contactId:contactId,status:'ACTIVE',active:true,
+    reasonCode:'SPAM_COMPLAINT',expiresAt:'',updatedAt:new Date().toISOString()
+  });
+}
+
 // AURA event-type vocabulary aliases: external callers (AM Platform, mail/CRM webhooks)
 // may send the plain names below; they map onto the original internal event types
 // without changing stored pipeline semantics or introducing a second vocabulary.
-var MKT_V6_RESPONSE_EVENT_ALIASES_={QUOTE:'QUOTE_SIGNAL',LOAD:'LOAD_SIGNAL'};
+// HARD_BOUNCE aliases onto the existing BOUNCE handling (permanent delivery failure ->
+// mark the contact's email invalid) verbatim -- no new mechanism, same as QUOTE/LOAD before it.
+var MKT_V6_RESPONSE_EVENT_ALIASES_={QUOTE:'QUOTE_SIGNAL',LOAD:'LOAD_SIGNAL',HARD_BOUNCE:'BOUNCE'};
+
+// Event types that are real, loggable engagement signals but must never mutate pipeline
+// stage, contact validity, or exclusions on their own: SENT/DELIVERED are provider delivery
+// confirmations (not customer intent), OPEN and CLICK are weak engagement signals (CLICK
+// already ranked above OPEN, per policy, but neither is qualifying commercial activity), and
+// SOFT_BOUNCE is a transient delivery issue -- unlike HARD_BOUNCE, it must NOT invalidate the
+// contact, since the address may still be reachable on a later attempt. All resolve to
+// action:'IGNORED' with zero writes, exactly like the pre-existing CLICK/OTHER fallthrough.
+var MKT_V6_RESPONSE_EVENT_NO_OP_={SENT:true,DELIVERED:true,OPEN:true,SOFT_BOUNCE:true,CLICK:true};
 
 function v6ClassifyResponseEvent_(rawEvent){
   var e=rawEvent||{},eventType=String(e.eventType||'').toUpperCase(),accountId=e.accountId||'',action='IGNORED',result=null;
@@ -46,6 +71,11 @@ function v6ClassifyResponseEvent_(rawEvent){
   }else if(eventType==='UNSUBSCRIBE'){
     result=v6RegisterExclusion_({accountId:e.accountId,contactId:e.contactId});
     action='EXCLUSION_REGISTERED';
+  }else if(eventType==='SPAM_COMPLAINT'){
+    result=v6RegisterSpamComplaintExclusion_({accountId:e.accountId,contactId:e.contactId});
+    action='EXCLUSION_REGISTERED';
+  }else if(MKT_V6_RESPONSE_EVENT_NO_OP_[eventType]){
+    action='IGNORED';
   }
   return {eventId:e.eventId,eventType:e.eventType,accountId:e.accountId||'',action:action,result:result};
 }

@@ -236,9 +236,11 @@ function emptyReportTables(overrides){
   ctx.v6ReportRows_=function(){throw new Error('STALE must short-circuit before any report read');};
   var result=ctx.v6AuraEvaluateRetention_();
   assert.equal(result.status,'BLOCKED_STALE_DATA');
-  assert.equal(result.freshness.status,'STALE');
-  assert(result.freshness.hoursSinceLastUpdate>6);
-  assert.equal(result.freshness.staleThresholdHours,6);
+  assert.equal(result.freshness.status,'STALE_SOURCE','arbitration: neither NOVA nor an AM Intelligence fallback qualifies here');
+  assert.equal(result.freshness.selectedSource,'NONE');
+  assert.equal(result.freshness.nova.status,'STALE');
+  assert(result.freshness.nova.hoursSinceLastUpdate>6);
+  assert.equal(result.freshness.nova.staleThresholdHours,6);
   assert.strictEqual(tables.MKT_OPPORTUNITIES,undefined,'STALE must never write MKT_OPPORTUNITIES');
   assert.strictEqual(tables.MKT_CAMPAIGN_SCOPES,undefined,'STALE must never build campaign scope');
   console.log('aura bridge test 7 (freshness gate blocks STALE source before any write): PASS');

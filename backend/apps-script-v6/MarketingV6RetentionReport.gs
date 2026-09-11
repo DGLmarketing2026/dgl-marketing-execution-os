@@ -63,8 +63,8 @@ var MKT_V6_AM_HANDOFFS_CSV_HEADERS=['runId','accountId','accountName','amOwner',
 
 // --- Pilot dry run -----------------------------------------------------------
 function v6AuraRetentionDryRun_(){
-  var freshness=v6AuraCheckReportFreshness_();
-  if(freshness.status==='STALE')return {status:'BLOCKED_STALE_DATA',freshness:freshness,label:'AURA RETENTION PILOT — DRY RUN'};
+  var freshness=v6AuraResolveFreshnessSource_();
+  if(freshness.status==='STALE_SOURCE')return {status:'BLOCKED_STALE_DATA',freshness:freshness,label:'AURA RETENTION PILOT — DRY RUN'};
   var evaluate=v6AuraEvaluateRetention_();
   // evaluate itself re-checks freshness (defense in depth, cheap read-only DriveApp call);
   // if it somehow reports STALE here (source went stale between the two checks), honor it
