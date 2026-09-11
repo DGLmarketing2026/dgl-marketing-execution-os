@@ -62,14 +62,29 @@ var MKT_V6_AM_HANDOFF_DECISIONS=['RESPONDED','HANDED_TO_AM','RFQ','QUOTED','RETA
 var MKT_V6_AM_HANDOFFS_CSV_HEADERS=['runId','accountId','accountName','amOwner','campaignId','responseType','responseDate','handoffStatus','nextAction','rfqStatus','quoteStatus','loadStatus','attributedRevenue'];
 
 // --- Pilot dry run -----------------------------------------------------------
-function v6AuraRetentionDryRun_(){
+// Accepts an optional runId so a caller (v6AuraBootstrapAndRun_) that already generated one
+// at the very start of a run (to log BOOTSTRAP_STARTED before freshness is even known) can
+// thread the SAME id through every stage instead of this function silently minting a second,
+// disconnected one. Standalone callers (tests, a manual dry-run check) get one generated here
+// exactly as before when no runId is supplied -- fully backward compatible.
+function v6AuraRetentionDryRun_(runId){
+  runId=runId||('RUN-'+Utilities.getUuid().slice(0,8).toUpperCase());
   var freshness=v6AuraResolveFreshnessSource_();
-  if(freshness.status==='STALE_SOURCE')return {status:'BLOCKED_STALE_DATA',freshness:freshness,label:'AURA RETENTION PILOT — DRY RUN'};
+  if(typeof v6AuraLogStage_==='function')v6AuraLogStage_(runId,'SOURCE_SELECTED','OK',{sourceType:freshness.selectedSource,sourceTimestamp:(freshness.amIntelligence&&freshness.amIntelligence.lastReportReceivedAt)||freshness.nova.lastUpdatedIso});
+  if(freshness.status==='STALE_SOURCE'){
+    if(typeof v6AuraLogStage_==='function')v6AuraLogStage_(runId,'RUN_FAILED','STALE_SOURCE',{errorCode:'STALE_SOURCE',errorMessage:'Neither NOVA canonical nor an approved AM Intelligence source is fresh enough to run.'});
+    return {status:'BLOCKED_STALE_DATA',runId:runId,freshness:freshness,label:'AURA RETENTION PILOT — DRY RUN'};
+  }
+  if(typeof v6AuraLogStage_==='function')v6AuraLogStage_(runId,'FRESHNESS_PASSED','OK',{sourceType:freshness.selectedSource});
+  if(typeof v6AuraLogStage_==='function')v6AuraLogStage_(runId,'RETENTION_STARTED','OK',{});
   var evaluate=v6AuraEvaluateRetention_();
   // evaluate itself re-checks freshness (defense in depth, cheap read-only DriveApp call);
   // if it somehow reports STALE here (source went stale between the two checks), honor it
   // rather than proceeding on data evaluate itself refused to use.
-  if(evaluate.status==='BLOCKED_STALE_DATA')return Object.assign({label:'AURA RETENTION PILOT — DRY RUN'},evaluate);
+  if(evaluate.status==='BLOCKED_STALE_DATA'){
+    if(typeof v6AuraLogStage_==='function')v6AuraLogStage_(runId,'RUN_FAILED','STALE_SOURCE',{errorCode:'STALE_SOURCE',errorMessage:'Source went stale between the arbitration check and the detection pass.'});
+    return Object.assign({label:'AURA RETENTION PILOT — DRY RUN',runId:runId},evaluate);
+  }
 
   var rows=v6Rows_('MKT_OPPORTUNITIES').filter(function(r){return v6AuraText_(r.opportunityType)==='Retention';});
   var AM_ACTIVITY_REASONS=['AM ACTIVITY REVIEW REQUIRED','OWNER REQUIRED','COLLECTIONS'];
@@ -89,9 +104,10 @@ function v6AuraRetentionDryRun_(){
     if(REVIEW_REASONS.indexOf(reason)>=0)reviewRequired++;
   });
 
+  if(typeof v6AuraLogStage_==='function')v6AuraLogStage_(runId,'RETENTION_COMPLETED','OK',{accountsEvaluated:rows.length,detected:detected,eligible:eligible,suppressed:evaluate.suppressed,reviewRequired:reviewRequired,campaignReady:evaluate.scopesBuilt});
   return {
     status:'DRY_RUN_COMPLETE',label:'AURA RETENTION PILOT — DRY RUN',
-    runId:'RUN-'+Utilities.getUuid().slice(0,8).toUpperCase(),
+    runId:runId,
     sourceTimestamp:evaluate.syncedAt,
     accountsEvaluated:rows.length,
     detected:detected,
@@ -294,16 +310,18 @@ function v6AuraRetentionRunSummary_(payload){
 // If the dry run is BLOCKED_STALE_DATA, no CSV and no summary row are generated -- the
 // same fail-closed contract as v6AuraEvaluateRetention_ itself; a stale-data pilot number
 // must never be handed to AM as if it were current.
-function v6AuraRunRetentionCycle_(){
-  var dryRun=v6AuraRetentionDryRun_();
+function v6AuraRunRetentionCycle_(runId){
+  var dryRun=v6AuraRetentionDryRun_(runId);
   if(dryRun.status==='BLOCKED_STALE_DATA')return dryRun;
   var asOfDate=Utilities.formatDate(new Date(),(typeof Session!=='undefined'&&Session.getScriptTimeZone&&Session.getScriptTimeZone())||'America/Bogota','yyyy-MM-dd');
-  var runId=dryRun.runId;
+  runId=dryRun.runId;
   var csv=v6AuraGenerateAmCsvReport_(runId,asOfDate);
+  if(typeof v6AuraLogStage_==='function')v6AuraLogStage_(runId,'CSV_CREATED','OK',{csvCreated:true});
   // Task 5: Handoffs CSV reuses the exact rows v6AuraGenerateAmCsvReport_ already built
   // (csv.csvRows) -- no second join/read of MKT_OPPORTUNITIES/MKT_ACCOUNT_PIPELINE/
   // MKT_SCOPE_ACCOUNTS for the same cycle.
   var handoffs=v6AuraGenerateHandoffsCsvReport_(runId,asOfDate,csv.csvRows);
+  if(typeof v6AuraLogStage_==='function')v6AuraLogStage_(runId,'HANDOFF_CSV_CREATED','OK',{handoffsCsvCreated:true});
   var suppressed=dryRun.suppressedTotal||0;
   var summaryMetrics={
     accountsEvaluated:dryRun.accountsEvaluated,detected:dryRun.detected,eligible:dryRun.eligible,suppressed:suppressed,
@@ -312,5 +330,7 @@ function v6AuraRunRetentionCycle_(){
     attributedRevenue:csv.attributedRevenueTotal,csvDriveFileId:csv.csvDriveFileId,handoffsCsvDriveFileId:handoffs.csvDriveFileId
   };
   v6AuraWriteRunSummary_(runId,asOfDate,summaryMetrics);
+  if(typeof v6AuraLogStage_==='function')v6AuraLogStage_(runId,'RUN_SUMMARY_WRITTEN','OK',{accountsEvaluated:summaryMetrics.accountsEvaluated,detected:summaryMetrics.detected,eligible:summaryMetrics.eligible,suppressed:summaryMetrics.suppressed,reviewRequired:summaryMetrics.reviewRequired,campaignReady:summaryMetrics.campaignReady,csvCreated:true,handoffsCsvCreated:true});
+  if(typeof v6AuraLogStage_==='function')v6AuraLogStage_(runId,'RUN_COMPLETED','OK',{});
   return {runId:runId,asOfDate:asOfDate,csvDriveFileId:csv.csvDriveFileId,handoffsCsvDriveFileId:handoffs.csvDriveFileId,metrics:summaryMetrics,status:'CYCLE_COMPLETE'};
 }

@@ -15,7 +15,13 @@ var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
   // Handoffs CSV (MarketingV6RetentionReport.gs, v6AuraGenerateHandoffsCsvReport_) is a
   // second, separate Drive artifact per run -- additive column, existing readers of
   // csvDriveFileId are unaffected.
-  MKT_RETENTION_RUN_SUMMARY:['runId','asOfDate','accountsEvaluated','detected','eligible','suppressed','reviewRequired','campaignReady','responded','handedToAM','rfqs','quotes','loads','attributedRevenue','csvDriveFileId','handoffsCsvDriveFileId','createdAt']
+  MKT_RETENTION_RUN_SUMMARY:['runId','asOfDate','accountsEvaluated','detected','eligible','suppressed','reviewRequired','campaignReady','responded','handedToAM','rfqs','quotes','loads','attributedRevenue','csvDriveFileId','handoffsCsvDriveFileId','createdAt'],
+  // Self-observability log (MarketingV6AuraRunLog.gs): one row per (runId, stage) so a run's
+  // full progression -- including exactly where and why it failed -- is durable and
+  // inspectable natively via SpreadsheetApp/DriveApp, without depending on any external API
+  // to read Sheets content. Second table this pack auto-creates end to end, same justification
+  // as MKT_RETENTION_RUN_SUMMARY above (brand-new, AURA-owned, no historical data at risk).
+  MKT_AURA_RUN_LOG:['runId','timestamp','stage','status','sourceType','sourceTimestamp','accountsEvaluated','detected','eligible','suppressed','reviewRequired','campaignReady','csvCreated','handoffsCsvCreated','errorCode','errorMessage','nextAction']
 };
 // The one table in MKT_V6_CONTACT_RECIPIENT_SCHEMA that is safe to auto-create end to end
 // (tab + header row), because it is a brand-new, AURA-owned reporting table with no historical
@@ -32,6 +38,17 @@ var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
 // lookup mechanism.
 function v6AuraEnsureRunSummarySheet_(){
   var name='MKT_RETENTION_RUN_SUMMARY';
+  var existing=v6Sheet_(name);
+  if(existing)return {status:'ALREADY_EXISTS',sheetName:name};
+  var headers=MKT_V6_CONTACT_RECIPIENT_SCHEMA[name];
+  var created=SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).insertSheet(name);
+  created.getRange(1,1,1,headers.length).setValues([headers]);
+  return {status:'CREATED',sheetName:name,headers:headers};
+}
+// Same auto-create pattern as v6AuraEnsureRunSummarySheet_ above, for the same reason
+// (MKT_AURA_RUN_LOG is the second AURA-owned table with no historical data at risk).
+function v6AuraEnsureRunLogSheet_(){
+  var name='MKT_AURA_RUN_LOG';
   var existing=v6Sheet_(name);
   if(existing)return {status:'ALREADY_EXISTS',sheetName:name};
   var headers=MKT_V6_CONTACT_RECIPIENT_SCHEMA[name];

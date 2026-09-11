@@ -13,6 +13,7 @@ const bridgeSource=src('MarketingV6AuraBridge.gs');
 const archiveSource=src('MarketingV6DriveArchive.gs');
 const reportSource=src('MarketingV6RetentionReport.gs');
 const contactIngestionSource=src('MarketingV6ContactIngestion.gs');
+const runLogSource=src('MarketingV6AuraRunLog.gs');
 const bootstrapSource=src('MarketingV6AuraBootstrap.gs');
 const routerSource=src('MarketingV6RouterExtension.gs');
 
@@ -85,10 +86,16 @@ function fakeDriveApp(state){
     getFileById:function(){return {getLastUpdated:function(){return state.lastUpdated||new Date(Date.now()-3600000);}};},
     getFolderById:function(id){
       if(!state.folders[id])throw new Error('Folder not found: '+id);
-      return {createFile:function(name,content,mime){
-        var f={id:'FILE-'+(Object.keys(state.files).length+1),name:name,content:content,mime:mime,folderId:id};
-        f.getId=function(){return f.id;};state.files[name]=f;return f;
-      }};
+      return {
+        createFile:function(name,content,mime){
+          var f={id:'FILE-'+(Object.keys(state.files).length+1),name:name,content:content,mime:mime,folderId:id};
+          f.getId=function(){return f.id;};f.setContent=function(c){f.content=c;};state.files[name]=f;return f;
+        },
+        getFilesByName:function(name){
+          var match=state.files[name],i=0,arr=match?[match]:[];
+          return {hasNext:function(){return i<arr.length;},next:function(){return arr[i++];}};
+        }
+      };
     },
     getFoldersByName:function(name){
       var matches=Object.keys(state.folders).filter(function(id){return state.folders[id]===name;}),i=0;
@@ -113,6 +120,7 @@ function fakePropertiesService(store){
 
 function fakeScriptApp(state){
   state.triggers=state.triggers||[];
+  var nextId=1;
   return {
     getProjectTriggers:function(){return state.triggers.slice();},
     deleteTrigger:function(t){state.triggers=state.triggers.filter(function(x){return x!==t;});},
@@ -123,7 +131,18 @@ function fakeScriptApp(state){
             everyHours:function(hours){
               return {
                 create:function(){
-                  var trig={getHandlerFunction:function(){return handler;},_everyHours:hours};
+                  var id='TRIGGER-'+(nextId++);
+                  var trig={getHandlerFunction:function(){return handler;},getUniqueId:function(){return id;},_everyHours:hours};
+                  state.triggers.push(trig);
+                  return trig;
+                }
+              };
+            },
+            after:function(ms){
+              return {
+                create:function(){
+                  var id='TRIGGER-'+(nextId++);
+                  var trig={getHandlerFunction:function(){return handler;},getUniqueId:function(){return id;},_afterMs:ms};
                   state.triggers.push(trig);
                   return trig;
                 }
@@ -174,7 +193,7 @@ function makeContext(opts){
     Date:Date,String:String,Array:Array,Object:Object,Number:Number,RegExp:RegExp,isNaN:isNaN,console:console,JSON:JSON,Math:Math,Error:Error
   };
   vm.createContext(ctx);
-  [opportunityEngineSource,schemaMigrationSource,frequencySource,ingestionSource,recipientSource,freshnessSource,canonicalIdentitySource,bridgeSource,archiveSource,reportSource,contactIngestionSource,bootstrapSource].forEach(function(source,i){
+  [opportunityEngineSource,schemaMigrationSource,frequencySource,ingestionSource,recipientSource,freshnessSource,canonicalIdentitySource,bridgeSource,archiveSource,reportSource,contactIngestionSource,runLogSource,bootstrapSource].forEach(function(source,i){
     vm.runInContext(source,ctx,{filename:'src-'+i+'.gs'});
   });
   ctx.__sheets=sheets;ctx.__drive=driveState;ctx.__props=props;ctx.__script=scriptState;
@@ -287,7 +306,27 @@ function makeContext(opts){
   assert(result.canonicalIds);
   assert(result.driveFolderId);
   assert(result.triggerInstalled);
-  console.log('bootstrap test 6 (STALE freshness -> BOOTSTRAP_BLOCKED_STALE_DATA, no Retention cycle, no CSV): PASS');
+  // A STALE-blocked run must self-schedule a short-delay recovery attempt (not wait up to six
+  // hours for the canonical trigger) IN ADDITION to the canonical trigger itself (step 10 runs
+  // unconditionally, before the freshness branch) -- 2 total: canonical + one-shot.
+  assert.equal(ctx.__script.triggers.length,2,'canonical trigger (always installed) + one-shot recovery trigger (blocked path) = 2');
+  assert(ctx.__script.triggers.some(function(t){return t.getHandlerFunction()==='v6ScheduledOpportunityRefresh_';}));
+  assert(ctx.__script.triggers.some(function(t){return t.getHandlerFunction()==='v6AuraBootstrapAndRun_';}));
+  var secondResult=ctx.v6AuraBootstrapAndRun_();
+  assert.equal(secondResult.status,'BOOTSTRAP_BLOCKED_STALE_DATA');
+  assert.equal(ctx.__script.triggers.length,2,'a second consecutive STALE run must not duplicate either trigger');
+  console.log('bootstrap test 6 (STALE freshness -> BOOTSTRAP_BLOCKED_STALE_DATA, no Retention cycle, no CSV, recovery trigger scheduled once): PASS');
+
+  // Now the source becomes fresh (e.g. the report was refreshed) -- the next run must
+  // succeed AND clean up the now-unneeded one-shot recovery trigger, leaving only the
+  // canonical trigger behind.
+  driveState.lastUpdated=new Date();
+  ctx.v6ReportRows_=function(){return [];};
+  var thirdResult=ctx.v6AuraBootstrapAndRun_();
+  assert.equal(thirdResult.status,'BOOTSTRAP_COMPLETE');
+  assert.equal(ctx.__script.triggers.length,1,'a successful run must clean up the one-shot recovery trigger, leaving only the canonical one');
+  assert.equal(ctx.__script.triggers[0].getHandlerFunction(),'v6ScheduledOpportunityRefresh_');
+  console.log('bootstrap test 6b (a subsequent successful run cleans up the one-shot recovery trigger): PASS');
 })();
 
 // === Test 7: freshness FRESH -> full cycle runs, result includes retentionCycle =
@@ -344,6 +383,36 @@ function makeContext(opts){
   assert.equal(scriptState.triggers.length,1,'still exactly one trigger after a second run -- no competing duplicate schedule');
   assert.equal(scriptState.triggers[0].getHandlerFunction(),'v6ScheduledOpportunityRefresh_');
   console.log('bootstrap test 9 (trigger install/reinstall is idempotent across repeated bootstrap runs, never duplicated): PASS');
+})();
+
+// === Test 10: a real runtime exception is caught, logged as RUN_FAILED, and never crashes
+// the caller -- "no fallar silenciosamente" ===================================
+
+(function runFailedIsCaughtAndLoggedTest(){
+  var sheets={},props={},driveState={},scriptState={};
+  var ctx=makeContext({sheets:sheets,props:props,driveState:driveState,scriptState:scriptState});
+  var seeded=seedRequiredSheets(ctx);
+  Object.keys(seeded).forEach(function(name){sheets[name]=seeded[name];});
+  ctx.v6ReportRows_=function(){return [];};
+  // Force a real exception partway through (after the log table/summary sheet already exist,
+  // simulating a genuine mid-run failure rather than the Data-Hub-unreachable case already
+  // covered by test 1).
+  ctx.v6AuraAuditCanonicalIds_=function(){throw new Error('simulated canonical-id audit failure');};
+  var result=ctx.v6AuraBootstrapAndRun_();
+  assert.equal(result.status,'RUN_FAILED');
+  assert(result.runId,'a runId must still be reported even on failure');
+  assert.equal(result.errorCode,'RUNTIME_EXCEPTION');
+  assert(/simulated canonical-id audit failure/.test(result.errorMessage),'the real Apps Script error message must be surfaced, not swallowed');
+  var logRows=sheets.MKT_AURA_RUN_LOG?sheets.MKT_AURA_RUN_LOG.rows:null;
+  assert(logRows,'MKT_AURA_RUN_LOG must have been created before the failure, so the failure itself can still be logged');
+  var headers=logRows[0],failedRow=logRows.slice(1).map(function(r){var o={};headers.forEach(function(h,i){o[h]=r[i];});return o;}).filter(function(r){return r.stage==='RUN_FAILED';})[0];
+  assert(failedRow,'a RUN_FAILED row must exist in the durable log');
+  assert.equal(failedRow.errorCode,'RUNTIME_EXCEPTION');
+  assert(/simulated canonical-id audit failure/.test(failedRow.errorMessage));
+  // A failure must also self-schedule a short-delay recovery attempt instead of waiting up to
+  // six hours for the next canonical firing.
+  assert.equal(scriptState.triggers.length,1,'a one-shot recovery trigger must be scheduled on failure');
+  console.log('bootstrap test 10 (a real runtime exception is caught, logged as RUN_FAILED with the real error, and schedules recovery): PASS');
 })();
 
 // Router-agnostic check (same pattern as tests/v6-retention-report.test.js): passes whether

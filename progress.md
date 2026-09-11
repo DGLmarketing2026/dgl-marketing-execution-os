@@ -2,6 +2,57 @@
 
 Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
+## Pass 7 — Self-observability (MKT_AURA_RUN_LOG), one-shot recovery trigger
+
+Correction from the user: an external session (this one) being unable to read Google Sheets
+content via a REST API (Sheets API disabled for the `clasp` OAuth client's project) is an
+observability gap in this session, NOT a production runtime failure -- Apps Script itself
+runs `SpreadsheetApp`/`DriveApp`/`PropertiesService`/`ScriptApp` natively, with no dependency
+on any external API being reachable. Nothing in the actual runtime was ever coupled to that;
+this pass adds a durable, native self-log so the outcome of every run is inspectable without
+needing external Sheets access at all, and a short-delay recovery mechanism so a
+blocked/failed run does not have to wait up to six hours for the next canonical firing.
+
+Added:
+- `MKT_AURA_RUN_LOG` schema (`MarketingV6SchemaMigration.gs`) + `v6AuraEnsureRunLogSheet_()`
+  -- the second table this pack auto-creates end to end (same justification as
+  `MKT_RETENTION_RUN_SUMMARY`: brand-new, AURA-owned, no historical data at risk).
+- New `MarketingV6AuraRunLog.gs`: `v6AuraLogStage_(runId,stage,status,extra)` -- upserts one
+  row per `(runId, stage)`, idempotent, always best-effort (a logging failure is swallowed
+  internally and never breaks the real business logic calling it). `v6AuraWriteLastRunStatusFile_`
+  -- a single, overwritten-in-place `_AURA_LAST_RUN_STATUS.json` in the same AM-reports Drive
+  folder (native `DriveApp`, not a third historical CSV -- one fixed name, always the latest
+  state, safe-aggregate fields only). `v6AuraScheduleOneShotBootstrapRecovery_`/
+  `v6AuraCleanupOneShotBootstrapRecovery_` -- a short-delay (default 5 min), idempotent,
+  self-cleaning one-time trigger, tracked by trigger unique ID in a Script Property, that
+  never duplicates and never touches the canonical six-hour trigger.
+- `MarketingV6AuraBootstrap.gs` rewritten around this: generates `runId` once at the very
+  top, wraps the entire body in try/catch (a real thrown exception is now caught, logged as
+  `RUN_FAILED` with the real `errorCode`/`errorMessage`, schedules a one-shot recovery, and
+  returns -- it no longer propagates an unhandled exception out of the function), logs
+  `BOOTSTRAP_STARTED`/`SOURCE_SELECTED`/`SCHEDULER_CONFIRMED` inline, schedules one-shot
+  recovery on `STALE_SOURCE`, and cleans up any pending one-shot trigger on
+  `BOOTSTRAP_COMPLETE`.
+- `v6AuraRetentionDryRun_`/`v6AuraRunRetentionCycle_` (`MarketingV6RetentionReport.gs`) now
+  accept an optional `runId` so the bootstrap's id is threaded through every stage instead of
+  each function minting its own (fully backward compatible: a standalone caller with no
+  `runId` still gets one generated exactly as before). Logs
+  `SOURCE_SELECTED`/`FRESHNESS_PASSED`/`RETENTION_STARTED`/`RETENTION_COMPLETED`/
+  `CSV_CREATED`/`HANDOFF_CSV_CREATED`/`RUN_SUMMARY_WRITTEN`/`RUN_COMPLETED` at each real stage
+  (`typeof`-guarded, so these two functions remain fully usable standalone/in tests without
+  `MarketingV6AuraRunLog.gs` loaded).
+
+Tests: new `tests/v6-aura-run-log.test.js` (5 cases: log-stage idempotency, logging failure
+never throws, status file created-then-updated-in-place never duplicated, one-shot trigger
+scheduled/never-duplicated/cleaned-up, cleanup never touches the canonical trigger).
+`tests/v6-aura-bootstrap.test.js` extended (+2 cases: a real thrown exception is caught,
+logged with the real error, and schedules recovery; a STALE run schedules a one-shot
+recovery trigger alongside the always-installed canonical one, never duplicated on a second
+STALE run, and a subsequent successful run cleans the one-shot trigger up).
+`tests/v6-schema-migration.test.js` updated to seed the new `MKT_AURA_RUN_LOG` tab.
+
+Full suite: 35 files, 35 pass, 0 fail.
+
 ## Pass 6 — Source arbitration (NOVA -> AM Intelligence Gmail fallback), extended response events
 
 Root cause of the real production incident this pass fixes: the canonical NOVA report

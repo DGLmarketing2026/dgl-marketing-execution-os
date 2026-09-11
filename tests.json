@@ -243,6 +243,39 @@
         {
           "name": "router exposes v6AuraBootstrapAndRun -> v6AuraBootstrapAndRun_",
           "guarantee": "the single one-time entry point is reachable the same way every other AURA route is, not a hidden/undocumented function"
+        },
+        {
+          "name": "(added Pass 7) freshness STALE_SOURCE -> exactly 2 triggers exist after the run (the always-installed canonical trigger plus one one-shot recovery trigger), a second STALE run does not add a third, and a subsequent FRESH run cleans the one-shot trigger back down to just the canonical one",
+          "guarantee": "self-healing recovery: a blocked run schedules a short-delay retry instead of waiting up to six hours, never duplicates that retry, and never leaves a stale recovery trigger installed once a real run succeeds"
+        },
+        {
+          "name": "(added Pass 7) a forced real exception thrown mid-bootstrap (e.g. from v6AuraAuditCanonicalIds_) is caught, returned as status RUN_FAILED with the real errorCode/errorMessage, durably logged as a RUN_FAILED row in MKT_AURA_RUN_LOG, and schedules a one-shot recovery trigger",
+          "guarantee": "no genuine runtime failure is ever swallowed or reported silently: the exact real Apps Script error is preserved end to end, both in the return value and in the durable native run log, with no fabricated diagnosis"
+        }
+      ]
+    },
+    {
+      "file": "tests/v6-aura-run-log.test.js",
+      "cases": [
+        {
+          "name": "v6AuraLogStage_ upserts by (runId, stage): logging the same stage twice for one run updates the row instead of duplicating it; a different stage for the same run is a new row",
+          "guarantee": "the durable run log follows the same run_id/action-key idempotency convention as every other table in this codebase -- retries and re-logs never inflate the log"
+        },
+        {
+          "name": "v6AuraLogStage_ never throws even when the underlying upsert throws (e.g. a transient sheet-write failure)",
+          "guarantee": "self-observability is strictly best-effort: a logging failure can never break or mask the real business logic that called it"
+        },
+        {
+          "name": "v6AuraWriteLastRunStatusFile_ creates '_AURA_LAST_RUN_STATUS.json' once, then updates that same fixed-name file in place on every later call (never a second file), with only safe aggregate fields, no PII",
+          "guarantee": "the Drive-native status mirror stays a single always-current file, providing a cheap native alternative to Sheets REST access for verifying a run's outcome without ever accumulating history or leaking PII"
+        },
+        {
+          "name": "v6AuraScheduleOneShotBootstrapRecovery_ installs exactly one trigger, a second call while one is already pending returns ALREADY_PENDING and installs no second trigger, and v6AuraCleanupOneShotBootstrapRecovery_ removes it and clears the tracking Script Property (a second cleanup call safely reports NONE_PENDING)",
+          "guarantee": "the short-delay recovery mechanism is idempotent and self-cleaning by construction, matching the project's existing idempotent-trigger-install pattern"
+        },
+        {
+          "name": "cleanup removes only the tracked one-shot trigger id and leaves an unrelated pre-existing canonical trigger installed and untouched",
+          "guarantee": "the recovery mechanism can never accidentally delete the canonical six-hour scheduler trigger it was deliberately kept separate from"
         }
       ]
     },
@@ -302,11 +335,11 @@
     }
   ],
   "regressionCoverage": {
-    "description": "Full suite re-run after every change in this branch, most recently after the source-arbitration / Gmail AM Intelligence fallback / extended response-event vocabulary pass (Pass 6). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
-    "totalFiles": 34,
-    "passed": 34,
+    "description": "Full suite re-run after every change in this branch, most recently after the self-observability / one-shot bootstrap recovery pass (Pass 7: MKT_AURA_RUN_LOG, MarketingV6AuraRunLog.gs, native-runtime discipline). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
+    "totalFiles": 35,
+    "passed": 35,
     "failed": 0,
-    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5/6's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in either pass touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (33 pre-existing files + 1 new this pass: tests/v6-source-arbitration.test.js; tests/v6-response-events.test.js, tests/v6-aura-bridge.test.js, tests/v6-aura-bootstrap.test.js and tests/v6-no-pii-in-repo.test.js were extended/updated in place rather than added).",
+    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5/6/7's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (34 files carried forward + 1 new this pass: tests/v6-aura-run-log.test.js; tests/v6-aura-bootstrap.test.js and tests/v6-schema-migration.test.js were extended/updated in place rather than added).",
     "failedFiles": []
   }
 }
