@@ -2,6 +2,51 @@
 
 Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
+## Pass 9 — Pre-LIVE content/safety audit for MKT_EMAIL_QUEUE
+
+Requested validation before ever allowing LIVE: real/personalized recipient content, correct
+company/contact/service match, no unmerged `{{token}}`, no broken `href="#"` CTA, a sender
+signature and reply-to present, suppression/frequency/approval/duplicate protection all holding,
+and -- the one non-negotiable check -- confirmation that DRY_RUN never produced a real send.
+
+Attempted independent, this-session verification against the live Data Hub
+(`1FXpoBO658ldbr4V8wCKo0luHU3_kqHwYzAnWijA6lBM`) first, exhausting every read path available:
+Sheets REST API (already known disabled, 403 SERVICE_DISABLED), Drive API's native-file export
+endpoint (`files/{id}/export`, blocked 403 `appNotAuthorizedToFile` -- Drive's `export` still
+requires per-file app authorization, not just the `drive.metadata.readonly` scope this OAuth
+client has), Drive content read (`alt=media`) on both an Apps-Script-created JSON status file
+and an Apps-Script-created CSV (both blocked 403 for the same reason -- content access is
+restricted to files created through an authorized interactive session of this exact app, not
+just any file this account owns), the Apps Script Execution API (`clasp run`, still returning
+the same previously-diagnosed `storage NOT_FOUND`/permission error), and the project's own public
+Web App endpoint (`doGet`/`doPost` in `DGL_Core.gs`, real and reachable over plain HTTPS, but
+correctly gated by `assertApiKey_` against a random UUID stored only in Script Properties --
+intentionally not bypassed; weakening that gate to solve an observability gap would be a real
+security regression, not a fix). Net result: this session has metadata-only Drive visibility
+(file names/timestamps/sizes -- confirmed real, e.g. the `aura-execution-*.csv` archive trail
+showing `v6AuraAutomationTick_` firing on a genuine ~60-minute cadence) and zero ability to read
+actual spreadsheet or file content. This is an intentional, correctly-configured security
+boundary, not a bug to route around.
+
+Given that, added `v6AuraEmailQueueAudit_()` (`MarketingV6AuraEmailDispatcher.gs`) -- a
+no-argument function callable directly from the Apps Script editor (or, API-key-authenticated,
+via the router as `v6AuraEmailQueueAudit`) that performs exactly the checklist above against the
+real `MKT_EMAIL_QUEUE`/`MKT_ACCOUNTS`/`MKT_CONTACTS_SECURE` data, in place, with zero external API
+dependency: per-job checks for invalid email, a mismatch against the real account/contact record
+(company, firstName, email), any generic fallback value reaching a real job
+(`your company`/`Team`/`freight`), any unmerged `{{token}}` in subject or HTML, a broken
+`href="#"` CTA, a missing sender signature or reply-to, a duplicate `(campaignId, accountId,
+contactId, sequenceStep)` key, and an approval gate that was bypassed or recorded but not
+enforced -- plus the one critical, top-level signal: `realSendsDetected` (any job already at
+status `SENT`) and its own `CRITICAL` warning string. Every email in the output is masked
+(`m***@domain.com`) -- this is a safety report, not a place to reproduce contact PII.
+
+Tests: `tests/v6-aura-email-dispatcher.test.js` extended (+2 cases: a genuinely well-formed job
+audits clean with zero findings; a deliberately broken/mismatched/duplicated/already-sent set of
+jobs is caught on every single category, including the real-SENT critical case).
+
+Full suite: 36 files, 36 pass, 0 fail.
+
 ## Pass 8 — Real Gmail send provider for Retention (AURA Email Dispatcher)
 
 DGL's own real run (`RUN-4C091A1B`: 131 accountsEvaluated, 14 detected/eligible/campaignReady,

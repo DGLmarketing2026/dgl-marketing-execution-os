@@ -332,3 +332,71 @@ function v6AuraRetentionDashboard_() {
     campaigns: retentionRows.map(function (r) { return { campaignId: r.campaignId, owner: r.owner, service: r.service, status: r.status, recipients: r.recipients, queued: r.queued, sent: r.sent, failed: r.failed }; })
   };
 }
+
+// --- Pre-LIVE content/safety audit -----------------------------------------------------------
+// A REAL, no-Sheets-access-required verification of exactly what a human would otherwise have
+// to open the spreadsheet to check by eye: is every Retention job genuinely personalized, does
+// it match its own account/contact record, is nothing generic/inventible reaching a real send,
+// is every governance gate (suppression/frequency/approval/duplicate/stop) actually holding, and
+// -- the one non-negotiable check -- has DRY_RUN really never sent a real email. Callable
+// directly from the Apps Script editor (no argument required) so a human can get this answer in
+// one click without needing external API access this project's own OAuth scopes don't grant.
+// Masks the local-part of every email in its output (m***@domain.com) -- this is a safety
+// report, not a place to reproduce full contact PII.
+function v6AuraEmailMask_(email) {
+  var e = v6AuraEmailText_(email);
+  var at = e.indexOf('@');
+  if (at <= 0) return e ? '***' : '';
+  return e.slice(0, 1) + '***' + e.slice(at);
+}
+function v6AuraEmailQueueAudit_() {
+  var jobs = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) { return v6AuraEmailText_(r.playbookId) === 'Retention'; });
+  var accountsById = {}, contactsById = {};
+  v6Rows_('MKT_ACCOUNTS').forEach(function (a) { accountsById[v6AuraEmailText_(a.accountId)] = a; });
+  v6Rows_('MKT_CONTACTS_SECURE').forEach(function (c) { contactsById[v6AuraEmailText_(c.contactId)] = c; });
+
+  var seenKeys = {}, duplicateKeys = {};
+  jobs.forEach(function (j) {
+    var key = v6AuraEmailText_(j.campaignId) + '|' + v6AuraEmailText_(j.accountId) + '|' + v6AuraEmailText_(j.contactId) + '|' + v6AuraEmailText_(j.sequenceStep);
+    if (seenKeys[key]) duplicateKeys[key] = true; else seenKeys[key] = true;
+  });
+
+  var byStatus = {}, findings = [], realSendsDetected = 0;
+  jobs.forEach(function (job) {
+    byStatus[job.status] = (byStatus[job.status] || 0) + 1;
+    if (String(job.status).toUpperCase() === 'SENT') realSendsDetected++;
+
+    var issues = [];
+    var account = accountsById[v6AuraEmailText_(job.accountId)] || null;
+    var contact = contactsById[v6AuraEmailText_(job.contactId)] || null;
+
+    if (!v6AuraEmailValid_(job.email)) issues.push('INVALID_EMAIL');
+    if (contact && v6AuraEmailText_(contact.email).toLowerCase() !== v6AuraEmailText_(job.email).toLowerCase()) issues.push('EMAIL_MISMATCH_WITH_CONTACT_RECORD');
+    if (account && v6AuraEmailText_(account.accountName) && v6AuraEmailText_(account.accountName) !== v6AuraEmailText_(job.company)) issues.push('COMPANY_MISMATCH_WITH_ACCOUNT_RECORD');
+    if (contact && v6AuraEmailText_(contact.firstName) && v6AuraEmailText_(contact.firstName) !== v6AuraEmailText_(job.firstName)) issues.push('FIRSTNAME_MISMATCH_WITH_CONTACT_RECORD');
+    if (v6AuraEmailText_(job.company) === 'your company') issues.push('GENERIC_COMPANY_FALLBACK_USED');
+    if (v6AuraEmailText_(job.firstName) === 'Team') issues.push('GENERIC_FIRSTNAME_FALLBACK_USED');
+    if (v6AuraEmailText_(job.service) === 'freight') issues.push('GENERIC_SERVICE_FALLBACK_USED');
+    if (/\{\{\w+\}\}/.test(job.subject || '')) issues.push('UNMERGED_TOKEN_IN_SUBJECT');
+    if (/\{\{\w+\}\}/.test(job.htmlBody || '')) issues.push('UNMERGED_TOKEN_IN_HTML_BODY');
+    if (/href\s*=\s*"#"/i.test(job.htmlBody || '')) issues.push('BROKEN_CTA_HREF');
+    if (!/DGL/i.test(job.htmlBody || '')) issues.push('MISSING_SENDER_SIGNATURE');
+    if (!job.replyTo) issues.push('MISSING_REPLY_TO');
+    var dupKey = v6AuraEmailText_(job.campaignId) + '|' + v6AuraEmailText_(job.accountId) + '|' + v6AuraEmailText_(job.contactId) + '|' + v6AuraEmailText_(job.sequenceStep);
+    if (duplicateKeys[dupKey]) issues.push('DUPLICATE_JOB_KEY');
+    if (job.approvalId && job.approvedAt && String(job.status).toUpperCase() !== 'REVIEW_REQUIRED') issues.push('APPROVAL_RECORDED_BUT_NOT_ENFORCED');
+    if (job.approvalId && !job.approvedAt && ['SENT', 'DRY_RUN'].indexOf(String(job.status).toUpperCase()) >= 0) issues.push('APPROVAL_BYPASSED');
+
+    if (issues.length) findings.push({ jobId: job.jobId, accountId: job.accountId, email: v6AuraEmailMask_(job.email), issues: issues });
+  });
+
+  return {
+    status: 'AUDIT_COMPLETE', sendMode: v6AuraSendMode_(),
+    jobsChecked: jobs.length, byStatus: byStatus,
+    realSendsDetected: realSendsDetected,
+    realSendsDetectedWarning: realSendsDetected > 0 ? 'CRITICAL: ' + realSendsDetected + ' job(s) already show status SENT -- a real email may have gone out.' : null,
+    duplicateJobKeys: Object.keys(duplicateKeys).length,
+    findings: findings,
+    clean: findings.length === 0 && realSendsDetected === 0
+  };
+}

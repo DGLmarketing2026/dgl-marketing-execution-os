@@ -379,16 +379,24 @@
         {
           "name": "auraInstallTriggers() installs exactly one hourly dispatcher trigger; a second call reports TRIGGER_EXISTS and never installs a duplicate",
           "guarantee": "the dispatcher's own trigger is idempotent and kept strictly separate from the canonical hourly Acquisition/AURA tick and the 6-hour Retention bootstrap trigger"
+        },
+        {
+          "name": "(added Pass 9) v6AuraEmailQueueAudit_ reports a genuinely well-formed DRY_RUN job as clean (zero findings, zero real sends detected)",
+          "guarantee": "the pre-LIVE audit does not cry wolf on correct, personalized, properly-governed content"
+        },
+        {
+          "name": "(added Pass 9) v6AuraEmailQueueAudit_ catches every requested problem category on a deliberately broken/mismatched/duplicated set of jobs -- generic company/firstName/service fallback reaching a real job, an unmerged {{token}} in subject and in HTML, a broken href=\"#\" CTA, a missing reply-to, an email/company/firstName mismatch against the real account/contact record, a duplicate (campaignId,accountId,contactId,sequenceStep) key, and a job already at real status SENT flagged as a CRITICAL realSendsDetected warning",
+          "guarantee": "no category of content or governance problem DGL asked to detect before allowing LIVE can pass through this audit unnoticed, and a real send is never silently missed"
         }
       ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full suite re-run after every change in this branch, most recently after adding the real Gmail send provider for Retention (Pass 8: MarketingV6AuraEmailDispatcher.gs, DRY_RUN/LIVE AURA_SEND_MODE, MKT_EMAIL_QUEUE built from the existing eligible audience). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
+    "description": "Full suite re-run after every change in this branch, most recently after adding the pre-LIVE MKT_EMAIL_QUEUE content/safety audit (Pass 9: v6AuraEmailQueueAudit_, masked-email findings report, real-send critical detection). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
     "totalFiles": 36,
     "passed": 36,
     "failed": 0,
-    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5/6/7/8's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (35 files carried forward + 1 new this pass: tests/v6-aura-email-dispatcher.test.js; tests/v6-aura-bootstrap.test.js and tests/v6-schema-migration.test.js fixtures were extended in place, not added, to seed the two newly schema-tracked legacy tables MKT_EMAIL_QUEUE/MKT_TOUCHES).",
+    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5/6/7/8/9's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (36 files total; Pass 9 extended tests/v6-aura-email-dispatcher.test.js in place rather than adding a new file).",
     "failedFiles": []
   }
 }

@@ -129,6 +129,8 @@ function routeMarketingV6_(action, payload) {
       return typeof v6AuraSendMode_ === 'function' ? { sendMode: v6AuraSendMode_() } : v6RouteMissing_(a, 'v6AuraSendMode_');
     case 'v6AuraRetentionDashboard':
       return typeof v6AuraRetentionDashboard_ === 'function' ? v6AuraRetentionDashboard_(p) : v6RouteMissing_(a, 'v6AuraRetentionDashboard_');
+    case 'v6AuraEmailQueueAudit':
+      return typeof v6AuraEmailQueueAudit_ === 'function' ? v6AuraEmailQueueAudit_(p) : v6RouteMissing_(a, 'v6AuraEmailQueueAudit_');
     default:
       return null;
   }

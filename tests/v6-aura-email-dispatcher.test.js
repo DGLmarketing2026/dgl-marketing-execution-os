@@ -250,4 +250,54 @@ function eligibleAudienceRow(over) {
   console.log('dispatcher test 11 (auraInstallTriggers is idempotent, never duplicates): PASS');
 })();
 
+// 12. The pre-LIVE audit reports a clean bill of health for a genuinely well-formed job: no
+// findings, zero real sends detected, masked email in output.
+(function auditCleanJobTest() {
+  var tables = {
+    MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'maria@shipperco.com', firstName: 'Maria', company: 'Shipper Co', service: 'FTL', subject: 'Maria, seguimos cerca de Shipper Co', htmlBody: '<p>Hola Maria de Shipper Co</p><a href="https://dglus.com/quote">ENVIAR MOVIMIENTO</a> DGL Freight Broker', replyTo: 'am@dglus.com', status: 'DRY_RUN', sequenceStep: 1, playbookId: 'Retention' }],
+    MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }],
+    MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria', email: 'maria@shipperco.com' }]
+  };
+  var ctx = makeContext({ tables: tables });
+  var audit = ctx.v6AuraEmailQueueAudit_();
+  assert.equal(audit.jobsChecked, 1);
+  assert.equal(audit.realSendsDetected, 0);
+  assert.equal(audit.clean, true, 'a well-formed DRY_RUN job must produce zero findings');
+  assert.equal(audit.findings.length, 0);
+  console.log('dispatcher test 12 (pre-LIVE audit: a well-formed job is reported clean): PASS');
+})();
+
+// 13. The pre-LIVE audit detects every category of real problem it was asked to catch: generic
+// fallback content, an unmerged {{token}}, a broken href="#" CTA, a missing signature/replyTo, a
+// mismatch against the real account/contact record, a duplicate job key, and -- the one truly
+// critical case -- a job that already shows a real SENT status.
+(function auditDetectsRealProblemsTest() {
+  var tables = {
+    MKT_EMAIL_QUEUE: [
+      { jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'wrong@otherbroker.com', firstName: 'Team', company: 'your company', service: 'freight', subject: 'Hi {{firstName}}', htmlBody: '<p>Hi {{firstName}} from {{company}}</p><a href="#">Click</a>', replyTo: '', status: 'DRY_RUN', sequenceStep: 1, playbookId: 'Retention' },
+      { jobId: 'JOB:CMP-RET-1:CON-2:1', campaignId: 'CMP-RET-1', accountId: 'ACC-2', contactId: 'CON-2', email: 'sent@shipperco.com', firstName: 'Ana', company: 'Shipper Co', service: 'FTL', subject: 'Ana, hola', htmlBody: '<p>Ana content DGL</p>', replyTo: 'am@dglus.com', status: 'SENT', sequenceStep: 1, playbookId: 'Retention' },
+      { jobId: 'JOB:CMP-RET-1:CON-3:1', campaignId: 'CMP-RET-1', accountId: 'ACC-3', contactId: 'CON-3', email: 'carlos@shipperco.com', firstName: 'Carlos', company: 'Shipper Co', service: 'FTL', subject: 'Carlos, hola', htmlBody: '<p>Carlos content DGL</p>', replyTo: 'am@dglus.com', status: 'DRY_RUN', sequenceStep: 1, playbookId: 'Retention' },
+      { jobId: 'JOB:CMP-RET-1:CON-3:1:DUP', campaignId: 'CMP-RET-1', accountId: 'ACC-3', contactId: 'CON-3', email: 'carlos@shipperco.com', firstName: 'Carlos', company: 'Shipper Co', service: 'FTL', subject: 'Carlos, hola otra vez', htmlBody: '<p>Carlos content DGL</p>', replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1, playbookId: 'Retention' }
+    ],
+    MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Real Shipper Inc' }, { accountId: 'ACC-2', accountName: 'Shipper Co' }, { accountId: 'ACC-3', accountName: 'Shipper Co' }],
+    MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Real Contact', email: 'real@realshipper.com' }, { contactId: 'CON-2', firstName: 'Ana', email: 'sent@shipperco.com' }, { contactId: 'CON-3', firstName: 'Carlos', email: 'carlos@shipperco.com' }]
+  };
+  var ctx = makeContext({ tables: tables });
+  var audit = ctx.v6AuraEmailQueueAudit_();
+  assert.equal(audit.jobsChecked, 4);
+  assert.equal(audit.realSendsDetected, 1, 'the one SENT job must be flagged as a real send');
+  assert(audit.realSendsDetectedWarning, 'a real send must produce a CRITICAL warning string');
+  assert.equal(audit.duplicateJobKeys, 1);
+  var job1 = audit.findings.filter(function (f) { return f.jobId === 'JOB:CMP-RET-1:CON-1:1'; })[0];
+  assert(job1, 'the generic/broken/mismatched job must appear in findings');
+  assert(job1.email.indexOf('***') >= 0, 'the audit must mask the local part of every email');
+  ['GENERIC_COMPANY_FALLBACK_USED', 'GENERIC_FIRSTNAME_FALLBACK_USED', 'GENERIC_SERVICE_FALLBACK_USED', 'UNMERGED_TOKEN_IN_SUBJECT', 'UNMERGED_TOKEN_IN_HTML_BODY', 'BROKEN_CTA_HREF', 'MISSING_REPLY_TO', 'EMAIL_MISMATCH_WITH_CONTACT_RECORD', 'COMPANY_MISMATCH_WITH_ACCOUNT_RECORD', 'FIRSTNAME_MISMATCH_WITH_CONTACT_RECORD'].forEach(function (code) {
+    assert(job1.issues.indexOf(code) >= 0, 'missing expected finding: ' + code);
+  });
+  var dupJobs = audit.findings.filter(function (f) { return f.jobId.indexOf('CON-3') >= 0; });
+  assert(dupJobs.length >= 1 && dupJobs.some(function (f) { return f.issues.indexOf('DUPLICATE_JOB_KEY') >= 0; }), 'the duplicated (campaign,account,contact,step) pair must be flagged');
+  assert.equal(audit.clean, false);
+  console.log('dispatcher test 13 (pre-LIVE audit: every real problem category is detected, including a real SENT job): PASS');
+})();
+
 console.log('V6 AURA email dispatcher (queue build + DRY_RUN/LIVE dispatch + gates): ALL PASS');
