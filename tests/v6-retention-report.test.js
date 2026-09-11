@@ -21,16 +21,39 @@ function fakeUtilities(){
     getUuid(){n++;return 'UUID-'+('00000000'+n).slice(-8);}
   };
 }
-function fakeDriveApp(files,lastUpdated){
+function fakeDriveApp(files,lastUpdated,folders){
+  folders=folders||{};
   return {
-    getFolderById:function(id){return {createFile:function(name,content,mime){var f={id:'FILE-'+(Object.keys(files).length+1),name:name,content:content,mime:mime,folderId:id};f.getId=function(){return f.id;};files[name]=f;return f;}};},
+    getFolderById:function(id){
+      if(!folders[id])throw new Error('Folder not found: '+id);
+      return {createFile:function(name,content,mime){var f={id:'FILE-'+(Object.keys(files).length+1),name:name,content:content,mime:mime,folderId:id};f.getId=function(){return f.id;};files[name]=f;return f;}};
+    },
+    getFoldersByName:function(name){
+      var matches=Object.keys(folders).filter(function(id){return folders[id]===name;}),i=0;
+      return {hasNext:function(){return i<matches.length;},next:function(){var id=matches[i++];return {getId:function(){return id;}};}};
+    },
+    createFolder:function(name){
+      var id='FOLDER-'+(Object.keys(folders).length+1);
+      folders[id]=name;
+      return {getId:function(){return id;}};
+    },
     getFileById:function(){return {getLastUpdated:function(){return lastUpdated||new Date(Date.now()-3600000);}};}
   };
 }
 
-function makeContext(tables,files){
-  tables=tables||{};files=files||{};
-  var ctx={Utilities:fakeUtilities(),Session:{getScriptTimeZone:function(){return 'UTC';}},SpreadsheetApp:{},ScriptApp:{},MimeType:{CSV:'CSV'},DriveApp:fakeDriveApp(files),Date:Date,String:String,Array:Array,Object:Object,Number:Number,RegExp:RegExp,isNaN:isNaN,console:console};
+function fakePropertiesService(store){
+  store=store||{};
+  return {getScriptProperties:function(){
+    return {
+      getProperty:function(key){return Object.prototype.hasOwnProperty.call(store,key)?store[key]:null;},
+      setProperty:function(key,value){store[key]=value;return this;}
+    };
+  }};
+}
+
+function makeContext(tables,files,props,folders){
+  tables=tables||{};files=files||{};props=props||{};folders=folders||{};
+  var ctx={Utilities:fakeUtilities(),Session:{getScriptTimeZone:function(){return 'UTC';}},SpreadsheetApp:{},ScriptApp:{},MimeType:{CSV:'CSV'},DriveApp:fakeDriveApp(files,null,folders),PropertiesService:fakePropertiesService(props),Date:Date,String:String,Array:Array,Object:Object,Number:Number,RegExp:RegExp,isNaN:isNaN,console:console};
   vm.createContext(ctx);
   vm.runInContext(ingestionSource,ctx,{filename:'MarketingV6ReportIngestion.gs'});
   vm.runInContext(pipelineSource,ctx,{filename:'MarketingV6Pipeline.gs'});
@@ -224,18 +247,57 @@ function csvRows(csvText){
   assert.equal(suppressed.campaignStatus,'NOT YET SCOPED');
   assert.equal(suppressed.lastLoadDate,'');
   assert.equal(suppressed.daysSinceLastLoad,'');
+  assert(Array.isArray(result.csvRows)&&result.csvRows.length===2,'csvRows must be exposed for the Handoffs CSV to reuse without a second join');
   console.log('retention report test 4 (AM CSV report: columns, decision join, no PII): PASS');
+})();
+
+// === Task 5: v6AuraGenerateHandoffsCsvReport_ ================================
+
+(function handoffsCsvTest(){
+  var files={};
+  var ctx=makeContext({},files);
+  var csvRowsInput=[
+    {runId:'RUN-H1',accountId:'ACC-1',accountName:'Eligible Co',amOwner:'Jane',campaignId:'',auraDecision:'ELIGIBLE',handoffStatus:'',nextAction:'',rfqStatus:'',quoteStatus:'',loadStatus:'',attributedRevenue:'',responseAtRaw:'',rfqAtRaw:'',quoteAtRaw:'',loadAtRaw:''},
+    {runId:'RUN-H1',accountId:'ACC-2',accountName:'Suppressed Co',amOwner:'Jane',campaignId:'',auraDecision:'SUPPRESSED',handoffStatus:'',nextAction:'',rfqStatus:'',quoteStatus:'',loadStatus:'',attributedRevenue:'',responseAtRaw:'',rfqAtRaw:'',quoteAtRaw:'',loadAtRaw:''},
+    {runId:'RUN-H1',accountId:'ACC-3',accountName:'Campaign Ready Co',amOwner:'Jane',campaignId:'',auraDecision:'CAMPAIGN_READY',handoffStatus:'',nextAction:'',rfqStatus:'',quoteStatus:'',loadStatus:'',attributedRevenue:'',responseAtRaw:'',rfqAtRaw:'',quoteAtRaw:'',loadAtRaw:''},
+    {runId:'RUN-H1',accountId:'ACC-4',accountName:'Active Co',amOwner:'Jane',campaignId:'CAM-4',auraDecision:'ACTIVE',handoffStatus:'',nextAction:'MONITOR',rfqStatus:'',quoteStatus:'',loadStatus:'',attributedRevenue:'',responseAtRaw:'',rfqAtRaw:'',quoteAtRaw:'',loadAtRaw:''},
+    {runId:'RUN-H1',accountId:'ACC-5',accountName:'Review Co',amOwner:'Jane',campaignId:'',auraDecision:'REVIEW_REQUIRED',handoffStatus:'',nextAction:'',rfqStatus:'',quoteStatus:'',loadStatus:'',attributedRevenue:'',responseAtRaw:'',rfqAtRaw:'',quoteAtRaw:'',loadAtRaw:''},
+    {runId:'RUN-H1',accountId:'ACC-6',accountName:'Responded Co',amOwner:'Jane',campaignId:'CAM-6',auraDecision:'RESPONDED',handoffStatus:'PENDING',nextAction:'STOP ACCOUNT AUTOMATION / V5.5 HANDOFF',rfqStatus:'',quoteStatus:'',loadStatus:'',attributedRevenue:'',responseAtRaw:'2026-09-01T00:00:00.000Z',rfqAtRaw:'',quoteAtRaw:'',loadAtRaw:''},
+    {runId:'RUN-H1',accountId:'ACC-7',accountName:'Handed Co',amOwner:'Jane',campaignId:'CAM-7',auraDecision:'HANDED_TO_AM',handoffStatus:'PENDING',nextAction:'AM HANDOFF: RFQ',rfqStatus:'',quoteStatus:'',loadStatus:'',attributedRevenue:'',responseAtRaw:'2026-09-01T00:00:00.000Z',rfqAtRaw:'',quoteAtRaw:'',loadAtRaw:''},
+    {runId:'RUN-H1',accountId:'ACC-8',accountName:'RFQ Co',amOwner:'Jane',campaignId:'CAM-8',auraDecision:'RFQ',handoffStatus:'',nextAction:'',rfqStatus:'YES 2026-09-02T00:00:00.000Z',quoteStatus:'',loadStatus:'',attributedRevenue:'',responseAtRaw:'2026-09-01T00:00:00.000Z',rfqAtRaw:'2026-09-02T00:00:00.000Z',quoteAtRaw:'',loadAtRaw:''},
+    {runId:'RUN-H1',accountId:'ACC-9',accountName:'Quoted Co',amOwner:'Jane',campaignId:'CAM-9',auraDecision:'QUOTED',handoffStatus:'',nextAction:'',rfqStatus:'',quoteStatus:'YES 2026-09-03T00:00:00.000Z',loadStatus:'',attributedRevenue:'',responseAtRaw:'2026-09-01T00:00:00.000Z',rfqAtRaw:'2026-09-02T00:00:00.000Z',quoteAtRaw:'2026-09-03T00:00:00.000Z',loadAtRaw:''},
+    {runId:'RUN-H1',accountId:'ACC-10',accountName:'Retained Co',amOwner:'Jane',campaignId:'CAM-10',auraDecision:'RETAINED',handoffStatus:'',nextAction:'',rfqStatus:'',quoteStatus:'',loadStatus:'YES 2026-09-04T00:00:00.000Z',attributedRevenue:1500,responseAtRaw:'2026-09-01T00:00:00.000Z',rfqAtRaw:'2026-09-02T00:00:00.000Z',quoteAtRaw:'2026-09-03T00:00:00.000Z',loadAtRaw:'2026-09-04T00:00:00.000Z'}
+  ];
+  var result=ctx.v6AuraGenerateHandoffsCsvReport_('RUN-H1','2026-09-05',csvRowsInput);
+  assert.equal(result.status,'CSV_GENERATED');
+  assert.equal(result.fileName,'AURA_RETENTION_HANDOFFS_2026-09-05_RUN-H1.csv');
+  assert.equal(result.rowCount,5,'only RESPONDED/HANDED_TO_AM/RFQ/QUOTED/RETAINED rows are included');
+  var file=files[result.fileName];
+  assert(file,'Handoffs CSV must be created in the AM reports folder');
+  assert(!/@[a-z0-9.-]+\.[a-z]{2,}/i.test(file.content),'Handoffs CSV must never contain an email address');
+  var lines=file.content.split('\r\n');
+  assert.equal(lines[0],'runId,accountId,accountName,amOwner,campaignId,responseType,responseDate,handoffStatus,nextAction,rfqStatus,quoteStatus,loadStatus,attributedRevenue','exact 13 columns, in the exact specified order');
+  var rows=csvRows(file.content);
+  var includedIds=rows.map(function(r){return r.accountId;});
+  ['ACC-1','ACC-2','ACC-3','ACC-4','ACC-5'].forEach(function(id){assert(includedIds.indexOf(id)<0,id+' (ELIGIBLE/SUPPRESSED/CAMPAIGN_READY/ACTIVE/REVIEW_REQUIRED) must be excluded');});
+  ['ACC-6','ACC-7','ACC-8','ACC-9','ACC-10'].forEach(function(id){assert(includedIds.indexOf(id)>=0,id+' must be included');});
+  var retained=rows.filter(function(r){return r.accountId==='ACC-10';})[0];
+  assert.equal(retained.responseType,'RETAINED');
+  assert.equal(retained.responseDate,'2026-09-04T00:00:00.000Z','most recent of responseAt/rfqAt/quoteAt/loadAt');
+  assert.equal(retained.attributedRevenue,'1500');
+  console.log('retention report test 4b (Handoffs CSV: exact 13 columns, correct filter set, most-recent responseDate, no PII): PASS');
 })();
 
 // === Task 8C: run summary persistence + read-back ===========================
 
 (function runSummaryTest(){
   var ctx=makeContext({},{});
-  var written=ctx.v6AuraWriteRunSummary_('RUN-SUM-1','2026-09-04',{accountsEvaluated:5,detected:2,eligible:1,suppressed:3,reviewRequired:2,campaignReady:1,responded:0,handedToAM:0,rfqs:0,quotes:0,loads:0,attributedRevenue:0,csvDriveFileId:'FILE-1'});
+  var written=ctx.v6AuraWriteRunSummary_('RUN-SUM-1','2026-09-04',{accountsEvaluated:5,detected:2,eligible:1,suppressed:3,reviewRequired:2,campaignReady:1,responded:0,handedToAM:0,rfqs:0,quotes:0,loads:0,attributedRevenue:0,csvDriveFileId:'FILE-1',handoffsCsvDriveFileId:'FILE-2'});
   assert.equal(written.runId,'RUN-SUM-1');
   var readBack=ctx.v6AuraRetentionRunSummary_({runId:'RUN-SUM-1'});
   assert.equal(readBack.accountsEvaluated,5);
   assert.equal(readBack.csvDriveFileId,'FILE-1');
+  assert.equal(readBack.handoffsCsvDriveFileId,'FILE-2');
   var notFound=ctx.v6AuraRetentionRunSummary_({runId:'RUN-NONE'});
   assert.equal(notFound.status,'NOT FOUND');
   console.log('retention report test 5 (run summary write + read-back, unknown runId is NOT FOUND): PASS');
@@ -264,11 +326,13 @@ function csvRows(csvText){
   assert.equal(result.status,'CYCLE_COMPLETE');
   assert(result.runId);
   assert(result.csvDriveFileId);
+  assert(result.handoffsCsvDriveFileId,'cycle must also produce the Handoffs CSV file id');
   assert(tables.MKT_RETENTION_RUN_SUMMARY.length===1);
   assert.equal(tables.MKT_RETENTION_RUN_SUMMARY[0].runId,result.runId);
   assert.equal(tables.MKT_RETENTION_RUN_SUMMARY[0].csvDriveFileId,result.csvDriveFileId);
-  assert.equal(Object.keys(files).length,1);
-  console.log('retention report test 7 (run cycle: FRESH source produces CSV + persisted summary): PASS');
+  assert.equal(tables.MKT_RETENTION_RUN_SUMMARY[0].handoffsCsvDriveFileId,result.handoffsCsvDriveFileId);
+  assert.equal(Object.keys(files).length,2,'exactly one AM CSV + one Handoffs CSV per cycle');
+  console.log('retention report test 7 (run cycle: FRESH source produces AM CSV + Handoffs CSV + persisted summary): PASS');
 })();
 
 // Router-agnostic check: passes whether routeMarketingV6_ is the legacy map literal
