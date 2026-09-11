@@ -1,6 +1,6 @@
 # Retention V1 — Progress
 
-Branch: `retention/v1-am-activity-join` (pushed to `origin`).
+Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
 ## Pass 4 — Canonical ID Bridge fix, data-freshness gate, first Retention pilot + AM CSV report
 

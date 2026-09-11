@@ -1,6 +1,6 @@
 # Retention V1 Runbook
 
-Follows the same deployment pattern as `backend/apps-script-v6/README_INSTALL_V6.md`. This branch (`retention/v1-am-activity-join`) only adds/edits `.gs` files inside `backend/apps-script-v6/`; nothing here changes the deployment mechanics, the token validation, the JSONP wrapper, or the existing Web App deployment.
+Follows the same deployment pattern as `backend/apps-script-v6/README_INSTALL_V6.md`. This branch (`retention/v1-aura-integration-20260911`) only adds/edits `.gs` files inside `backend/apps-script-v6/`; nothing here changes the deployment mechanics, the token validation, the JSONP wrapper, or the existing Web App deployment.
 
 **The exact one-time deployment checklist now lives in `docs/AURA_DEPLOYMENT.md`.** This file keeps the router-action reference and the current blocked-state statement; follow `AURA_DEPLOYMENT.md` step by step to deploy.
 

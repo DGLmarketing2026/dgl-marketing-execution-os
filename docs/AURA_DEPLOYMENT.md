@@ -4,7 +4,7 @@ This is the exact, one-time checklist to take Retention from `AURA_BLOCKED_ONLY_
 
 ## 0. What you are deploying
 
-Ten `.gs` files, all inside `backend/apps-script-v6/`, on branch `retention/v1-am-activity-join`:
+Ten `.gs` files, all inside `backend/apps-script-v6/`, on branch `retention/v1-aura-integration-20260911`:
 
 | File | Status |
 |---|---|
@@ -22,9 +22,15 @@ Ten `.gs` files, all inside `backend/apps-script-v6/`, on branch `retention/v1-a
 
 No customer/contact PII, credentials, account lists, quotes, loads or revenue snapshots are in any of these files — they are code only, reading/writing table names and safe aggregate fields, exactly like every other file already in this pack. The one generated artifact with real account-level detail, the AM CSV report, is written to private Drive at runtime — it is never committed to this repository.
 
+### Complete file set required for the Retention dry run (first real deployment)
+
+The table above is the delta since the prior AURA pass. For a first real deployment, the full self-consistent set `v6AuraRunRetentionCycle_` depends on, transitively, is these 18 files (all of `backend/apps-script-v6/*.gs` **except** `MarketingV6AcquisitionEngine.gs` and `MarketingV6AcquisitionWordPress.gs`, which Retention never calls and the router resolves lazily — safe to omit for this deployment):
+
+`MarketingV6ReportIngestion.gs`, `MarketingV6RouterExtension.gs`, `MarketingV6Pipeline.gs`, `MarketingV6ContactIngestion.gs`, `MarketingV6SchemaMigration.gs`, `MarketingV6AuraBridge.gs`, `MarketingV6ResponseEvents.gs`, `MarketingV6CommercialOutcomes.gs`, `MarketingV6CanonicalIdentity.gs`, `MarketingV6DataFreshness.gs`, `MarketingV6RetentionReport.gs`, `MarketingV6OpportunityEngine.gs`, `MarketingV6FrequencyControl.gs`, `MarketingV6RecipientResolution.gs`, `MarketingV6ExecutionEngine.gs`, `MarketingV6DriveArchive.gs`, `MarketingV6CopyUsage.gs`, `MarketingV6CreativeUsage.gs`.
+
 ## 1. Copy the files (one-time)
 
-Copy all ten files above into the existing private Apps Script project (the one behind the current V6.6 Web App deployment), preserving filenames exactly. Do not rename, do not split, do not create a new project. Save the project.
+Copy the 18 files above into the existing private Apps Script project (the one behind the current V6.6 Web App deployment), preserving filenames exactly. Do not rename, do not split, do not create a new project. Save the project.
 
 ## 2. Verify and run once
 

@@ -13,7 +13,7 @@ NOVA / SALESFORCE -> AM PLATFORM / AM INTELLIGENCE -> AURA -> MARKETING OS
 
 AURA (the interpretive layer producing the detection rules in this document) must never classify a signal that requires Account Management context from NOVA-only fields alone, skipping AM. In this codebase, `CUENTAS` is AM Intelligence output (ownership, bucket, Chatter/commercial activity, relationship status), not a generic NOVA export — it is the required upstream gate for Retention detection, not optional enrichment. A `MIGRACION_CAIDAS` (NOVA) candidate with no corresponding `CUENTAS` (AM Intelligence) record is held (`SUPPRESSED` / `AM CONTEXT REQUIRED`), never auto-advanced to `DETECTED` on NOVA fields alone — see the Detect section and `RETENTION_V1_DATA_CONTRACT.md`.
 
-All line references are to `backend/apps-script-v6/` in this repo, as of this branch (`retention/v1-am-activity-join`).
+All line references are to `backend/apps-script-v6/` in this repo, as of this branch (`retention/v1-aura-integration-20260911`).
 
 ## 0. Data freshness gate (new, fail-closed)
 
