@@ -2,6 +2,75 @@
 
 Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
+## Pass 5 — Single-shot bootstrap, no-hardcoded-Drive-folder, Handoffs CSV
+
+Goal: remove every remaining manual one-time setup step (tab creation, Drive folder creation, folder-ID paste) and replace it with one idempotent function, `v6AuraBootstrapAndRun_()`, so the only human action left is: copy files, save, run it once, accept the Google permissions prompt. Also adds a second, AM-actionable CSV (Handoffs) alongside the existing full AM CSV, reusing the same join instead of rebuilding it. Real `clasp`/deployment access remains unavailable from this environment (confirmed by the user beforehand, not re-verified here) — no `clasp login`/`clasp push`/deployment action of any kind was attempted in this pass.
+
+### Task 1 — `v6AuraBootstrapAndRun_()` (new file, new function)
+
+New `backend/apps-script-v6/MarketingV6AuraBootstrap.gs`. Runs, in order, idempotently: (1) verify `MKT_V6_DATA_HUB_ID`/`MKT_V6_REPORT_SOURCE_ID` are readable via `SpreadsheetApp.openById`, fail closed to `{status:'BLOCKED_DATA_HUB_ACCESS', error}` immediately if not, before touching anything else; (2) `v6AuraEnsureRunSummarySheet_()` (Task 2); (3-4) `v6AuditContactRecipientSchema_()`/`v6EnsureContactRecipientSchema_()` (unchanged); (5) record `MKT_ACCOUNTS`/`MKT_CONTACTS_SECURE` row counts as informational, never fatal (confirmed by direct read that these tables already have real data in this deployment, per the user's instruction — not assumed empty); (6) `v6AuraAuditCanonicalIds_()`; (7) `v6AuraCheckReportFreshness_()`; (8) trivial confirmation that `v6BuildRetentionOpportunities_` (the `AM CONTEXT REQUIRED` gate's home function) is present, without touching or re-verifying the gate's internal logic; (9) `v6AuraResolveReportsFolder_()` (Task 2); (10) `v6InstallOpportunityRefreshTrigger_()` (already dedupes by handler name, untouched); (11) conditional contact ingestion (Task 4); (12) `STALE` -> stop, return `BOOTSTRAP_BLOCKED_STALE_DATA` with everything accumulated, `retentionCycle:null`; (13) `FRESH` -> `v6AuraRunRetentionCycle_()`; (14) one consolidated result object. Registered as `v6AuraBootstrapAndRun` in the router.
+
+### Task 2 — No hardcoded Drive folder ID; one auto-creatable sheet
+
+`backend/apps-script-v6/MarketingV6RetentionReport.gs`: removed the placeholder constant `MKT_V6_AM_REPORTS_FOLDER_ID='REPLACE_WITH_REAL_AM_REPORTS_DRIVE_FOLDER_ID'`. New `v6AuraResolveReportsFolder_()`: reuses the folder ID already stored in `PropertiesService.getScriptProperties()` under `AURA_AM_REPORT_FOLDER_ID` if `DriveApp.getFolderById` still opens it; otherwise looks up by the fixed name `DGL_AURA_AM_REPORTS` and re-saves its ID; otherwise creates it once and saves the new ID. The folder ID is never hardcoded in source and never written to a file this repo tracks — only to Script Properties (private per Apps Script project). `v6AuraGenerateAmCsvReport_`/`v6AuraGenerateHandoffsCsvReport_` both call it instead of the removed constant.
+
+`backend/apps-script-v6/MarketingV6SchemaMigration.gs`: new `v6AuraEnsureRunSummarySheet_()` — creates the `MKT_RETENTION_RUN_SUMMARY` tab (with the schema's exact header row) if `v6Sheet_('MKT_RETENTION_RUN_SUMMARY')` is null, using `SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).insertSheet(...)` (same data hub ID `v6Sheet_` already uses, not a second lookup mechanism); leaves it untouched if it already exists (no data loss, no header rewrite — the pre-existing additive `v6EnsureContactRecipientSchema_()` still handles appending any further missing columns to it afterward, unchanged). This is deliberately the **only** table in `MKT_V6_CONTACT_RECIPIENT_SCHEMA` that auto-creates its own tab; every other table must keep failing loudly (`SCHEMA MIGRATION REQUIRED: <name> NOT FOUND`) if its tab is missing — not generalized to any other table, per the explicit instruction.
+
+`docs/AURA_DEPLOYMENT.md` rewritten: the old manual steps ("create a new, empty tab named exactly...", "create one new, private Drive folder... paste its real folder ID into `MKT_V6_AM_REPORTS_FOLDER_ID`...") are gone, replaced by the single "copy files -> run `v6AuraBootstrapAndRun_()` once -> accept permissions" flow.
+
+### Task 3 — AM CONTEXT REQUIRED / priority / suppression / scope / recipients / governance — confirmed intact, not touched
+
+`v6RetentionAmActivityReason_`, `v6ApplyPrioritySuppression_`, `v6AuraAutoBuildRetentionScopes_`, `v6ResolveRecipients_`, `v6FrequencyStatus_` were not edited in this pass. `tests/v6-retention-am-activity.test.js` (7/7) and `tests/v6-aura-bridge.test.js` (all cases) re-run unmodified and still pass.
+
+### Task 4 — Conditional contact ingestion, no invented source
+
+Confirmed by grep before writing this pass: `v6FetchAuthoritativeContactsFromSource_` does not exist anywhere in `backend/apps-script-v6/`. The bootstrap checks `typeof v6FetchAuthoritativeContactsFromSource_ === 'function'`; if absent (today, always), records `contactIngestion:'SOURCE_NOT_CONFIGURED'` and proceeds — no Salesforce/NOVA contact-pull integration was fabricated. If such a hook is ever added elsewhere under this exact name, the bootstrap calls it and feeds its result straight into the existing, unchanged `v6IngestAuthoritativeContacts_`.
+
+### Task 5 — Handoffs CSV (new, additive to the existing AM CSV)
+
+`v6AuraGenerateAmCsvReport_` refactored (same public signature, same return contract, plus one new additive field) into a pure row-builder, `v6AuraBuildAmCsvRows_(runId, asOfDate)`, and a thin Drive-writing wrapper — so both the full AM CSV and the new `v6AuraGenerateHandoffsCsvReport_(runId, asOfDate, csvRows)` reuse the exact same join/rows without reading `MKT_OPPORTUNITIES`/`MKT_ACCOUNT_PIPELINE`/`MKT_SCOPE_ACCOUNTS` twice per cycle. Handoffs CSV filters to `auraDecision` in `['RESPONDED','HANDED_TO_AM','RFQ','QUOTED','RETAINED']`, exactly 13 columns (`runId, accountId, accountName, amOwner, campaignId, responseType, responseDate, handoffStatus, nextAction, rfqStatus, quoteStatus, loadStatus, attributedRevenue`), `responseType` = the row's `auraDecision`, `responseDate` = the most recent of `responseAt/rfqAt/quoteAt/loadAt` (new `v6AuraMostRecentDate_` helper), filename `AURA_RETENTION_HANDOFFS_<asOfDate>_<runId>.csv`, same resolved folder. `v6AuraRunRetentionCycle_` now generates both CSVs every cycle and records both `csvDriveFileId` and `handoffsCsvDriveFileId` on the persisted run summary (`handoffsCsvDriveFileId` added to the `MKT_RETENTION_RUN_SUMMARY` schema, additive).
+
+### Task 6 — Scheduler — confirmed, not reconstructed
+
+`v6ScheduledOpportunityRefresh_` (`MarketingV6ReportIngestion.gs`) still calls `v6AuraRunRetentionCycle_()` directly, unchanged from Pass 4 — **not** `v6AuraBootstrapAndRun_()`. The bootstrap's folder/sheet/trigger-creation is explicitly a one-time install concern; the recurring six-hour cycle stays the existing lightweight cycle. Documented explicitly in `docs/AURA_DEPLOYMENT.md` section 3 and `docs/RETENTION_V1_ARCHITECTURE.md` section 15.
+
+### Task 7 — Response events / attribution — confirmed, not touched
+
+`MarketingV6ResponseEvents.gs`/`MarketingV6CommercialOutcomes.gs` untouched. `tests/v6-response-events.test.js` and `tests/v6-commercial-outcomes.test.js` re-run unmodified, still pass.
+
+### Task 8 — Production/email — confirmed
+
+`MKT_V6_PROVIDER_READY` remains `false`, untouched by every file in this pass. No new code path simulates or performs a real send.
+
+### Task 9 — Tests
+
+New `tests/v6-aura-bootstrap.test.js` (10 cases: Data Hub inaccessible -> `BLOCKED_DATA_HUB_ACCESS` immediately with nothing else attempted; running bootstrap twice never duplicates the Drive folder; stored-but-deleted folder id falls back to name lookup then create, updating the property either way; `MKT_RETENTION_RUN_SUMMARY` auto-creates with exact schema headers when missing; already-existing `MKT_RETENTION_RUN_SUMMARY` data is left untouched; `STALE` -> `BOOTSTRAP_BLOCKED_STALE_DATA`, no cycle/CSV; `FRESH` -> full cycle runs, `retentionCycle` populated with both CSV ids; `contactIngestion` reports `SOURCE_NOT_CONFIGURED`; trigger install/reinstall is idempotent across two bootstrap runs; router exposes `v6AuraBootstrapAndRun`). Exercises the real (not re-mocked) `v6Sheet_`/`v6Rows_`/`v6UpsertByKey_`/`v6WriteOpportunities_` engines against a generic in-memory sheet mock, rather than re-stubbing their contracts.
+
+`tests/v6-retention-report.test.js` extended: folder-resolution-aware `fakeDriveApp`/`fakePropertiesService`, a new Handoffs CSV test (exact 13 columns, correct inclusion/exclusion set across all 10 `auraDecision` values, most-recent `responseDate`, no PII), and updated assertions on `v6AuraGenerateAmCsvReport_`'s additive `csvRows` field and `v6AuraRunRetentionCycle_`'s new `handoffsCsvDriveFileId` / two-CSV-files-per-cycle contract.
+
+New `tests/v6-no-pii-in-repo.test.js` — scans (via `fs`, not `git`) every `.gs`/`.md`/`.json` file directly inside `backend/apps-script-v6/`, `docs/`, and the repo root for email-address patterns; fails on anything outside a minimal allowlist (the single pre-existing synthetic QA fixture `qa-synthetic@dglus.com`, already covered by `tests/acquisition-wordpress-automation.test.js`'s own no-PII check) and separately asserts the user's own commit-authorship email address never appears in tracked file content (it only lives in git commit authorship metadata, which this scan does not read).
+
+Full suite: `node --test tests/*.test.js` -> **33 files, 33 pass, 0 fail** (31 pre-existing + 2 new this pass: `v6-aura-bootstrap.test.js`, `v6-no-pii-in-repo.test.js`).
+
+### Files changed / added this pass
+
+- Added: `backend/apps-script-v6/MarketingV6AuraBootstrap.gs`
+- Modified: `backend/apps-script-v6/MarketingV6RetentionReport.gs` (folder resolution, `v6AuraBuildAmCsvRows_` extraction, `v6AuraGenerateHandoffsCsvReport_`, `v6AuraMostRecentDate_`, `v6AuraRunRetentionCycle_` produces both CSVs), `backend/apps-script-v6/MarketingV6SchemaMigration.gs` (`v6AuraEnsureRunSummarySheet_`, `handoffsCsvDriveFileId` schema field), `backend/apps-script-v6/MarketingV6RouterExtension.gs` (`v6AuraBootstrapAndRun` route)
+- Added tests: `tests/v6-aura-bootstrap.test.js`, `tests/v6-no-pii-in-repo.test.js`
+- Modified tests: `tests/v6-retention-report.test.js`
+- Docs updated: `docs/AURA_DEPLOYMENT.md`, `docs/RETENTION_V1_ARCHITECTURE.md` (new sections 14-15), `docs/RETENTION_V1_RUNBOOK.md`, this file, `tests.json`
+
+### What this pass deliberately does NOT do
+
+- Does not attempt any `clasp`/deployment action (`clasp login`, `clasp push`, or any real Apps Script deployment) — confirmed by the user beforehand to be broken/unreachable from this environment; not re-verified, not retried.
+- Does not touch `v6RetentionAmActivityReason_`, `v6ApplyPrioritySuppression_`, `v6AuraAutoBuildRetentionScopes_`, `v6ResolveRecipients_`, `v6FrequencyStatus_`, `MarketingV6ResponseEvents.gs`, `MarketingV6CommercialOutcomes.gs`, or `MKT_V6_PROVIDER_READY`.
+- Does not invent a Salesforce/NOVA contact-pull integration (`v6FetchAuthoritativeContactsFromSource_` stays undefined, conditionally called only if it is ever added elsewhere).
+- Does not change what the six-hour recurring trigger calls (`v6ScheduledOpportunityRefresh_` still calls `v6AuraRunRetentionCycle_()`, not the bootstrap).
+
+### Final status after this pass
+
+Every remaining one-time manual setup step (tab creation, Drive folder creation, pasting a real folder ID into source) is now automated by `v6AuraBootstrapAndRun_()`. The only manual action left for a first real deployment is: copy the 19 files, save, run `v6AuraBootstrapAndRun_()` once, accept the Google permissions prompt. Real deployment/`clasp` access remains the only blocker, and remains outside this codebase's or this environment's control.
+
 ## Pass 4 — Canonical ID Bridge fix, data-freshness gate, first Retention pilot + AM CSV report
 
 Goal: fix a confirmed real bug in Salesforce ID population, add a fail-closed data-freshness gate, and produce the first real AM-facing Retention pilot (dry-run metrics + CSV report + persisted run summary), wired into the existing 6-hour scheduler.

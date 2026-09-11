@@ -1,55 +1,66 @@
 # AURA Deployment — one-time setup
 
-This is the exact, one-time checklist to take Retention from `AURA_BLOCKED_ONLY_BY_DEPLOYMENT` to running automatically in production. Nothing in this document is optional cleanup — each numbered step removes one specific, named blocker. After steps 1–3 are done, Retention detection, suppression, campaign-scope build, the AM CSV report and the persisted run summary all run automatically on the existing 6-hour trigger, with no manual account list and no manual export at any point. Step 4 is what makes real-time response capture and attribution real; step 5 is what makes the report *source itself* self-refreshing; step 6 is what makes batch attribution resolve real accounts. All three depend on systems or decisions outside this repository that only DGL can wire.
+This is the exact, one-time checklist to take Retention from `AURA_BLOCKED_ONLY_BY_DEPLOYMENT` to running automatically in production. Steps 1–2 are now a single action: copy the files, save, and run `v6AuraBootstrapAndRun_()` once. There is no more manual tab creation, no manual folder creation, and no folder-ID constant to paste anywhere — the bootstrap does all of it, idempotently (safe to re-run if you are ever unsure whether it already ran). After that one run, Retention detection, suppression, campaign-scope build, the AM CSV report, the AM Handoffs CSV, and the persisted run summary all run automatically on the existing 6-hour trigger, with no manual account list and no manual export at any point. Step 4 is what makes real-time response capture and attribution real; step 5 is what makes the report *source itself* self-refreshing; step 6 is what makes batch attribution resolve real accounts. All three depend on systems or decisions outside this repository that only DGL can wire.
 
 ## 0. What you are deploying
 
-Ten `.gs` files, all inside `backend/apps-script-v6/`, on branch `retention/v1-aura-integration-20260911`:
+Twelve `.gs` files, all inside `backend/apps-script-v6/`, on branch `retention/v1-aura-integration-20260911`:
 
 | File | Status |
 |---|---|
 | `MarketingV6ReportIngestion.gs` | modified — `CUENTAS` (AM Intelligence) join, `AM CONTEXT REQUIRED` gate, additive `tierDestino` field on Retention rows, `v6ScheduledOpportunityRefresh_` now calls `v6AuraRunRetentionCycle_` |
-| `MarketingV6RouterExtension.gs` | modified — 11 new route entries total across this branch (7 from the earlier AURA Bridge pass + `v6AuraAuditCanonicalIds`, `v6AuraRetentionDryRun`, `v6AuraRunRetentionCycle`, `v6AuraRetentionRunSummary` this pass) |
+| `MarketingV6RouterExtension.gs` | modified — new route entries across this branch, including `v6AuraAuditCanonicalIds`, `v6AuraRetentionDryRun`, `v6AuraRunRetentionCycle`, `v6AuraRetentionRunSummary`, and `v6AuraBootstrapAndRun` (this pass) |
 | `MarketingV6Pipeline.gs` | modified — revenue aggregates in `v6PipelineSummary_` |
 | `MarketingV6ContactIngestion.gs` | modified — Canonical ID Bridge fix: `v6ContactIsSalesforceSource_` replaces the exact-match `source==='SALESFORCE'` gate; new additive `canonicalSalesforceIdStatus` field |
-| `MarketingV6SchemaMigration.gs` | modified — `canonicalSalesforceIdStatus` added to `MKT_ACCOUNTS`/`MKT_CONTACTS_SECURE`; new `MKT_RETENTION_RUN_SUMMARY` schema entry |
+| `MarketingV6SchemaMigration.gs` | modified — `canonicalSalesforceIdStatus` added to `MKT_ACCOUNTS`/`MKT_CONTACTS_SECURE`; `handoffsCsvDriveFileId` added to `MKT_RETENTION_RUN_SUMMARY`; new `v6AuraEnsureRunSummarySheet_()` (this pass — the **only** table in this schema that auto-creates its own tab) |
 | `MarketingV6AuraBridge.gs` | modified — `v6AuraEvaluateRetention_` now calls the freshness gate before any refresh/scope-build |
 | `MarketingV6ResponseEvents.gs` | new (earlier pass) — event classifier (`REPLY`/`RFQ`/`QUOTE`/`LOAD`/`BOUNCE`/`UNSUBSCRIBE`/`CLICK`) |
 | `MarketingV6CommercialOutcomes.gs` | new (earlier pass) — batch attribution ingestion from `LOADS_ORIGEN_LQ` |
-| `MarketingV6CanonicalIdentity.gs` | new (this pass) — `v6AuraAuditCanonicalIds_()`, read-only safe-aggregate audit |
-| `MarketingV6DataFreshness.gs` | new (this pass) — `v6AuraCheckReportFreshness_()`, fail-closed staleness gate |
-| `MarketingV6RetentionReport.gs` | new (this pass) — pilot dry run, AM decision mapper, AM CSV report, persisted run summary, single cycle orchestrator |
+| `MarketingV6CanonicalIdentity.gs` | new (earlier pass) — `v6AuraAuditCanonicalIds_()`, read-only safe-aggregate audit |
+| `MarketingV6DataFreshness.gs` | new (earlier pass) — `v6AuraCheckReportFreshness_()`, fail-closed staleness gate |
+| `MarketingV6RetentionReport.gs` | modified (this pass) — pilot dry run, AM decision mapper, AM CSV report, new **Handoffs CSV** (`v6AuraGenerateHandoffsCsvReport_`), persisted run summary, single cycle orchestrator; the previous hardcoded-placeholder `MKT_V6_AM_REPORTS_FOLDER_ID` constant is gone, replaced by runtime-resolved `v6AuraResolveReportsFolder_()` |
+| `MarketingV6AuraBootstrap.gs` | new (this pass) — `v6AuraBootstrapAndRun_()`, the single one-time install-and-run entry point |
 
 No customer/contact PII, credentials, account lists, quotes, loads or revenue snapshots are in any of these files — they are code only, reading/writing table names and safe aggregate fields, exactly like every other file already in this pack. The one generated artifact with real account-level detail, the AM CSV report, is written to private Drive at runtime — it is never committed to this repository.
 
-### Complete file set required for the Retention dry run (first real deployment)
+### Complete file set required for the Retention cycle (first real deployment)
 
-The table above is the delta since the prior AURA pass. For a first real deployment, the full self-consistent set `v6AuraRunRetentionCycle_` depends on, transitively, is these 18 files (all of `backend/apps-script-v6/*.gs` **except** `MarketingV6AcquisitionEngine.gs` and `MarketingV6AcquisitionWordPress.gs`, which Retention never calls and the router resolves lazily — safe to omit for this deployment):
+The table above is the delta since the prior AURA pass. For a first real deployment, the full self-consistent set `v6AuraBootstrapAndRun_`/`v6AuraRunRetentionCycle_` depends on, transitively, is these 19 files (all of `backend/apps-script-v6/*.gs` **except** `MarketingV6AcquisitionEngine.gs` and `MarketingV6AcquisitionWordPress.gs`, which Retention never calls and the router resolves lazily — safe to omit for this deployment):
 
-`MarketingV6ReportIngestion.gs`, `MarketingV6RouterExtension.gs`, `MarketingV6Pipeline.gs`, `MarketingV6ContactIngestion.gs`, `MarketingV6SchemaMigration.gs`, `MarketingV6AuraBridge.gs`, `MarketingV6ResponseEvents.gs`, `MarketingV6CommercialOutcomes.gs`, `MarketingV6CanonicalIdentity.gs`, `MarketingV6DataFreshness.gs`, `MarketingV6RetentionReport.gs`, `MarketingV6OpportunityEngine.gs`, `MarketingV6FrequencyControl.gs`, `MarketingV6RecipientResolution.gs`, `MarketingV6ExecutionEngine.gs`, `MarketingV6DriveArchive.gs`, `MarketingV6CopyUsage.gs`, `MarketingV6CreativeUsage.gs`.
+`MarketingV6ReportIngestion.gs`, `MarketingV6RouterExtension.gs`, `MarketingV6Pipeline.gs`, `MarketingV6ContactIngestion.gs`, `MarketingV6SchemaMigration.gs`, `MarketingV6AuraBridge.gs`, `MarketingV6ResponseEvents.gs`, `MarketingV6CommercialOutcomes.gs`, `MarketingV6CanonicalIdentity.gs`, `MarketingV6DataFreshness.gs`, `MarketingV6RetentionReport.gs`, `MarketingV6AuraBootstrap.gs`, `MarketingV6OpportunityEngine.gs`, `MarketingV6FrequencyControl.gs`, `MarketingV6RecipientResolution.gs`, `MarketingV6ExecutionEngine.gs`, `MarketingV6DriveArchive.gs`, `MarketingV6CopyUsage.gs`, `MarketingV6CreativeUsage.gs`.
 
 ## 1. Copy the files (one-time)
 
-Copy the 18 files above into the existing private Apps Script project (the one behind the current V6.6 Web App deployment), preserving filenames exactly. Do not rename, do not split, do not create a new project. Save the project.
+Copy the 19 files above into the existing private Apps Script project (the one behind the current V6.6 Web App deployment), preserving filenames exactly. Do not rename, do not split, do not create a new project. Save the project.
 
-## 2. Verify and run once
+## 2. Run the bootstrap once
 
-1. **Canonical ID Bridge schema:** run `v6EnsureContactRecipientSchema_()` (unchanged, pre-existing engine) once. This branch added `canonicalSalesforceIdStatus` to the required-columns list for `MKT_ACCOUNTS` and `MKT_CONTACTS_SECURE` — this step appends that header to both real sheets (append-only, never deletes/renames/moves existing data). Confirm the result reports `SCHEMA READY`.
-2. **New table, one-time manual tab creation:** create a new, empty tab named exactly `MKT_RETENTION_RUN_SUMMARY` in the private Data Hub spreadsheet (this engine only appends columns to an existing sheet; it never creates a new tab). Then re-run `v6EnsureContactRecipientSchema_()` — it will append the `runId, asOfDate, accountsEvaluated, detected, eligible, suppressed, reviewRequired, campaignReady, responded, handedToAM, rfqs, quotes, loads, attributedRevenue, csvDriveFileId, createdAt` headers to that new tab. Confirm `SCHEMA READY` again.
-3. **New Drive folder for AM reports:** create one new, private Drive folder (separate from the existing `MKT_V6_ARCHIVE` folder set, which is for campaign-execution artifacts, not AM reporting) and paste its real folder ID into `MKT_V6_AM_REPORTS_FOLDER_ID` in `MarketingV6RetentionReport.gs`, replacing the `'REPLACE_WITH_REAL_AM_REPORTS_DRIVE_FOLDER_ID'` placeholder. This is a one-time, DGL-owned step — this codebase cannot invent a real folder ID.
-4. **Re-sync existing accounts/contacts (retroactive fix):** if `v6IngestAuthoritativeContacts_` has already been run against real Salesforce data before this branch, re-run it once against the same extract now that `v6ContactIsSalesforceSource_` correctly recognizes `externalSystem` values like `'SALESFORCE_EXPORT'`. This populates `salesforceAccountId`/`salesforceContactId` (and `canonicalSalesforceIdStatus:'RESOLVED'`) on rows that were previously silently left with those fields empty. Run `v6AuraAuditCanonicalIds_()` before and after to see the `RESOLVED` count increase.
-5. Run `v6AuraCheckReportFreshness_()` once manually and confirm it returns `status:'FRESH'` (or, if `STALE`, understand why before proceeding — see section 5 below, "Automate the upstream report-source refresh").
-6. Run `v6AuraRunRetentionCycle_()` once manually from the Apps Script editor (this supersedes running `v6AuraEvaluateRetention_()` alone as the verification step, since it also now includes the CSV/summary; `v6AuraEvaluateRetention_()` is still safe to call directly and unchanged in its own contract). Confirm the returned object has:
-   - `status: 'CYCLE_COMPLETE'` (or `'BLOCKED_STALE_DATA'` if the report source is stale — see section 5)
-   - `metrics.detected` / `metrics.suppressed` / `metrics.campaignReady` reflecting however many DETECTED Retention accounts exist in the current `MIGRACION_CAIDAS`/`CUENTAS` snapshot (all zero is valid and expected if there are none right now)
-   - `csvDriveFileId` pointing at a real file inside the folder configured in step 3
-7. Confirm `MKT_CAMPAIGN_SCOPES` / `MKT_SCOPE_ACCOUNTS` now have rows whose `scopeId` contains `-RETENTION-` for any DETECTED accounts found in step 6, and that `MKT_RETENTION_RUN_SUMMARY` now has one row for the `runId` returned in step 6. This is the concrete, checkable proof that the full detect -> suppress -> scope -> CSV -> summary cycle ran end to end.
+There is nothing left to create by hand. No new tab, no new Drive folder, no folder-ID constant to paste anywhere. From the Apps Script editor, select `v6AuraBootstrapAndRun_` and run it once (or call it via the router as `{action:'v6AuraBootstrapAndRun', payload:{}}`). Accept the Google permissions prompt if it appears (Drive/Sheets scopes, first-run only). This single call does everything steps 2–3 used to require manually:
 
-## 3. (Re-)install the scheduler
+1. Verifies `MKT_V6_DATA_HUB_ID`/`MKT_V6_REPORT_SOURCE_ID` are readable — fails fast with `status:'BLOCKED_DATA_HUB_ACCESS'` if not, before touching anything else.
+2. Creates the `MKT_RETENTION_RUN_SUMMARY` tab (with the correct headers) if it does not already exist yet; leaves it untouched if it does (`v6AuraEnsureRunSummarySheet_`).
+3. Runs `v6AuditContactRecipientSchema_()`/`v6EnsureContactRecipientSchema_()` (unchanged engines) — appends any other missing columns, including `canonicalSalesforceIdStatus` on `MKT_ACCOUNTS`/`MKT_CONTACTS_SECURE` and `handoffsCsvDriveFileId` on `MKT_RETENTION_RUN_SUMMARY`, append-only, never touching existing data.
+4. Records `MKT_ACCOUNTS`/`MKT_CONTACTS_SECURE` row counts (informational only — an empty table is reported, not treated as fatal, since this pack does not assume they are empty).
+5. Runs `v6AuraAuditCanonicalIds_()` (safe RESOLVED/UNRESOLVED/MISSING aggregates).
+6. Runs `v6AuraCheckReportFreshness_()`.
+7. Confirms the `AM CONTEXT REQUIRED` gate's entry point (`v6BuildRetentionOpportunities_`) is present in the deployed code.
+8. Resolves (or creates, exactly once) the private `DGL_AURA_AM_REPORTS` Drive folder and remembers its ID in `PropertiesService` (`v6AuraResolveReportsFolder_`) — never a hardcoded ID, never written to this repo.
+9. Installs/reinstalls the six-hour opportunity-refresh trigger (`v6InstallOpportunityRefreshTrigger_`, already deduped by handler name — safe to run again on an existing deployment, never a second competing schedule).
+10. Checks for an optional `v6FetchAuthoritativeContactsFromSource_` hook (not present anywhere in this pack today) — if absent, records `contactIngestion:'SOURCE_NOT_CONFIGURED'` and continues; does not invent a Salesforce contact-pull integration.
+11. If the freshness check from step 6 is `STALE`, stops here and returns `status:'BOOTSTRAP_BLOCKED_STALE_DATA'` with everything gathered so far — no cycle, no CSV, no summary row are produced against stale data.
+12. If `FRESH`, runs the real first cycle (`v6AuraRunRetentionCycle_`) — detect -> suppress -> build scope -> AM CSV -> Handoffs CSV -> run summary — and returns `status:'BOOTSTRAP_COMPLETE'` with the cycle's result attached as `retentionCycle`.
 
-Run `v6InstallOpportunityRefreshTrigger_()` once. It is idempotent — it deletes and recreates only its own trigger by handler name (`v6ScheduledOpportunityRefresh_`), so running it again on an existing deployment does not create a second, competing schedule. From this point on, every 6 hours, Retention is freshness-checked, detected, suppressed, scoped, CSV-reported and summarized automatically with no manual list and no manual export — this is true immediately after this step, independent of steps 4–5 below (except that a `STALE` source will correctly cause that particular run to do nothing but report `BLOCKED_STALE_DATA`, until the source is refreshed — see section 5).
+Confirm the returned object's `retentionCycle.csvDriveFileId` and `retentionCycle.handoffsCsvDriveFileId` point at real files inside the folder from step 8, and that `MKT_RETENTION_RUN_SUMMARY` now has one row for `retentionCycle.runId`. This is the concrete, checkable proof that the full detect -> suppress -> scope -> CSV -> Handoffs CSV -> summary cycle ran end to end.
 
-Do not add any other trigger for Retention. A second trigger calling `v6RefreshOpportunitiesFromReports_`, `v6AuraEvaluateRetention_`, or `v6AuraRunRetentionCycle_` directly would race with this one and risk duplicate/overlapping writes to `MKT_OPPORTUNITIES` or duplicate CSV files for the same cycle.
+It is safe to run `v6AuraBootstrapAndRun_()` again later (e.g. after DGL wires steps 4–6 below) — every step it performs is idempotent: the second run reuses the same Drive folder (via the Script Property), leaves the already-created `MKT_RETENTION_RUN_SUMMARY` tab alone, and reinstalls the same single trigger rather than creating a second one.
+
+**Re-sync existing accounts/contacts (retroactive fix, separate manual step, only if needed):** if `v6IngestAuthoritativeContacts_` was already run against real Salesforce data *before* this branch, re-run it once against the same extract now that `v6ContactIsSalesforceSource_` correctly recognizes `externalSystem` values like `'SALESFORCE_EXPORT'`. This populates `salesforceAccountId`/`salesforceContactId` (and `canonicalSalesforceIdStatus:'RESOLVED'`) on rows that were previously silently left with those fields empty. Run `v6AuraAuditCanonicalIds_()` before and after to see the `RESOLVED` count increase.
+
+## 3. The recurring six-hour cycle is already wired, and is a different, lighter entry point
+
+`v6ScheduledOpportunityRefresh_()` — the handler the trigger installed in step 2.9 above actually calls every six hours — still calls `v6AuraRunRetentionCycle_()` directly, **not** `v6AuraBootstrapAndRun_()`. This is intentional: the bootstrap's folder/sheet/trigger-creation steps are a one-time install concern; repeating them every six hours would be wasted, redundant work. From the moment step 2 above completes, every 6 hours Retention is freshness-checked, detected, suppressed, scoped, CSV-reported (AM CSV + Handoffs CSV) and summarized automatically with no manual list and no manual export — independent of steps 4–5 below (except that a `STALE` source will correctly cause that particular run to do nothing but report `BLOCKED_STALE_DATA`, until the source is refreshed — see section 5).
+
+Do not add any other trigger for Retention. A second trigger calling `v6RefreshOpportunitiesFromReports_`, `v6AuraEvaluateRetention_`, `v6AuraRunRetentionCycle_`, or `v6AuraBootstrapAndRun_` directly would race with this one and risk duplicate/overlapping writes to `MKT_OPPORTUNITIES`, or duplicate CSV files, folders, or run-summary rows for the same cycle.
 
 ## 4. Connect real response/engagement events (required for account stop + AM handoff to fire on real customer activity)
 
@@ -103,7 +114,7 @@ Until one of these is wired, expect `v6AuraRunRetentionCycle_()` (and the six-ho
 
 ## 6. Populate the authoritative account/contact crosswalk and schedule batch attribution
 
-1. Run `v6IngestAuthoritativeContacts_` against a real Salesforce/authorized-source extract (unchanged, pre-existing function; the Canonical ID Bridge fix in this pass — step 2.4 above — means `salesforceAccountId`/`salesforceContactId` now populate correctly for `externalSystem` values like `'SALESFORCE_EXPORT'`, not just the bare literal `'SALESFORCE'`). Until `MKT_ACCOUNTS` has real rows with `salesforceAccountId`/`externalAccountId`, `v6IngestCommercialOutcomes_` will correctly report every row `unresolvedCount` and write nothing — this is fail-closed by design, not a bug.
+1. Run `v6IngestAuthoritativeContacts_` against a real Salesforce/authorized-source extract (unchanged, pre-existing function; the Canonical ID Bridge fix — see the "Re-sync existing accounts/contacts" note under step 2 above — means `salesforceAccountId`/`salesforceContactId` now populate correctly for `externalSystem` values like `'SALESFORCE_EXPORT'`, not just the bare literal `'SALESFORCE'`). Until `MKT_ACCOUNTS` has real rows with `salesforceAccountId`/`externalAccountId`, `v6IngestCommercialOutcomes_` will correctly report every row `unresolvedCount` and write nothing — this is fail-closed by design, not a bug.
 2. Once populated, schedule `v6IngestCommercialOutcomes_()` (e.g. `ScriptApp.newTrigger('v6IngestCommercialOutcomes_').timeBased()...`, daily or matching how often `LOADS_ORIGEN_LQ` refreshes). Not wired to a trigger yet in this pack, intentionally, so it isn't run against an empty crosswalk.
 
 ## 7. Optional, non-blocking
@@ -112,5 +123,5 @@ Extend `MKT_OPPORTUNITIES` headers with `amActivityBucket`, `amActivityTipoGesti
 
 ## Status after this checklist
 
-- After steps 1–3: Retention runs automatically end-to-end for freshness-gate -> detect -> suppress -> build scope -> AM CSV report -> persisted run summary, with no manual account list and no manual export, on the existing schedule. This is the part fully owned by this codebase and fully unit-tested.
+- After steps 1–2 (copy files, run `v6AuraBootstrapAndRun_()` once): Retention runs automatically end-to-end for freshness-gate -> detect -> suppress -> build scope -> AM CSV report -> Handoffs CSV -> persisted run summary, with no manual account list and no manual export, on the existing schedule (confirmed wired by step 3, and already true immediately once the bootstrap's one-time trigger install completes). This is the part fully owned by this codebase and fully unit-tested (`tests/v6-aura-bootstrap.test.js` plus the existing Retention test suite).
 - Steps 4–6 depend on systems and decisions outside this repository (which mail/CRM/ESP actually calls the response webhook, what refreshes the report source spreadsheet itself, when the Salesforce contact extract runs) — they cannot be completed or verified from a development environment with no credentials to the private Apps Script project, no network path to script.google.com, and no access to Salesforce/NOVA/Drive. That is the entire remaining blocker: **deployment and integration wiring, not missing code.**

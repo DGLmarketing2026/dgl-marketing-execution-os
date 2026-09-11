@@ -200,23 +200,72 @@
           "guarantee": "duplicate prevention / idempotency: repeated scheduler runs against the same data never accumulate duplicate rows in any of the three tables this cycle writes"
         }
       ]
+    },
+    {
+      "file": "tests/v6-aura-bootstrap.test.js",
+      "cases": [
+        {
+          "name": "MKT_V6_DATA_HUB_ID or MKT_V6_REPORT_SOURCE_ID not openable -> BLOCKED_DATA_HUB_ACCESS returned immediately, nothing else runs",
+          "guarantee": "fail-closed: the bootstrap never attempts schema/folder/trigger/cycle work against a Data Hub it cannot even open"
+        },
+        {
+          "name": "MKT_RETENTION_RUN_SUMMARY tab auto-creates with the exact schema header row when it does not exist",
+          "guarantee": "the one table this pack is allowed to auto-create does so correctly, with headers read from the real schema constant, not duplicated by hand"
+        },
+        {
+          "name": "MKT_RETENTION_RUN_SUMMARY already exists with a header + data row -> v6AuraEnsureRunSummarySheet_ leaves it untouched (ALREADY_EXISTS, no clear/rewrite)",
+          "guarantee": "auto-creation is one-way and non-destructive: existing run-history data is never cleared or overwritten by the bootstrap"
+        },
+        {
+          "name": "running v6AuraBootstrapAndRun_ twice reuses the same Drive folder id (via the Script Property) and never creates a second folder",
+          "guarantee": "idempotency: the one-time Drive folder resolution never duplicates infrastructure on a repeated bootstrap run"
+        },
+        {
+          "name": "stored AURA_AM_REPORT_FOLDER_ID no longer resolves (DriveApp.getFolderById throws) -> falls back to a by-name lookup, then to creating a new folder only if no by-name match exists either; the Script Property is updated in both fallback branches",
+          "guarantee": "folder resolution degrades gracefully instead of hard-failing when the previously remembered folder was deleted, and never silently keeps pointing at a dead id"
+        },
+        {
+          "name": "freshness STALE -> v6AuraBootstrapAndRun_ returns BOOTSTRAP_BLOCKED_STALE_DATA with retentionCycle:null, while every step upstream of the freshness gate (schema, canonical ids, folder, trigger) still ran and is reported",
+          "guarantee": "fail-closed: no Retention cycle, no CSV, no run summary row is ever produced against data already known to be stale, even though the rest of the one-time setup still completes"
+        },
+        {
+          "name": "freshness FRESH -> v6AuraBootstrapAndRun_ returns BOOTSTRAP_COMPLETE with retentionCycle.status='CYCLE_COMPLETE' and both csvDriveFileId/handoffsCsvDriveFileId populated",
+          "guarantee": "the bootstrap's single call performs the full detect -> suppress -> scope -> AM CSV -> Handoffs CSV -> run summary cycle on a fresh source, with no manual follow-up step"
+        },
+        {
+          "name": "v6FetchAuthoritativeContactsFromSource_ does not exist anywhere in this pack (confirmed by source grep and by its absence in the loaded runtime context) -> contactIngestion reports SOURCE_NOT_CONFIGURED, bootstrap proceeds normally",
+          "guarantee": "no Salesforce/NOVA contact-pull integration is fabricated; the optional hook stays conditional and inert until DGL adds a real one"
+        },
+        {
+          "name": "v6InstallOpportunityRefreshTrigger_ (called inside the bootstrap) installs exactly one trigger on the first run and still exactly one trigger after a second bootstrap run",
+          "guarantee": "duplicate prevention: repeated bootstrap runs never create a second, competing six-hour schedule"
+        },
+        {
+          "name": "router exposes v6AuraBootstrapAndRun -> v6AuraBootstrapAndRun_",
+          "guarantee": "the single one-time entry point is reachable the same way every other AURA route is, not a hidden/undocumented function"
+        }
+      ]
+    },
+    {
+      "file": "tests/v6-no-pii-in-repo.test.js",
+      "cases": [
+        {
+          "name": "every .gs/.md/.json file directly inside backend/apps-script-v6/, docs/, and the repo root contains zero email addresses outside a minimal, named allowlist (the single pre-existing synthetic QA fixture qa-synthetic@dglus.com)",
+          "guarantee": "GitHub stores code only: no customer/contact PII (email addresses) is ever committed to this public repo, checked by content scan (fs), not by trusting prior review alone"
+        },
+        {
+          "name": "the user's own commit-authorship email address never appears in the content of any tracked file in those locations",
+          "guarantee": "author identity belongs only in git commit authorship metadata, never inside a committed file"
+        }
+      ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full existing suite re-run after every change in this branch, most recently after the Canonical ID Bridge / data-freshness / Retention pilot pass (Pass 4).",
-    "totalFiles": 24,
-    "passed": 17,
-    "failed": 7,
-    "failedTestsAreProvenPreExisting": true,
-    "verification": "git stash of all Retention V1 changes + re-run reproduced the identical 7 failures on main before any change in this branch, confirming they are unrelated (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions). Re-verified after Pass 4: same 7 files, same failure reasons (e.g. v6-report-ingestion.test.js still fails on the same stale 'marketing-opportunity-engine-v6.js?v=20260827-1' assertion; v55-validation.test.js still fails on the same 'AUTOMATION READY' vs 'NEEDS CLARIFICATION' V5.5 assertion). Pass/fail counts moved only by the 3 new test files added in this pass (v6-canonical-identity.test.js, v6-data-freshness.test.js, v6-retention-report.test.js) plus 2 new cases appended to the existing v6-aura-bridge.test.js and a mock-table update in v6-schema-migration.test.js (21 files/14 passed -> 24 files/17 passed; 7 fail is unchanged throughout, same files, same reasons).",
-    "failedFiles": [
-      "tests/v55-audience-bridge.test.js",
-      "tests/v55-backend-adapter.test.js",
-      "tests/v55-legacy-status-visibility.test.js",
-      "tests/v55-validation.test.js",
-      "tests/v6-live-opportunities-ui.test.js",
-      "tests/v6-report-ingestion.test.js",
-      "tests/v6-validation.test.js"
-    ]
+    "description": "Full suite re-run after every change in this branch, most recently after the single-shot bootstrap / no-hardcoded-Drive-folder / Handoffs CSV pass (Pass 5). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) are no longer present in the current tree -- the full suite is green.",
+    "totalFiles": 33,
+    "passed": 33,
+    "failed": 0,
+    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of this pass's run (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in this pass touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (31 pre-existing files + 2 new this pass: tests/v6-aura-bootstrap.test.js, tests/v6-no-pii-in-repo.test.js).",
+    "failedFiles": []
   }
 }
