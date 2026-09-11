@@ -74,6 +74,8 @@ function routeMarketingV6_(action, payload) {
       return typeof v6AuraRunRetentionCycle_ === 'function' ? v6AuraRunRetentionCycle_(p) : v6RouteMissing_(a, 'v6AuraRunRetentionCycle_');
     case 'v6AuraRetentionRunSummary':
       return typeof v6AuraRetentionRunSummary_ === 'function' ? v6AuraRetentionRunSummary_(p) : v6RouteMissing_(a, 'v6AuraRetentionRunSummary_');
+    case 'v6AuraBootstrapAndRun':
+      return typeof v6AuraBootstrapAndRun_ === 'function' ? v6AuraBootstrapAndRun_(p) : v6RouteMissing_(a, 'v6AuraBootstrapAndRun_');
     case 'v6DeploymentAudit':
       return typeof v6DeploymentAudit_ === 'function' ? v6DeploymentAudit_(p) : { status: 'NOT AVAILABLE' };
     case 'v6AcqSetup':
