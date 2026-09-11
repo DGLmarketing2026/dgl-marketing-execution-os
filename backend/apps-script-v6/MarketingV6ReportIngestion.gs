@@ -225,4 +225,14 @@ function v6InstallOpportunityRefreshTrigger_(){
 // competing trigger. Requires MarketingV6AuraBridge.gs, MarketingV6DataFreshness.gs and
 // MarketingV6RetentionReport.gs to be present in the same Apps Script project (see
 // docs/AURA_DEPLOYMENT.md).
-function v6ScheduledOpportunityRefresh_(){return v6AuraRunRetentionCycle_();}
+//
+// Root-cause fix (production incident): v6AuraRunRetentionCycle_ assumes
+// MKT_RETENTION_RUN_SUMMARY, the AM-reports Drive folder and full schema already exist --
+// true only after v6AuraBootstrapAndRun_ (MarketingV6AuraBootstrap.gs) has run at least
+// once. No human step is guaranteed to run the bootstrap manually before this trigger next
+// fires, so this now calls the bootstrap instead: it is idempotent (safe every 6 hours
+// forever -- sheet/folder/trigger reuse, never duplicated), self-heals anything missing,
+// and still ends by running the exact same v6AuraRunRetentionCycle_ once the freshness gate
+// allows it. This makes the scheduled trigger self-sufficient with zero manual bootstrap
+// step ever required.
+function v6ScheduledOpportunityRefresh_(){return v6AuraBootstrapAndRun_();}
