@@ -171,6 +171,12 @@ function seedRequiredSheets(ctx,extraOpportunityHeaders){
     MKT_SCOPE_ACCOUNTS:new FakeSheet([schema.MKT_SCOPE_ACCOUNTS]),
     MKT_EXCLUSIONS:new FakeSheet([schema.MKT_EXCLUSIONS]),
     MKT_AUDIENCES:new FakeSheet([schema.MKT_AUDIENCES]),
+    // Pre-existing legacy tables (MarketingDataHub.gs draft engine / MarketingV6AuraEmailDispatcher.gs
+    // real-send queue) -- like MKT_ACCOUNTS/MKT_CONTACTS_SECURE above, these must already exist in
+    // production and are never auto-created by the bootstrap; v6EnsureContactRecipientSchema_
+    // (step 3-4) throws SCHEMA MIGRATION REQUIRED for any table in the schema map that isn't seeded.
+    MKT_EMAIL_QUEUE:new FakeSheet([schema.MKT_EMAIL_QUEUE]),
+    MKT_TOUCHES:new FakeSheet([schema.MKT_TOUCHES]),
     MKT_OPPORTUNITIES:new FakeSheet([extraOpportunityHeaders||['opportunityId','accountId','accountName','amOwner','opportunityType','service','signalDate','qnbWindow','lane','sourceReport','sourceRecordId','priorityRank','eligibilityStatus','suppressionReason','campaignId','detectedAt','updatedAt','amActivityBucket','amActivityTipoGestion','amActivityUltimoChatter','amActivityAutorChatter','tierDestino']])
   };
   return sheets;

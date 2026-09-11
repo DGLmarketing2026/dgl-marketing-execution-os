@@ -332,14 +332,63 @@
           "guarantee": "cross-source signals for one account never both stay active; the existing priority engine handles two sources exactly like it already handles two families from one source, no new mechanism"
         }
       ]
+    },
+    {
+      "file": "tests/v6-aura-email-dispatcher.test.js",
+      "cases": [
+        {
+          "name": "building the queue for an eligible recipient produces exactly one real, personalized PENDING job (subject/htmlBody carry the real firstName/company, no unmerged {{token}})",
+          "guarantee": "real B2B personalization reusing the existing approved copy template verbatim, not a generic or fabricated email"
+        },
+        {
+          "name": "a non-ELIGIBLE MKT_AUDIENCES row (SUPPRESSED / review-required at the recipient-resolution layer) never reaches the queue",
+          "guarantee": "this file trusts v6ResolveRecipients_'s own suppression/frequency/DNC gate completely -- no parallel, second eligibility rule is ever invented here, so a reviewRequired or suppressed account can never be queued"
+        },
+        {
+          "name": "building the queue twice for the same campaign never rebuilds or duplicates an existing job, and never resets an already-SENT job back to PENDING",
+          "guarantee": "idempotent by deterministic jobId (campaignId+contactId+sequenceStep), matching the project's run_id/action-key convention; a later automatic tick can never silently undo a real send's terminal state"
+        },
+        {
+          "name": "a policy-review campaign (v6AuraPolicyApproved_ false) queues REVIEW_REQUIRED with an approvalId, never PENDING",
+          "guarantee": "approval is enforced before a job can ever reach the dispatcher's PENDING queue, reusing the existing policy engine unchanged"
+        },
+        {
+          "name": "DRY_RUN (the default when AURA_SEND_MODE is unset) runs every validation and writes the exact job that would be sent, but never calls GmailApp.sendEmail",
+          "guarantee": "the safe default: a fresh deployment can never send a real email until a human explicitly calls auraEnableLiveSending()"
+        },
+        {
+          "name": "LIVE mode actually calls GmailApp.sendEmail with the existing DGL_CONFIG.DEFAULT_SENDER_NAME identity, marks the job SENT, records a v6RecordMarketingTouch_ frequency-ledger touch and an MKT_TOUCHES row, and auraDisableLiveSending() switches back to DRY_RUN",
+          "guarantee": "going LIVE is a real, auditable, reversible, explicit action -- no invented sender alias, and the existing frequency/touch ledgers stay authoritative"
+        },
+        {
+          "name": "an active MKT_EXCLUSIONS row suppresses the job at dispatch time even though it was queued before the exclusion existed",
+          "guarantee": "suppression is re-checked at send time, not just at queue-build time, so a DNC/unsubscribe registered in between can never be bypassed by an already-queued job"
+        },
+        {
+          "name": "an account whose MKT_ACCOUNT_PIPELINE currentStage is RESPONDED is marked STOPPED and never sent",
+          "guarantee": "stopOnResponse / account-stop is enforced at the real send boundary, reusing v6PipelineAdvanced_ verbatim -- a customer who already replied can never receive a further automated send for that account"
+        },
+        {
+          "name": "a frequency-capped contact (v6FrequencyStatus_ eligible:false) is marked SKIPPED, never sent",
+          "guarantee": "frequency governance is re-checked at send time using the one real engine (v6FrequencyStatus_), not a duplicated or looser rule"
+        },
+        {
+          "name": "a second job for a (campaignId, accountId, contactId, sequenceStep) that already has a SENT row is marked SKIPPED / ALREADY_SENT_DUPLICATE and never sent, even under LIVE mode",
+          "guarantee": "duplicate prevention holds even if a job is ever queued under a second jobId for the same real-world send target -- no customer can ever receive the same touch twice from this dispatcher"
+        },
+        {
+          "name": "auraInstallTriggers() installs exactly one hourly dispatcher trigger; a second call reports TRIGGER_EXISTS and never installs a duplicate",
+          "guarantee": "the dispatcher's own trigger is idempotent and kept strictly separate from the canonical hourly Acquisition/AURA tick and the 6-hour Retention bootstrap trigger"
+        }
+      ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full suite re-run after every change in this branch, most recently after the self-observability / one-shot bootstrap recovery pass (Pass 7: MKT_AURA_RUN_LOG, MarketingV6AuraRunLog.gs, native-runtime discipline). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
-    "totalFiles": 35,
-    "passed": 35,
+    "description": "Full suite re-run after every change in this branch, most recently after adding the real Gmail send provider for Retention (Pass 8: MarketingV6AuraEmailDispatcher.gs, DRY_RUN/LIVE AURA_SEND_MODE, MKT_EMAIL_QUEUE built from the existing eligible audience). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
+    "totalFiles": 36,
+    "passed": 36,
     "failed": 0,
-    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5/6/7's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (34 files carried forward + 1 new this pass: tests/v6-aura-run-log.test.js; tests/v6-aura-bootstrap.test.js and tests/v6-schema-migration.test.js were extended/updated in place rather than added).",
+    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5/6/7/8's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (35 files carried forward + 1 new this pass: tests/v6-aura-email-dispatcher.test.js; tests/v6-aura-bootstrap.test.js and tests/v6-schema-migration.test.js fixtures were extended in place, not added, to seed the two newly schema-tracked legacy tables MKT_EMAIL_QUEUE/MKT_TOUCHES).",
     "failedFiles": []
   }
 }

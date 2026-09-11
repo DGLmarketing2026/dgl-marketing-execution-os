@@ -21,7 +21,17 @@ var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
   // inspectable natively via SpreadsheetApp/DriveApp, without depending on any external API
   // to read Sheets content. Second table this pack auto-creates end to end, same justification
   // as MKT_RETENTION_RUN_SUMMARY above (brand-new, AURA-owned, no historical data at risk).
-  MKT_AURA_RUN_LOG:['runId','timestamp','stage','status','sourceType','sourceTimestamp','accountsEvaluated','detected','eligible','suppressed','reviewRequired','campaignReady','csvCreated','handoffsCsvCreated','errorCode','errorMessage','nextAction']
+  MKT_AURA_RUN_LOG:['runId','timestamp','stage','status','sourceType','sourceTimestamp','accountsEvaluated','detected','eligible','suppressed','reviewRequired','campaignReady','csvCreated','handoffsCsvCreated','errorCode','errorMessage','nextAction'],
+  // Real Gmail-send execution queue (MarketingV6AuraEmailDispatcher.gs). The first 17 columns
+  // already exist in production (created long ago by the legacy MarketingDataHub.gs draft
+  // engine, which still owns and reads them under its own manual/Draft-only flow -- untouched
+  // here); the remaining 9 are additive-only, appended by v6EnsureContactRecipientSchema_ same
+  // as every other table in this map, never reordering or clearing the existing 17.
+  MKT_EMAIL_QUEUE:['jobId','campaignId','audienceId','accountId','contactId','email','firstName','company','service','subject','htmlBody','replyTo','status','gmailDraftId','createdAt','processedAt','error','requestId','amOwner','playbookId','sequenceStep','scheduledAt','approvalId','approvedAt','approvedBy','stopOnResponse'],
+  // Pre-existing legacy table (MarketingDataHub.gs); listed here only so
+  // v6RequireContactRecipientHeaders_/v6EnsureContactRecipientSchema_ can validate it before
+  // the dispatcher logs a real send touch into it -- no column added or changed.
+  MKT_TOUCHES:['touchId','campaignId','audienceId','accountId','contactId','channel','eventType','eventAt','externalId','metadata']
 };
 // The one table in MKT_V6_CONTACT_RECIPIENT_SCHEMA that is safe to auto-create end to end
 // (tab + header row), because it is a brand-new, AURA-owned reporting table with no historical

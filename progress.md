@@ -2,6 +2,82 @@
 
 Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
+## Pass 8 — Real Gmail send provider for Retention (AURA Email Dispatcher)
+
+DGL's own real run (`RUN-4C091A1B`: 131 accountsEvaluated, 14 detected/eligible/campaignReady,
+117 suppressed, 54 reviewRequired) proved detection/scoping worked end to end, but
+`MKT_AURA_EXECUTION_REPORT` stalled every Retention campaign at `READY TO SEND · SEND PROVIDER
+REQUIRED` and `MKT_EMAIL_QUEUE` stayed header-only: the automatic campaign/execution engine
+(`v6AuraAutomationTick_`, `MarketingV6AuraAutomation.gs` -- live-authored, not yet in this repo
+before this pass, now added verbatim) already built scopes/campaigns/executions and generated
+real copy every hour, but nothing ever turned an already-vetted eligible audience
+(`v6ResolveRecipients_`'s own `MKT_AUDIENCES` output) into `MKT_EMAIL_QUEUE` jobs, and
+`v6QueueExecution_`'s gate hard-blocks on the global `MKT_V6_PROVIDER_READY` flag that also
+gates QNB/Reactivation/Cross-Sell and Campaign Studio.
+
+Added `MarketingV6AuraEmailDispatcher.gs` as an independent send path for Retention only
+(`AURA_EMAIL_QUEUE_FAMILIES_ = ['Retention']`) that never reads or writes
+`MKT_V6_PROVIDER_READY`, so QNB/Reactivation/Cross-Sell keep reporting
+`READY TO SEND · SEND PROVIDER REQUIRED` exactly as before (zero regression, proven by
+`v6AuraQueueCountsForCampaign_` falling through to the unchanged gate-based status whenever a
+campaign has no queue rows). It re-uses every existing gate verbatim instead of re-implementing
+any of them:
+- `v6AuraBuildEmailQueueForCampaign_` reads ONLY the already-`ELIGIBLE` rows
+  `v6ResolveRecipients_` persisted in `MKT_AUDIENCES` (DNC/invalid-email/active-exclusion/
+  frequency-blocked contacts never even reach this file), builds one deterministic,
+  idempotent job per `(campaignId, contactId, sequenceStep)`, and never rebuilds a job that
+  already exists -- a job's status, once the dispatcher moves it past `PENDING`, is never reset
+  by a later automatic tick.
+- Copy/brand template reuse: `v6AuraGenerateCopy_`/`v6AuraEmailHtml_`
+  (`MarketingV6AuraCopyEngine.gs`, also newly added to this repo) generate the real subject/
+  HTML; `v6AuraEmailHtml_`/`v6AuraSample_` gained an optional `vars`/`firstName` argument
+  (backward-compatible default = old hardcoded 'Team' sample) so the SAME approved template
+  now personalizes per real contact instead of only ever rendering the generic archive sample.
+- Approval: `v6AuraPolicyApproved_` (unchanged) -- a policy-review campaign queues
+  `REVIEW_REQUIRED`, never `PENDING`.
+- Account stop / `stopOnResponse`: `MKT_ACCOUNT_PIPELINE` + `v6PipelineAdvanced_`
+  (unchanged) -- a `RESPONDED`/`RFQ RECEIVED`/`QUOTED`/`LOAD / REACTIVATED`/`RETAINED /
+  EXPANDED`/`COOLDOWN / NURTURE`/`CLOSED / SUPPRESSED` account is marked `STOPPED`, never sent.
+- Post-send frequency ledger: `v6RecordMarketingTouch_` (unchanged).
+
+`AURA_SEND_MODE` (Script Property) defaults to `DRY_RUN` whenever unset. `auraProcessEmailQueue`
+re-validates every gate at send time (email format, active exclusion, approval, duplicate-sent,
+frequency) before either simulating (`DRY_RUN` -- every check runs, `GmailApp.sendEmail` is
+never called) or actually sending (`LIVE`, via `GmailApp.sendEmail` with
+`DGL_CONFIG.DEFAULT_SENDER_NAME` as the display name -- the same identity `DGL_Core.gs`'s own
+`processEmailQueue()` already uses, no invented alias). Only `auraEnableLiveSending()`/
+`auraDisableLiveSending()` change the mode; neither this file, `v6AuraAutomationTick_`, nor
+`auraInstallTriggers()` ever calls them. `auraInstallTriggers()` installs a dedicated, idempotent
+hourly trigger for the dispatcher, strictly separate from the canonical Acquisition/AURA hourly
+tick and the Retention 6-hour bootstrap trigger.
+
+`MKT_EMAIL_QUEUE` extended additively (existing 17 legacy columns untouched) with `requestId,
+amOwner, playbookId, sequenceStep, scheduledAt, approvalId, approvedAt, approvedBy,
+stopOnResponse` via the same generic `v6EnsureContactRecipientSchema_` engine every other table
+in this project already uses (`MKT_V6_CONTACT_RECIPIENT_SCHEMA`, `MarketingV6SchemaMigration.gs`)
+-- `MKT_TOUCHES` added to the same map purely for header validation before the dispatcher logs a
+real send touch into it, no column changed. `MKT_AURA_EXECUTION_REPORT` extended with `queued`/
+`failed` (additive); `v6AuraReportRow_` now reports real `sent`/`queued`/`failed` counts and a
+real `QUEUED` / `READY TO SEND · DRY RUN VALIDATED` / `SENDING` / `ACTIVE` status once a queue
+exists for a campaign, so `READY ≠ QUEUED ≠ SENT` is finally distinguishable. `v6AuraRetentionDashboard_`
+exposes one safe (no PII), read-only data contract (Run ID, Last Run, Detected/Eligible/Review
+Required/Campaign Ready/Handoffs from the real pilot run, Queued/Sent/Failed/Responses/RFQs/
+Quotes/Loads from the real execution reports, per-campaign table) for `dgl-marketing-execution-os`
+to consume later.
+
+Tests: new `tests/v6-aura-email-dispatcher.test.js` (11 cases: personalized job build, non-
+eligible rows never queued, idempotent build never resets a terminal job, policy-review queues
+`REVIEW_REQUIRED`, `DRY_RUN` validates everything but never calls `GmailApp.sendEmail`, `LIVE`
+sends + records the frequency-ledger touch + `MKT_TOUCHES` row + can be disabled again, an
+active exclusion suppresses at dispatch time, a `RESPONDED` account is `STOPPED` not sent, a
+frequency cap `SKIPS` the send, a duplicate-sent guard prevents a real double-send even under
+`LIVE`, `auraInstallTriggers` is idempotent). `tests/v6-aura-bootstrap.test.js` and
+`tests/v6-schema-migration.test.js` fixtures extended with the new `MKT_EMAIL_QUEUE`/
+`MKT_TOUCHES` tables (both must already exist in production, like every other real commercial
+table in the schema map -- neither is auto-created by the bootstrap).
+
+Full suite: 36 files, 36 pass, 0 fail.
+
 ## Pass 7 — Self-observability (MKT_AURA_RUN_LOG), one-shot recovery trigger
 
 Correction from the user: an external session (this one) being unable to read Google Sheets

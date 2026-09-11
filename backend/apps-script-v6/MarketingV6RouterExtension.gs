@@ -104,6 +104,31 @@ function routeMarketingV6_(action, payload) {
       return typeof v6AcqWpQaRun_ === 'function' ? v6AcqWpQaRun_(p) : v6RouteMissing_(a, 'v6AcqWpQaRun_');
     case 'v6AcqGa4Status':
       return typeof v6AcqGa4Status_ === 'function' ? v6AcqGa4Status_(p) : v6RouteMissing_(a, 'v6AcqGa4Status_');
+    case 'v6AcqLandingReport':
+      return typeof v6AcqLandingReport_ === 'function' ? v6AcqLandingReport_(p) : v6RouteMissing_(a, 'v6AcqLandingReport_');
+    case 'v6AuraAutomationTick':
+      return typeof v6AuraAutomationTick_ === 'function' ? v6AuraAutomationTick_(p) : v6RouteMissing_(a, 'v6AuraAutomationTick_');
+    case 'v6AuraAutomaticReportStatus':
+      return typeof v6AuraAutomaticReportStatus_ === 'function' ? v6AuraAutomaticReportStatus_(p) : v6RouteMissing_(a, 'v6AuraAutomaticReportStatus_');
+    case 'v6AuraExecutionReport':
+      return typeof v6AuraExecutionReport_ === 'function' ? v6AuraExecutionReport_(p) : v6RouteMissing_(a, 'v6AuraExecutionReport_');
+    case 'v6AuraGmailFreshness':
+      return typeof v6AuraGmailFreshnessStatus_ === 'function' ? v6AuraGmailFreshnessStatus_(p) : v6RouteMissing_(a, 'v6AuraGmailFreshnessStatus_');
+    case 'v6AuraGmailPanel':
+      return typeof v6AuraGmailPanelStatus_ === 'function' ? v6AuraGmailPanelStatus_(p) : v6RouteMissing_(a, 'v6AuraGmailPanelStatus_');
+    case 'v6AuraIngestHistory':
+      return typeof v6AuraIngestHistory_ === 'function' ? v6AuraIngestHistory_(p) : v6RouteMissing_(a, 'v6AuraIngestHistory_');
+    case 'v6AuraSourceBreakdown':
+      return typeof v6AuraGmailSourceBreakdown_ === 'function' ? v6AuraGmailSourceBreakdown_(p) : v6RouteMissing_(a, 'v6AuraGmailSourceBreakdown_');
+    // --- AURA Email Dispatcher (MarketingV6AuraEmailDispatcher.gs) ---------------------------
+    case 'v6AuraBuildRetentionEmailQueue':
+      return typeof v6AuraBuildRetentionEmailQueue_ === 'function' ? v6AuraBuildRetentionEmailQueue_(p) : v6RouteMissing_(a, 'v6AuraBuildRetentionEmailQueue_');
+    case 'auraProcessEmailQueue':
+      return typeof auraProcessEmailQueue === 'function' ? auraProcessEmailQueue((p || {}).limit) : v6RouteMissing_(a, 'auraProcessEmailQueue');
+    case 'v6AuraSendMode':
+      return typeof v6AuraSendMode_ === 'function' ? { sendMode: v6AuraSendMode_() } : v6RouteMissing_(a, 'v6AuraSendMode_');
+    case 'v6AuraRetentionDashboard':
+      return typeof v6AuraRetentionDashboard_ === 'function' ? v6AuraRetentionDashboard_(p) : v6RouteMissing_(a, 'v6AuraRetentionDashboard_');
     default:
       return null;
   }
