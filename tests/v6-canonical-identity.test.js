@@ -136,5 +136,11 @@ function makeContext(tables){
   console.log('canonical identity test 6 (audit safe aggregates, MISSING vs UNRESOLVED distinction): PASS');
 })();
 
-assert(routerSource.includes('v6AuraAuditCanonicalIds:v6AuraAuditCanonicalIds_'),'router must expose v6AuraAuditCanonicalIds');
+// Router-agnostic check: passes whether routeMarketingV6_ is the legacy map literal
+// ('action:handler_') or the current switch-statement form ("case 'action': ... handler_").
+(function(){
+  var action='v6AuraAuditCanonicalIds',handler='v6AuraAuditCanonicalIds_';
+  var caseRe=new RegExp("case '"+action+"'\\s*:[\\s\\S]{0,200}"+handler);
+  assert(routerSource.includes(action+':'+handler)||caseRe.test(routerSource),'router must expose '+action);
+})();
 console.log('V6 canonical identity bridge: ALL PASS');

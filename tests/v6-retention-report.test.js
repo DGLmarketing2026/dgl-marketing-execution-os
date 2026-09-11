@@ -271,7 +271,11 @@ function csvRows(csvText){
   console.log('retention report test 7 (run cycle: FRESH source produces CSV + persisted summary): PASS');
 })();
 
+// Router-agnostic check: passes whether routeMarketingV6_ is the legacy map literal
+// ('action:handler_') or the current switch-statement form ("case 'action': ... handler_").
 ['v6AuraAuditCanonicalIds:v6AuraAuditCanonicalIds_','v6AuraRetentionDryRun:v6AuraRetentionDryRun_','v6AuraRunRetentionCycle:v6AuraRunRetentionCycle_','v6AuraRetentionRunSummary:v6AuraRetentionRunSummary_'].forEach(function(entry){
-  assert(routerSource.includes(entry),'router must expose '+entry);
+  var action=entry.split(':')[0],handler=entry.split(':')[1];
+  var caseRe=new RegExp("case '"+action+"'\\s*:[\\s\\S]{0,200}"+handler);
+  assert(routerSource.includes(entry)||caseRe.test(routerSource),'router must expose '+entry);
 });
 console.log('V6 retention report/pilot: ALL PASS');
