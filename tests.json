@@ -405,14 +405,67 @@
           "guarantee": "regenerating a fresh, verifiable DRY_RUN after a content fix can never itself be the thing that accidentally goes LIVE"
         }
       ]
+    },
+    {
+      "file": "tests/v6-aura-campana-a.test.js",
+      "cases": [
+        {
+          "name": "'Campana A - HA prioritaria' is recognized by the real Gmail-report parser and every accepted row carries its sheetName; 'Campana B' and any other unmapped tab return null",
+          "guarantee": "ignoring every other tab in the same workbook is enforced structurally by the tab-name -> family map, not by a manual per-tab skip check that could drift"
+        },
+        {
+          "name": "v6AuraDedicatedAccountIds_ registers exactly the accounts sourced from Campana A, and only those",
+          "guarantee": "the shared, multi-source Retention pipeline's exclusion check has an accurate, real list of accounts to leave alone"
+        },
+        {
+          "name": "multiple eligible contacts of the SAME account each get their own job, never collapsed to one",
+          "guarantee": "227 contacts across 65 accounts are all genuinely reachable, not silently reduced to one recipient per account"
+        },
+        {
+          "name": "an explicit, reliable per-contact language signal wins over the country-derived language",
+          "guarantee": "the specified priority order (existing signal first, country second, EN fallback last) is followed exactly, never overridden by a cruder default"
+        },
+        {
+          "name": "country-based language derivation: Brazil -> PT, a named Spanish-speaking LATAM country -> ES, USA -> EN, and an unmapped/unknown country falls back to EN",
+          "guarantee": "no country ever produces a guessed or fabricated language; an unrecognized value fails closed to the specified EN fallback"
+        },
+        {
+          "name": "a generic/unreliable contact name (Pricing Team, Sales Team, Correo Corporativo, Imports, Operations) is never used as firstName and never falls back to a fabricated 'Team'; the subject drops the leading name clause and capitalizes what follows, matching DGL's own example exactly, while a real name still personalizes normally",
+          "guarantee": "no customer-facing email can ever address a recipient by a role/mailbox label or an invented placeholder name"
+        },
+        {
+          "name": "every job's replyTo resolves to the canonical DGL identity and status stays DRY_RUN end to end through a full build+dispatch pass, with zero real GmailApp.sendEmail calls",
+          "guarantee": "this first-phase activation can never accidentally send a real email, and never ships with a missing/invented reply-to"
+        },
+        {
+          "name": "suppression (an excluded recipient-resolution row) and stopOnResponse (an already-RESPONDED account) both still hold inside this dedicated pipeline",
+          "guarantee": "a dedicated, narrowly-scoped pipeline still reuses every existing governance gate verbatim rather than reimplementing (and potentially weakening) them"
+        },
+        {
+          "name": "the full QA audit reports accurate language distribution, zero 'Team' fallbacks, zero non-canonical reply-to, zero invalid emails, and correctly does NOT flag a different, already-mapped, unrelated tab's own legitimate historical data as a leak",
+          "guarantee": "the QA report DGL asked for is trustworthy -- accurate on real problems, and not a false-positive generator on normal, unrelated system activity"
+        },
+        {
+          "name": "the audit correctly flags it if 'Campana B' (the tab explicitly ignored from the same workbook) is ever found to have produced an opportunity row",
+          "guarantee": "a genuine regression -- Campana B accidentally being processed -- would be caught, not silently missed"
+        },
+        {
+          "name": "v6AuraCampanaARegenerateDryRun_ forces DRY_RUN even if LIVE was left on from a prior call",
+          "guarantee": "this validation/regeneration entry point can never itself be the thing that produces a real send"
+        },
+        {
+          "name": "the shared family scope-builder's dedicated-account exclusion filter keeps Campana A's accounts out of the generic multi-source pipeline",
+          "guarantee": "the same 65 accounts are never processed twice under two different campaignIds with two different (one lower-quality) sets of content"
+        }
+      ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full suite re-run after every change in this branch, most recently after fixing the two real problems the pre-LIVE audit found -- empty replyTo and a broken href=\"#\" CTA (Pass 10: canonical v6AuraEmailCanonicalReplyTo_, a real mailto: CTA, and a repair/regenerate path for jobs built before the fix existed). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
-    "totalFiles": 36,
-    "passed": 36,
+    "description": "Full suite re-run after every change in this branch, most recently after adding the dedicated 'Campana A - HA prioritaria' Phase-1 pipeline (Pass 11: tab-restricted ingestion, per-contact ES/EN/PT language, generic-name detection, dedicated-account exclusion from the shared pipeline). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
+    "totalFiles": 37,
+    "passed": 37,
     "failed": 0,
-    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5 through 10's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (36 files total; Pass 10 extended tests/v6-aura-email-dispatcher.test.js and tests/v6-no-pii-in-repo.test.js in place rather than adding a new file).",
+    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5 through 11's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (36 files carried forward + 1 new this pass: tests/v6-aura-campana-a.test.js).",
     "failedFiles": []
   }
 }

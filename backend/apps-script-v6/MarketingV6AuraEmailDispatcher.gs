@@ -449,8 +449,12 @@ function v6AuraEmailMask_(email) {
   if (at <= 0) return e ? '***' : '';
   return e.slice(0, 1) + '***' + e.slice(at);
 }
-function v6AuraEmailQueueAudit_() {
-  var jobs = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) { return v6AuraEmailText_(r.playbookId) === 'Retention'; });
+// filterFn is optional; the default (Retention-family jobs) is unchanged from every existing
+// caller. A dedicated pipeline (e.g. MarketingV6AuraCampanaA.gs) can pass its own predicate --
+// by campaignId -- to audit exactly its own jobs without ever touching this function's shared
+// checks.
+function v6AuraEmailQueueAudit_(filterFn) {
+  var jobs = v6Rows_('MKT_EMAIL_QUEUE').filter(filterFn || function (r) { return v6AuraEmailText_(r.playbookId) === 'Retention'; });
   var accountsById = {}, contactsById = {};
   v6Rows_('MKT_ACCOUNTS').forEach(function (a) { accountsById[v6AuraEmailText_(a.accountId)] = a; });
   v6Rows_('MKT_CONTACTS_SECURE').forEach(function (c) { contactsById[v6AuraEmailText_(c.contactId)] = c; });

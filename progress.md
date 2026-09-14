@@ -2,6 +2,69 @@
 
 Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
+## Pass 11 — "Campana A - HA prioritaria" dedicated Phase-1 pipeline
+
+First real activation scope: work with EXACTLY ONE tab (65 accounts / 227 contacts) from the
+House-Account priority Retention report (`Marketing_DGL_14-09-2026`), ignoring every other tab in
+that workbook (Campana B included), with real per-contact ES/EN/PT language selection and
+generic-name detection -- while changing nothing about the shared, multi-source Retention
+pipeline every other campaign already depends on. New dedicated file
+`MarketingV6AuraCampanaA.gs` rather than bolting single-purpose behavior onto shared code.
+
+- `MarketingV6AuraGmailIngest.gs`: added `'Campana A - HA prioritaria': 'Retention'` to the tab
+  -> family map (every other tab, Campana B included, stays unmapped, so
+  `v6AuraGmailParseTable_` returns `null` for it -- "ignore everything else" is enforced
+  structurally, not by a manual skip check). Added `sourceSheet` (additive) to
+  `MKT_AURA_GMAIL_OPPORTUNITIES` so a dedicated pipeline can select exactly its own tab's
+  accounts instead of the shared multi-tab 'Retention' bucket. Added
+  `v6AuraGmailReprocessRecent_(days)`: since this report may have already arrived and been
+  ingested BEFORE this tab was recognized (in which case it is already marked "seen" by
+  messageId and a normal tick would never look at it again), this reprocesses recent messages
+  ignoring that skip -- safe, since ingestion only ever upserts, never clears.
+- `MarketingV6AuraAutomation.gs`: `v6AuraAutoBuildScopesForFamily_` now excludes any account
+  registered in `v6AuraDedicatedAccountIds_()` (typeof-guarded) before grouping -- so these 65
+  accounts are never ALSO auto-grouped and auto-queued by the shared, multi-source mechanism,
+  and (with no dedicated pipeline deployed) behavior is byte-identical to before.
+- `MarketingV6AuraCampanaA.gs` (new): a self-contained pipeline reusing every existing governed
+  engine (`v6ResolveRecipients_` for suppression/frequency/DNC/exclusion-vetted eligibility --
+  naturally supports many eligible contacts per account, never collapsing to one;
+  `v6AuraPolicyApproved_`, `v6AuraEmailCanonicalReplyTo_`, `v6AuraEmailValid_`,
+  `v6AuraEmailAccountStopped_`, `v6AuraEmailJobId_`, `v6AuraGenerateCopy_`, `v6AuraEmailHtml_`).
+  Adds: a country -> language map matching DGL's exact specification (Brazil -> PT; the named
+  Spanish-speaking LATAM markets -> ES; USA/Canada -> EN; unmapped/missing -> EN, never a
+  guess), checked only after an existing reliable per-contact language signal (several plausible
+  real column names, since this schema does not declare a fixed one today); a generic-name
+  denylist (Pricing Team, Sales Team, Correo Corporativo, Imports, Operations, and similar
+  role/mailbox labels) that yields an empty `firstName` rather than ever fabricating "Team"; and
+  a no-name-aware subject merge that drops the leading "{{firstName}}, " clause and capitalizes
+  what follows -- reproducing DGL's own example exactly ("Team, seguimos cerca de la operación
+  de Progeral Corp" -> "Seguimos cerca de la operación de Progeral Corp"). `country`/
+  `preferredLanguage` added (additive) to `MKT_EMAIL_QUEUE`. `v6AuraCampanaADispatchAll_` loops
+  the shared 50-per-call dispatcher until the queue is drained (safe: still DRY_RUN, still zero
+  real sends). `v6AuraCampanaAAudit_` reuses `v6AuraEmailQueueAudit_` (now accepting an optional
+  filter predicate, default behavior unchanged) scoped to this one campaignId, plus language
+  distribution, a "Team" fallback count (must be zero), a canonical-reply-to mismatch count, and
+  `v6AuraCampanaAVerifyOtherTabsIgnored_` (checks specifically for the tab(s) DGL asked to
+  ignore from this workbook -- never flags a different, already-mapped, unrelated tab's own
+  legitimate historical data as a leak). `v6AuraCampanaARegenerateDryRun_` (+
+  `RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN()` editor wrapper) forces/confirms DRY_RUN first
+  (`auraDisableLiveSending`, never `auraEnableLiveSending`), reprocesses recent Gmail messages,
+  refreshes opportunities, rebuilds the queue, dispatches everything pending, and returns the
+  full audit.
+
+Tests: new `tests/v6-aura-campana-a.test.js` (12 cases): tab recognition (Campana A accepted,
+Campana B and any other tab return `null`); the dedicated-account registry; multiple contacts of
+one account never collapsed to one job; an explicit language signal beating country; the full
+Brazil/LATAM-Spanish/USA/unknown country->language chain; generic names never used (exact subject
+match to DGL's own example) alongside a real name personalizing normally; reply-to always
+canonical with status staying `DRY_RUN` end to end; suppression and stopOnResponse still holding
+through this pipeline; the full QA audit's accuracy (including correctly NOT flagging an
+unrelated legitimate tab, and correctly flagging Campana B if it were ever found processed);
+regenerate forcing DRY_RUN even if LIVE was left on; and the shared engine's dedicated-account
+exclusion filter.
+
+Full suite: 37 files, 37 pass, 0 fail.
+
 ## Pass 10 — Canonical reply-to + functional CTA (real problems from the pre-LIVE audit)
 
 Running the Pass 9 audit against real `MKT_EMAIL_QUEUE` content surfaced exactly two real

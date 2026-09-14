@@ -70,8 +70,14 @@ function v6AuraObjectiveLabel_(familyToken) {
 // it now simply produces a subset of what this function produces).
 function v6AuraAutoBuildScopesForFamily_(opportunityType) {
   var familyToken = v6AuraFamilyToken_(opportunityType);
+  // Accounts already claimed by a dedicated, single-purpose pipeline (e.g.
+  // MarketingV6AuraCampanaA.gs) are excluded here so they are never ALSO auto-grouped and
+  // auto-queued by this shared, multi-source mechanism -- one account, one controlled pipeline,
+  // never two competing sets of jobs for the same contacts. typeof-guarded: with no dedicated
+  // pipeline deployed, v6AuraDedicatedAccountIds_ is absent and behavior is exactly as before.
+  var dedicated = (typeof v6AuraDedicatedAccountIds_ === 'function') ? v6AuraDedicatedAccountIds_() : {};
   var rows = v6Rows_('MKT_OPPORTUNITIES').filter(function (r) {
-    return v6AuraFamilyToken_(r.opportunityType) === familyToken && v6AuraText_(r.eligibilityStatus).toUpperCase() === 'DETECTED';
+    return v6AuraFamilyToken_(r.opportunityType) === familyToken && v6AuraText_(r.eligibilityStatus).toUpperCase() === 'DETECTED' && !dedicated[v6AuraText_(r.accountId)];
   });
   var groups = {};
   rows.forEach(function (r) {
