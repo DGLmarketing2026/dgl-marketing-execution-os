@@ -2,6 +2,86 @@
 
 Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
+## Pass 14 — Diagnosing the first real run's three anomalies (100% EN, 69% STOPPED, 170/227 recipients)
+
+The first real run (post Pass 13 fix) returned real, non-zero data -- 64 accounts, 170
+recipients, 170 built, 0 real sends -- but three numbers needed real, code-grounded
+investigation rather than a guess: `byLanguage` 100% EN, 117/170 jobs STOPPED, and 170
+recipients against roughly 227 contacts DGL expects. No suppression/frequency/stopOnResponse
+rule was changed in this pass -- only diagnostic capture and traceability were added.
+
+**1. Language.** Traced every place a country/language value could legitimately live:
+`v6IngestAuthoritativeContacts_` (MarketingV6ContactIngestion.gs, the "official" V6 NOVA
+contact path) never writes country, firstName, or language at all -- its record shape is
+strictly identity/email/status fields. A SEPARATE, legacy import bridge (MarketingImport.js,
+`MKT_IMPORT_SHEETS`) DOES declare `country` as an optional `ACCOUNTS` field and `language`/
+`firstName`/`lastName` as optional `CONTACTS` fields, writing additively into the same
+MKT_ACCOUNTS/MKT_CONTACTS_SECURE tabs -- so a real value could exist there today only if that
+import path was actually used for these specific accounts, and even then possibly in a
+different format (e.g. 'Spanish' instead of 'ES') than the exact-match check expected. Fixed on
+two fronts: (a) `v6AuraCampanaANormalizeLanguageValue_` now recognizes full-word/locale-tag
+spellings ('Spanish'/'Español'/'es-MX' -> ES, etc.), not just the bare code; (b)
+per DGL's explicit instruction, the tab itself is now the PRIMARY country source for this
+campaign -- `v6AuraCampanaAParseSourceRows_` captures a country/market column under several
+real, plausible header names (País, Pais, Country, Mercado, Market, Region, Región) directly
+from the tab, persisted to a new diagnostic table, and `v6AuraCampanaAPreferredLanguage_` now
+takes an explicit `tabCountry` parameter checked ahead of the MKT_CONTACTS_SECURE/MKT_ACCOUNTS
+record. Every job now also records `languageSource`
+(`CONTACT_EXPLICIT_SIGNAL`/`CAMPANA_A_TAB_COUNTRY`/`CONTACT_OR_ACCOUNT_COUNTRY`/
+`EN_FALLBACK_...`) and `languageReason` (the real value that drove the decision) -- additive
+`MKT_EMAIL_QUEUE` columns -- so the next real run answers definitively, per contact, why each
+language was chosen instead of a guess.
+
+**2. The 117 STOPPED.** `v6AuraEmailAccountStopped_` only ever produced a boolean; nothing
+recorded WHICH real `MKT_ACCOUNT_PIPELINE.currentStage` caused it, when, or from which prior
+campaignId. No suppression/frequency/DNC/exclusion logic is even involved here -- those already
+run inside `v6ResolveRecipients_` before a contact ever becomes an eligible recipient, so every
+STOPPED job comes from exactly one place: an advanced pipeline stage
+(RESPONDED/RFQ RECEIVED/QUOTED/LOAD.../RETAINED.../COOLDOWN.../CLOSED-SUPPRESSED). Fixed by
+capturing the real stage plus `responseAt`/`enteredStageAt` and `campaignId` onto each STOPPED
+job (`stopReasonStage`, `stopReasonAt`, `stopReasonCampaignId` -- additive columns), and adding
+`v6AuraCampanaAStoppedBreakdown_()`, which reads these back and reports exact counts by stage
+and by prior campaignId -- a real, auditable answer to "how many were RESPONDED vs QUOTED, and
+from which earlier campaign" on the next run, with the stop rule itself completely untouched.
+
+**3. 170 recipients vs ~227 contacts.** `v6AuraGmailParseTable_` treats every recognized tab
+row as ONE ACCOUNT (accountName + amOwner only); it never reads a per-contact email/name
+column even if the real tab has one, and the account-level accountId it derives is a hash of
+the normalized account name -- meaning any account whose exact spelling differs even slightly
+between the tab and the NOVA-synced MKT_ACCOUNTS (e.g. "Progeral Corp" vs "Progeral") never
+matches at all, silently dropping every one of that account's contacts with no visible reason.
+Fixed with three real, verifiable pieces, all additive:
+`v6AuraCampanaAParseSourceRows_` now ALSO captures a contact-name and email column per row (same
+multi-candidate-header approach as country), persisted to the new
+`MKT_AURA_CAMPANA_A_SOURCE_ROWS` diagnostic table regardless of whether
+`v6AuraGmailParseTable_` would have accepted that row -- nothing from the real tab is ever
+discarded before it can be inspected; `v6AuraCampanaANormalizeAccountName_` performs
+deterministic (never fuzzy) normalization -- strips punctuation, whitespace, and a fixed,
+explicit list of common corporate suffixes (Corp, Inc, LLC, S.A., S.A.S, Ltda, Co) -- used only
+to recover a legitimate spelling difference for the SAME real company, never to match two
+different real companies; `v6AuraCampanaAMatchReport_()` compares the captured source rows
+against MKT_ACCOUNTS/MKT_CONTACTS_SECURE and reports exact counts (source accounts, matched,
+unmatched with a real reason each; source contacts with an email, matched, unmatched with a
+real reason each) plus `tabProvidesContactColumns` -- a concrete, evidence-based answer to
+whether Campana A can work directly from the tab's own contact data without depending on the
+NOVA hash-match, evaluated (not yet acted on) pending what the next real run's diagnostic
+output actually shows.
+
+None of `DRY_RUN`/the canonical reply-to identity/scope-to-Campana-A-only/all-eligible-contacts-
+per-account was changed. `RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN` was NOT executed in this pass per explicit
+instruction -- these are code-level fixes and new diagnostics only, verified by tests against
+mock data, not against the live report.
+
+Tests: `tests/v6-aura-campana-a.test.js` +6 cases: real headers and per-row country/contact/
+email are captured before any accept/reject decision; the tab's own country wins over the
+matched account's record, with a named reason; a full-word language value ('Spanish') is
+recognized; the STOPPED breakdown reports exact counts by real stage and by the prior
+campaignId; the match report recovers a legitimate "Corp" spelling difference deterministically
+while reporting a real unmatched account with a reason; the match report correctly evaluates
+whether the tab already provides usable contact/email columns.
+
+Full suite: 37 files, 37 pass, 0 fail.
+
 ## Pass 13 — Root-cause fix: Campana A had no direct reference to its real source at all
 
 The first real execution returned `accounts: 0 / recipients: 0 / built: 0`. Root cause: this

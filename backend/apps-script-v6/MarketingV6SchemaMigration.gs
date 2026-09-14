@@ -28,8 +28,10 @@ var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
   // here); the rest are additive-only, appended by v6EnsureContactRecipientSchema_ same as
   // every other table in this map, never reordering or clearing the existing 17. country/
   // preferredLanguage added for the per-contact ES/EN/PT language pipeline
-  // (MarketingV6AuraCampanaA.gs).
-  MKT_EMAIL_QUEUE:['jobId','campaignId','audienceId','accountId','contactId','email','firstName','company','service','subject','htmlBody','replyTo','status','gmailDraftId','createdAt','processedAt','error','requestId','amOwner','playbookId','sequenceStep','scheduledAt','approvalId','approvedAt','approvedBy','stopOnResponse','country','preferredLanguage'],
+  // (MarketingV6AuraCampanaA.gs). languageSource/languageReason and
+  // stopReasonStage/stopReasonAt/stopReasonCampaignId added so a language decision or a STOPPED
+  // status is traceable to exactly why, per job, instead of an opaque final value.
+  MKT_EMAIL_QUEUE:['jobId','campaignId','audienceId','accountId','contactId','email','firstName','company','service','subject','htmlBody','replyTo','status','gmailDraftId','createdAt','processedAt','error','requestId','amOwner','playbookId','sequenceStep','scheduledAt','approvalId','approvedAt','approvedBy','stopOnResponse','country','preferredLanguage','languageSource','languageReason','stopReasonStage','stopReasonAt','stopReasonCampaignId'],
   // Pre-existing legacy table (MarketingDataHub.gs); listed here only so
   // v6RequireContactRecipientHeaders_/v6EnsureContactRecipientSchema_ can validate it before
   // the dispatcher logs a real send touch into it -- no column added or changed.

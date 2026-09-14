@@ -141,6 +141,10 @@ function routeMarketingV6_(action, payload) {
       return typeof v6AuraCampanaAAudit_ === 'function' ? v6AuraCampanaAAudit_(p) : v6RouteMissing_(a, 'v6AuraCampanaAAudit_');
     case 'v6AuraCampanaAIngestFromSpreadsheet':
       return typeof v6AuraCampanaAIngestFromSpreadsheet_ === 'function' ? v6AuraCampanaAIngestFromSpreadsheet_(p) : v6RouteMissing_(a, 'v6AuraCampanaAIngestFromSpreadsheet_');
+    case 'v6AuraCampanaAMatchReport':
+      return typeof v6AuraCampanaAMatchReport_ === 'function' ? v6AuraCampanaAMatchReport_(p) : v6RouteMissing_(a, 'v6AuraCampanaAMatchReport_');
+    case 'v6AuraCampanaAStoppedBreakdown':
+      return typeof v6AuraCampanaAStoppedBreakdown_ === 'function' ? v6AuraCampanaAStoppedBreakdown_(p) : v6RouteMissing_(a, 'v6AuraCampanaAStoppedBreakdown_');
     default:
       return null;
   }

@@ -62,22 +62,102 @@ function v6AuraCampanaAIngestFromSpreadsheet_() {
     };
   }
   var values = sheet.getDataRange().getValues();
+  // Diagnostic ground truth FIRST, independent of whether v6AuraGmailParseTable_ recognizes the
+  // layout below -- every real row, every real header name, persisted before any accept/reject
+  // decision, so "what does the tab actually contain" never depends on guessing.
+  var sourceRows = v6AuraCampanaAParseSourceRows_(values);
+  if (sourceRows.status === 'OK') v6AuraCampanaAPersistSourceRows_(sourceRows.rows);
   var ctx = { messageId: 'DIRECT_SPREADSHEET_READ:' + spreadsheetId, receivedAt: new Date().toISOString(), sourceFile: 'Marketing_DGL_14-09-2026' };
   var parsed = v6AuraGmailParseTable_(CAMPANA_A_SHEET_NAME_, values, ctx);
   if (!parsed || parsed.unrecognizedLayout) {
-    return { status: 'TAB_EMPTY_OR_UNRECOGNIZED_LAYOUT', spreadsheetId: spreadsheetId, sheetName: CAMPANA_A_SHEET_NAME_, rowsInSheet: values.length };
+    return { status: 'TAB_EMPTY_OR_UNRECOGNIZED_LAYOUT', spreadsheetId: spreadsheetId, sheetName: CAMPANA_A_SHEET_NAME_, rowsInSheet: values.length, headersFound: sourceRows.headers };
   }
   var created = 0, updated = 0;
   parsed.accepted.forEach(function (candidate) {
     var result = v6AuraGmailUpsertOpportunity_(candidate, ctx);
     if (result === 'created') created++; else updated++;
   });
+  var contactColumnsFound = sourceRows.rows.filter(function (r) { return r.contactName || r.email; }).length;
+  var countryColumnFound = sourceRows.rows.filter(function (r) { return r.country; }).length;
   return {
     status: parsed.accepted.length ? 'OK' : 'TAB_FOUND_BUT_ZERO_ACCEPTED_ROWS',
     spreadsheetId: spreadsheetId, sheetName: CAMPANA_A_SHEET_NAME_, rowsInSheet: values.length,
+    headersFound: sourceRows.headers,
     rowsParsed: parsed.rowCount, accepted: parsed.accepted.length, rejected: parsed.rejected.length,
-    created: created, updated: updated
+    created: created, updated: updated,
+    sourceRowsCaptured: sourceRows.rows.length, rowsWithContactOrEmail: contactColumnsFound, rowsWithCountry: countryColumnFound
   };
+}
+
+// --- Raw per-row capture (diagnostic ground truth, never guessed) ---------------------------
+// v6AuraGmailParseTable_ treats every recognized tab as ONE ROW = ONE ACCOUNT (accountName +
+// amOwner only) -- correct for the account-level worklist tabs it was built for, but if
+// 'Campana A - HA prioritaria' actually carries per-contact columns (email, contact name,
+// country/market) on each row, that data is read into memory (getDataRange already returns
+// every column) but then silently discarded, since v6AuraGmailParseTable_ never looks at it and
+// multiple rows for the same account collapse into one upserted opportunity (last row wins).
+// This never assumes an exact header name: it checks each field against several real, plausible
+// spellings and only accepts a value under a header that is ACTUALLY present in the tab, so the
+// diagnostic below reports the true header names and true coverage instead of a guess.
+var CAMPANA_A_CONTACT_NAME_HEADERS_ = ['Contacto', 'Contact', 'Contact Name', 'Nombre', 'Nombre Contacto', 'Nombre del Contacto', 'Nombre y Apellido', 'First Name'];
+var CAMPANA_A_EMAIL_HEADERS_ = ['Email', 'E-mail', 'Correo', 'Correo Electronico', 'Correo Electrónico', 'Email Contacto', 'Contact Email'];
+var CAMPANA_A_COUNTRY_HEADERS_ = ['País', 'Pais', 'Country', 'Mercado', 'Market', 'Region', 'Región'];
+function v6AuraCampanaAFindField_(rowObject, candidates) {
+  for (var i = 0; i < candidates.length; i++) {
+    if (Object.prototype.hasOwnProperty.call(rowObject, candidates[i])) {
+      var v = v6AuraEmailText_(rowObject[candidates[i]]);
+      if (v) return { header: candidates[i], value: v };
+    }
+  }
+  return null;
+}
+// Reuses v6AuraGmailFindHeaderRow_/v6AuraGmailRowObject_ (MarketingV6AuraGmailIngest.gs, pure
+// data-in/data-out utilities, no Gmail dependency) to get the real header row and one object per
+// data row, then captures EVERY row -- not just the ones v6AuraGmailParseTable_ would accept --
+// so nothing from the real tab is ever silently lost before it can even be inspected.
+function v6AuraCampanaAParseSourceRows_(values) {
+  var headerRowIdx = v6AuraGmailFindHeaderRow_(values);
+  if (headerRowIdx < 0) return { status: 'UNRECOGNIZED_LAYOUT', headers: [], rows: [] };
+  var headers = values[headerRowIdx].map(v6AuraEmailText_);
+  var dataRows = values.slice(headerRowIdx + 1).filter(function (r) { return r.some(function (v) { return v6AuraEmailText_(v) !== ''; }); });
+  var rows = dataRows.map(function (row, i) {
+    var r = v6AuraGmailRowObject_(headers, row);
+    var contactField = v6AuraCampanaAFindField_(r, CAMPANA_A_CONTACT_NAME_HEADERS_);
+    var emailField = v6AuraCampanaAFindField_(r, CAMPANA_A_EMAIL_HEADERS_);
+    var countryField = v6AuraCampanaAFindField_(r, CAMPANA_A_COUNTRY_HEADERS_);
+    return {
+      sourceRow: headerRowIdx + 2 + i,
+      accountName: v6AuraEmailText_(r['Cuenta']),
+      amOwner: v6AuraEmailText_(r['Account Owner']) || v6AuraEmailText_(r['Agente responsable (Sales Rep Actual)']),
+      contactName: contactField ? contactField.value : '', contactNameHeader: contactField ? contactField.header : '',
+      email: emailField ? emailField.value : '', emailHeader: emailField ? emailField.header : '',
+      country: countryField ? countryField.value : '', countryHeader: countryField ? countryField.header : ''
+    };
+  });
+  return { status: 'OK', headers: headers, rows: rows };
+}
+var MKT_AURA_CAMPANA_A_SOURCE_ROWS_SCHEMA_ = ['sourceRow', 'accountName', 'amOwner', 'contactName', 'contactNameHeader', 'email', 'emailHeader', 'country', 'countryHeader', 'capturedAt'];
+function v6AuraCampanaAEnsureSourceRowsSheet_() { return v6AcqEnsureSheet_('MKT_AURA_CAMPANA_A_SOURCE_ROWS', MKT_AURA_CAMPANA_A_SOURCE_ROWS_SCHEMA_); }
+function v6AuraCampanaAPersistSourceRows_(rows) {
+  v6AuraCampanaAEnsureSourceRowsSheet_();
+  var now = new Date().toISOString();
+  rows.forEach(function (r) {
+    v6UpsertByKey_('MKT_AURA_CAMPANA_A_SOURCE_ROWS', ['sourceRow'], Object.assign({}, r, { capturedAt: now }));
+  });
+}
+
+// --- Deterministic account-name normalization (matching only, never fuzzy) -------------------
+// Strips punctuation, collapses whitespace, and removes a fixed, explicit list of common
+// corporate suffixes -- never a similarity/edit-distance guess that could match two different
+// real companies. Two different real accounts NEVER share a normalized name just because they
+// happen to have similar words; this only removes noise a real NOVA extract and a real
+// human-typed report legitimately spell differently for the exact same company (e.g. "Progeral
+// Corp" vs "Progeral" vs "PROGERAL, CORP.").
+var CAMPANA_A_CORP_SUFFIX_RE_ = /\b(corp(oration)?|inc(orporated)?|llc|ltda?|s\.?a\.?(\s*de\s*c\.?v\.?)?|s\.?a\.?s\.?|co(mpany)?)\.?\s*$/i;
+function v6AuraCampanaANormalizeAccountName_(name) {
+  var n = String(name || '').toLowerCase().replace(/[.,]/g, '').replace(/\s+/g, ' ').trim();
+  var stripped = n.replace(CAMPANA_A_CORP_SUFFIX_RE_, '').replace(/\s+/g, ' ').trim();
+  return stripped || n;
 }
 
 // --- Dedicated-account registry ---------------------------------------------------------------
@@ -91,6 +171,64 @@ function v6AuraCampanaAAccountMap_() {
     if (v6AuraEmailText_(r.sourceSheet) === CAMPANA_A_SHEET_NAME_) map[v6AuraEmailText_(r.accountId)] = r;
   });
   return map;
+}
+
+// --- Match report: no silent joins ------------------------------------------------------------
+// Compares the real, captured source rows (MKT_AURA_CAMPANA_A_SOURCE_ROWS -- written by
+// v6AuraCampanaAIngestFromSpreadsheet_ from the actual tab, before any accept/reject decision)
+// against the real MKT_ACCOUNTS/MKT_CONTACTS_SECURE tables, reporting exact counts and exact
+// unmatched names/emails -- never a percentage guess. Matches an account by the existing
+// hash-derived accountId first (v6AuraGmailOpportunityId_'s scheme, already the join key
+// v6AuraCampanaAAccountMap_ depends on), then, if that misses, by the deterministic normalized
+// name (accounts for legitimate spelling differences like a missing/extra "Corp" -- never a
+// fuzzy/similarity match that could conflate two different real companies).
+function v6AuraCampanaAMatchReport_() {
+  var sourceRows = v6Rows_('MKT_AURA_CAMPANA_A_SOURCE_ROWS');
+  var accountMap = v6AuraCampanaAAccountMap_();
+  var accounts = v6Rows_('MKT_ACCOUNTS');
+  var accountsById = {}; accounts.forEach(function (a) { accountsById[v6AuraEmailText_(a.accountId)] = a; });
+  var accountsByNormalizedName = {};
+  accounts.forEach(function (a) { accountsByNormalizedName[v6AuraCampanaANormalizeAccountName_(a.accountName)] = a; });
+  var contactsByAccountId = {};
+  v6Rows_('MKT_CONTACTS_SECURE').forEach(function (c) {
+    var id = v6AuraEmailText_(c.accountId);
+    (contactsByAccountId[id] = contactsByAccountId[id] || []).push(c);
+  });
+
+  var uniqueSourceAccountNames = {};
+  sourceRows.forEach(function (r) { if (r.accountName) uniqueSourceAccountNames[r.accountName] = true; });
+  var matchedAccounts = [], unmatchedAccounts = [];
+  Object.keys(uniqueSourceAccountNames).forEach(function (name) {
+    var accountId = null;
+    Object.keys(accountMap).forEach(function (id) { if (v6AuraEmailText_(accountMap[id].accountName) === name) accountId = id; });
+    var byId = accountId && accountsById[accountId];
+    var byName = accountsByNormalizedName[v6AuraCampanaANormalizeAccountName_(name)];
+    if (byId || byName) {
+      matchedAccounts.push({ accountName: name, accountId: accountId || (byName && byName.accountId), matchedVia: byId ? 'ACCOUNT_ID' : 'NORMALIZED_NAME' });
+    } else {
+      unmatchedAccounts.push({ accountName: name, accountId: accountId || '', reason: accountId ? 'ACCOUNT_ID_NOT_IN_MKT_ACCOUNTS' : 'NO_ACCOUNT_ID_DERIVED' });
+    }
+  });
+
+  var contactsWithEmail = sourceRows.filter(function (r) { return r.email; });
+  var matchedContacts = [], unmatchedContacts = [];
+  contactsWithEmail.forEach(function (r) {
+    var accountId = null;
+    Object.keys(accountMap).forEach(function (id) { if (v6AuraEmailText_(accountMap[id].accountName) === r.accountName) accountId = id; });
+    var candidates = (accountId && contactsByAccountId[accountId]) || [];
+    var found = candidates.filter(function (c) { return v6AuraEmailText_(c.email).toLowerCase() === r.email.toLowerCase(); })[0];
+    if (found) matchedContacts.push({ email: r.email, accountName: r.accountName, contactId: found.contactId });
+    else unmatchedContacts.push({ email: r.email, accountName: r.accountName, reason: accountId ? (candidates.length ? 'EMAIL_NOT_FOUND_AMONG_ACCOUNT_CONTACTS' : 'NO_CONTACTS_SECURE_ROWS_FOR_ACCOUNT') : 'ACCOUNT_NOT_MATCHED' });
+  });
+
+  return {
+    sourceRowCount: sourceRows.length,
+    sourceAccountCount: Object.keys(uniqueSourceAccountNames).length,
+    accountsMatched: matchedAccounts.length, accountsUnmatched: unmatchedAccounts.length, unmatchedAccounts: unmatchedAccounts,
+    sourceContactCount: contactsWithEmail.length,
+    contactsMatched: matchedContacts.length, contactsUnmatched: unmatchedContacts.length, unmatchedContacts: unmatchedContacts,
+    tabProvidesContactColumns: contactsWithEmail.length > 0
+  };
 }
 function v6AuraDedicatedAccountIds_() {
   var out = {};
@@ -157,19 +295,49 @@ function v6AuraCountryToLanguage_(country) {
   var key = v6AuraEmailText_(country).toUpperCase();
   return key ? (CAMPANA_A_COUNTRY_LANGUAGE_[key] || '') : '';
 }
-// Priority exactly as specified: (1) an existing reliable language signal on the contact, (2)
-// else derive from country, (3) else EN. Checks several plausible existing column-name spellings
-// defensively (this V6 schema does not declare a fixed 'country'/'language' column today; real
-// production data may carry either under one of these names) rather than assuming one exact
-// name -- an absent field simply falls through to the next rule, never a crash, never a guess
-// beyond what is actually present.
-function v6AuraCampanaAPreferredLanguage_(contact, account) {
+// A real contact-level "language" field found in this codebase's own NOVA import bridge
+// (MarketingImport.js, MKT_IMPORT_SHEETS.contacts.optional) may be populated in full-word or
+// locale-tag form ('Spanish'/'Español'/'es-MX') rather than the bare 'ES'/'EN'/'PT' this
+// pipeline stores -- normalizing common real-world spellings here means a genuine signal in any
+// of those forms is honored instead of silently falling through to a country guess or the EN
+// fallback just because of formatting.
+var CAMPANA_A_LANGUAGE_VALUE_MAP_ = {
+  ES: 'ES', ESP: 'ES', SPANISH: 'ES', ESPANOL: 'ES', 'ESPAÑOL': 'ES', 'ES-ES': 'ES', 'ES-MX': 'ES', 'ES-CO': 'ES', 'ES-US': 'ES', 'ES-419': 'ES',
+  EN: 'EN', ENG: 'EN', ENGLISH: 'EN', INGLES: 'EN', 'INGLÉS': 'EN', 'EN-US': 'EN', 'EN-GB': 'EN', 'EN-CA': 'EN',
+  PT: 'PT', POR: 'PT', PORTUGUESE: 'PT', PORTUGUES: 'PT', 'PORTUGUÊS': 'PT', 'PT-BR': 'PT', 'PT-PT': 'PT'
+};
+function v6AuraCampanaANormalizeLanguageValue_(value) {
+  var key = v6AuraEmailText_(value).toUpperCase();
+  return key ? (CAMPANA_A_LANGUAGE_VALUE_MAP_[key] || '') : '';
+}
+// Priority: (1) an existing reliable LANGUAGE signal already on the contact record (several
+// plausible column names AND several plausible value spellings, both real -- see above); (2)
+// the country column already present on 'Campana A - HA prioritaria' itself, when that tab
+// provides one -- DGL's own instruction is to use it directly as the primary country source for
+// this campaign, since it is the most current, campaign-specific data; (3) a country column on
+// the matched MKT_CONTACTS_SECURE/MKT_ACCOUNTS record, several plausible spellings, as a second
+// fallback; (4) EN, and only EN, when nothing above resolves -- never a guess beyond what is
+// actually present. Every decision returns WHY (languageSource/languageReason) so this can be
+// audited per contact instead of trusted blindly.
+function v6AuraCampanaAPreferredLanguage_(contact, account, tabCountry) {
   var c = contact || {}, a = account || {};
-  var explicit = v6AuraEmailText_(c.preferredLanguage || c.language || c.Idioma || c.idioma || c.Language).toUpperCase();
-  if (explicit === 'ES' || explicit === 'EN' || explicit === 'PT') return explicit;
-  var country = c.country || c.Country || c['país'] || c.pais || a.country || a.Country || a['país'] || a.pais || '';
-  var byCountry = v6AuraCountryToLanguage_(country);
-  return byCountry || 'EN';
+  var explicit = v6AuraCampanaANormalizeLanguageValue_(c.preferredLanguage || c.language || c.Idioma || c.idioma || c.Language);
+  if (explicit) {
+    return { language: explicit, source: 'CONTACT_EXPLICIT_SIGNAL', reason: 'MKT_CONTACTS_SECURE contact-level language field already resolves to ' + explicit };
+  }
+  var tabCountryText = v6AuraEmailText_(tabCountry);
+  if (tabCountryText) {
+    var byTabCountry = v6AuraCountryToLanguage_(tabCountryText);
+    if (byTabCountry) return { language: byTabCountry, source: 'CAMPANA_A_TAB_COUNTRY', reason: "'Campana A - HA prioritaria' row country = '" + tabCountryText + "'" };
+  }
+  var recordCountry = v6AuraEmailText_(c.country || c.Country || c['país'] || c.pais || a.country || a.Country || a['país'] || a.pais);
+  if (recordCountry) {
+    var byRecordCountry = v6AuraCountryToLanguage_(recordCountry);
+    if (byRecordCountry) return { language: byRecordCountry, source: 'CONTACT_OR_ACCOUNT_COUNTRY', reason: "MKT_CONTACTS_SECURE/MKT_ACCOUNTS country = '" + recordCountry + "'" };
+    return { language: 'EN', source: 'EN_FALLBACK_UNMAPPED_COUNTRY', reason: "country value '" + recordCountry + "' (tab: '" + tabCountryText + "') did not match the known country->language map" };
+  }
+  if (tabCountryText) return { language: 'EN', source: 'EN_FALLBACK_UNMAPPED_COUNTRY', reason: "tab country '" + tabCountryText + "' did not match the known country->language map" };
+  return { language: 'EN', source: 'EN_FALLBACK_NO_SIGNAL', reason: 'no contact-level language signal, no Campana A tab country, no MKT_CONTACTS_SECURE/MKT_ACCOUNTS country found under any checked field name' };
 }
 function v6AuraCampanaALanguageCampaignFlag_(lang) {
   return lang === 'EN' ? 'English' : lang === 'PT' ? 'Português (Brasil)' : 'Spanish';
@@ -229,6 +397,16 @@ function v6AuraCampanaABuildQueue_() {
   v6Rows_('MKT_EMAIL_QUEUE').forEach(function (r) { existingIds[v6AuraEmailText_(r.jobId)] = true; });
   var accountsById = {}; v6Rows_('MKT_ACCOUNTS').forEach(function (a) { accountsById[v6AuraEmailText_(a.accountId)] = a; });
   var contactsById = {}; v6Rows_('MKT_CONTACTS_SECURE').forEach(function (c) { contactsById[v6AuraEmailText_(c.contactId)] = c; });
+  // Real country, per real account name, as captured directly from the tab by
+  // v6AuraCampanaAIngestFromSpreadsheet_ (MKT_AURA_CAMPANA_A_SOURCE_ROWS) -- the primary country
+  // source for this campaign per DGL's own instruction, ahead of whatever MKT_CONTACTS_SECURE/
+  // MKT_ACCOUNTS may or may not carry.
+  var tabCountryByAccountName = {};
+  v6Rows_('MKT_AURA_CAMPANA_A_SOURCE_ROWS').forEach(function (r) {
+    if (r.accountName && r.country && !tabCountryByAccountName[r.accountName]) tabCountryByAccountName[r.accountName] = r.country;
+  });
+  var accountPipelineById = {};
+  v6Rows_('MKT_ACCOUNT_PIPELINE').forEach(function (r) { accountPipelineById[v6AuraEmailText_(r.accountId)] = r; });
 
   var replyTo = v6AuraEmailCanonicalReplyTo_();
   var replyToBlocked = !replyTo;
@@ -249,17 +427,25 @@ function v6AuraCampanaABuildQueue_() {
     var account = accountsById[accountId] || {};
     var contact = contactsById[contactId] || {};
     var gmailOpp = accountMap[accountId] || {};
-    var lang = v6AuraCampanaAPreferredLanguage_(contact, account);
-    result.byLanguage[lang] = (result.byLanguage[lang] || 0) + 1;
+    var tabCountry = tabCountryByAccountName[v6AuraEmailText_(gmailOpp.accountName)] || '';
+    var langInfo = v6AuraCampanaAPreferredLanguage_(contact, account, tabCountry);
+    result.byLanguage[langInfo.language] = (result.byLanguage[langInfo.language] || 0) + 1;
     var reliableName = v6AuraCampanaANameReliable_(contact.firstName);
     var vars = {
       firstName: reliableName, company: v6AuraEmailText_(account.accountName) || v6AuraEmailText_(gmailOpp.accountName) || 'your company',
       service: 'Multiservicio', replyTo: replyTo
     };
-    var copy = copyFor(lang);
-    var stopped = v6AuraEmailAccountStopped_(accountId);
+    var copy = copyFor(langInfo.language);
+    // Real, exact stage this account is sitting at -- never just a boolean -- so a STOPPED job
+    // is traceable to precisely why (which stage, when it entered it, and, when known, which
+    // campaignId produced it) instead of an opaque true/false a human would have to re-derive by
+    // hand later. v6PipelineAdvanced_/CLOSED-SUPPRESSED reproduces the exact same stop condition
+    // v6AuraEmailAccountStopped_ already uses -- this does not change what counts as stopped.
+    var pipelineRow = accountPipelineById[accountId] || null;
+    var currentStage = pipelineRow ? String(pipelineRow.currentStage || '').toUpperCase() : '';
+    var stopped = !!currentStage && (currentStage === 'CLOSED / SUPPRESSED' || (typeof v6PipelineAdvanced_ === 'function' && v6PipelineAdvanced_(currentStage)));
     var now = new Date().toISOString();
-    var country = v6AuraEmailText_(contact.country || contact.Country || account.country || account.Country || '');
+    var country = tabCountry || v6AuraEmailText_(contact.country || contact.Country || account.country || account.Country || '');
     var job = {
       jobId: jobId, campaignId: CAMPANA_A_CAMPAIGN_ID_, audienceId: CAMPANA_A_SCOPE_ID_,
       accountId: accountId, contactId: contactId, email: v6AuraEmailText_(r.email),
@@ -271,7 +457,10 @@ function v6AuraCampanaABuildQueue_() {
       requestId: CAMPANA_A_CAMPAIGN_ID_, amOwner: v6AuraEmailText_(gmailOpp.amOwner) || v6AuraEmailText_(account.amOwner) || '',
       playbookId: 'Retention', sequenceStep: sequenceStep, scheduledAt: now,
       approvalId: policyApproved ? '' : ('APR:' + CAMPANA_A_CAMPAIGN_ID_), approvedAt: '', approvedBy: '',
-      stopOnResponse: true, country: country, preferredLanguage: lang
+      stopOnResponse: true, country: country, preferredLanguage: langInfo.language,
+      languageSource: langInfo.source, languageReason: langInfo.reason,
+      stopReasonStage: stopped ? currentStage : '', stopReasonAt: stopped ? v6AuraEmailText_(pipelineRow.responseAt || pipelineRow.enteredStageAt) : '',
+      stopReasonCampaignId: stopped ? v6AuraEmailText_(pipelineRow.campaignId) : ''
     };
     v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);
     existingIds[jobId] = true;
@@ -279,6 +468,26 @@ function v6AuraCampanaABuildQueue_() {
     if (replyToBlocked) result.blockedNoReplyTo++;
   });
   return result;
+}
+
+// --- STOPPED breakdown: exact counts by real stage, never a guess ----------------------------
+// No suppression/frequency/stopOnResponse rule is changed here -- this only reads back the exact
+// stage/timestamp/campaignId v6AuraCampanaABuildQueue_ already captured onto each STOPPED job,
+// grouped for a real, auditable answer to "how many of these were RESPONDED vs QUOTED vs closed,
+// and from which prior campaign."
+function v6AuraCampanaAStoppedBreakdown_() {
+  var jobs = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) { return v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && r.status === 'STOPPED'; });
+  var byStage = {}, byPriorCampaignId = {};
+  jobs.forEach(function (j) {
+    var stage = v6AuraEmailText_(j.stopReasonStage) || 'UNKNOWN';
+    byStage[stage] = (byStage[stage] || 0) + 1;
+    var priorCampaign = v6AuraEmailText_(j.stopReasonCampaignId) || 'UNKNOWN';
+    byPriorCampaignId[priorCampaign] = (byPriorCampaignId[priorCampaign] || 0) + 1;
+  });
+  return {
+    totalStopped: jobs.length, byStage: byStage, byPriorCampaignId: byPriorCampaignId,
+    sample: jobs.slice(0, 10).map(function (j) { return { accountId: j.accountId, stage: j.stopReasonStage, at: j.stopReasonAt, priorCampaignId: j.stopReasonCampaignId }; })
+  };
 }
 
 // --- Dispatch every pending Campana A job (loops the shared 50-per-call dispatcher; safe in
@@ -335,12 +544,16 @@ function v6AuraCampanaAAudit_() {
   // no findings among zero jobs -- an empty/unreachable source is itself the finding.
   var sourceAccountCount = Object.keys(v6AuraCampanaAAccountMap_()).length;
   var sourceEmpty = sourceAccountCount === 0;
+  var byLanguageSource = {};
+  jobs.forEach(function (j) { var s = v6AuraEmailText_(j.languageSource) || 'UNKNOWN'; byLanguageSource[s] = (byLanguageSource[s] || 0) + 1; });
   return Object.assign({}, base, {
     campaignId: CAMPANA_A_CAMPAIGN_ID_, jobsForCampaignA: jobs.length,
     sourceStatus: sourceEmpty ? 'SOURCE_EMPTY_OR_NOT_FOUND' : 'SOURCE_OK', sourceAccountCount: sourceAccountCount,
-    byLanguage: byLanguage, byStatusForCampaignA: byStatus,
+    byLanguage: byLanguage, byLanguageSource: byLanguageSource, byStatusForCampaignA: byStatus,
     teamFirstNameCount: teamFirstNameCount, nonCanonicalReplyToCount: nonCanonicalReplyToCount, invalidEmailCount: invalidEmailCount,
     otherTabsIgnored: v6AuraCampanaAVerifyOtherTabsIgnored_(),
+    stoppedBreakdown: v6AuraCampanaAStoppedBreakdown_(),
+    matchReport: v6AuraCampanaAMatchReport_(),
     clean: sourceEmpty ? false : base.clean
   });
 }
@@ -391,6 +604,10 @@ function RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN() {
       invalidEmailCount: result.audit && result.audit.invalidEmailCount,
       duplicateJobKeys: result.audit && result.audit.duplicateJobKeys,
       byLanguage: result.audit && result.audit.byLanguage,
+      byLanguageSource: result.audit && result.audit.byLanguageSource,
+      headersFound: result.ingest && result.ingest.headersFound,
+      stoppedBreakdown: result.audit && result.audit.stoppedBreakdown,
+      matchReport: result.audit && result.audit.matchReport,
       realSendsDetected: result.audit && result.audit.realSendsDetected,
       findings: result.audit && result.audit.findings
     }));

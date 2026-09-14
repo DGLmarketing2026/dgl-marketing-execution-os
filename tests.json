@@ -480,16 +480,40 @@
         {
           "name": "(added Pass 13) a full end-to-end regenerate against a real, readable source produces real accounts/recipients/jobs and status REGENERATE_COMPLETE, with zero real sends",
           "guarantee": "the fix genuinely closes the loop from a live source tab to real, personalized, governed MKT_EMAIL_QUEUE jobs -- not just a narrower unit-level claim"
+        },
+        {
+          "name": "(added Pass 14) real header names and per-row country/contact/email columns are captured into MKT_AURA_CAMPANA_A_SOURCE_ROWS before any accept/reject decision, and returned as headersFound",
+          "guarantee": "nothing the real tab actually contains is ever silently discarded before it can be inspected, even for rows v6AuraGmailParseTable_ would not have accepted"
+        },
+        {
+          "name": "(added Pass 14) the Campana A tab's own country column is used as the primary country source for language derivation, ahead of the matched MKT_ACCOUNTS/MKT_CONTACTS_SECURE record, and every job records languageSource + languageReason naming the real value that drove the decision",
+          "guarantee": "a language decision is never an opaque final value -- it is traceable to exactly which real field, on which real record, produced it"
+        },
+        {
+          "name": "(added Pass 14) a full-word or locale-tag language value ('Spanish', 'es-MX') is recognized as a real explicit signal, not just the bare 'ES' code",
+          "guarantee": "a genuine language signal already present in MKT_CONTACTS_SECURE (e.g. from the legacy NOVA import bridge) is never missed purely due to formatting"
+        },
+        {
+          "name": "(added Pass 14) v6AuraCampanaAStoppedBreakdown_ reports exact counts of STOPPED jobs by real MKT_ACCOUNT_PIPELINE stage and by the prior campaignId that produced the stop, without changing what counts as stopped",
+          "guarantee": "a high STOPPED count is diagnosable to real, specific causes instead of an opaque aggregate -- the stop rule itself stays exactly as strict as before"
+        },
+        {
+          "name": "(added Pass 14) v6AuraCampanaAMatchReport_ deterministically recovers a legitimate account-name spelling difference (e.g. a missing 'Corp' suffix) via normalized-name matching, while a genuinely different/unmatched account name is reported with a specific reason -- never a silent join, never a fuzzy/similarity guess",
+          "guarantee": "the exact cause of a source-account-to-MKT_ACCOUNTS mismatch is named per account, and two different real companies can never be conflated by the normalization"
+        },
+        {
+          "name": "(added Pass 14) v6AuraCampanaAMatchReport_ correctly evaluates and reports whether the source tab already provides usable contact-level columns (email), and if so, whether each such email already matches a real MKT_CONTACTS_SECURE row for that account",
+          "guarantee": "gives a concrete, evidence-based answer to whether Campana A could work directly from the tab's own contact data, without guessing or requiring a pre-existing NOVA hash match"
         }
       ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full suite re-run after every change in this branch, most recently after fixing the root cause of the 0-recipients run -- Campana A had no direct reference to its real source spreadsheet at all (Pass 13: v6AuraCampanaAIngestFromSpreadsheet_ reads the live source directly by id, fail-closed status at every real failure point, and the audit can no longer report clean:true on an empty source). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
+    "description": "Full suite re-run after every change in this branch, most recently after adding real diagnostic capture/traceability for the first run's three anomalies -- 100% EN language, 69% STOPPED, and a 170/227 recipient gap (Pass 14: tab-country-primary language with full traceability, a real per-stage/per-prior-campaign STOPPED breakdown, and a deterministic account/contact match report -- no suppression, frequency, or stop rule was changed). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
     "totalFiles": 37,
     "passed": 37,
     "failed": 0,
-    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5 through 13's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (37 files total; Pass 13 extended tests/v6-aura-campana-a.test.js in place rather than adding a new file).",
+    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5 through 14's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (37 files total; Pass 14 extended tests/v6-aura-campana-a.test.js in place rather than adding a new file).",
     "failedFiles": []
   }
 }

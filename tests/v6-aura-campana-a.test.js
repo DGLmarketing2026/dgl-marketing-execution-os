@@ -371,6 +371,13 @@ function gmailOpp(accountId, accountName, amOwner, sheetName) {
 function campanaASheetValues(dataRows) {
   return [['Marketing DGL Report'], ['Summary line'], [], ['Cuenta', 'Account Owner', 'Motivo campana', 'Prioridad']].concat(dataRows);
 }
+// A version of the same real layout with extra, plausible per-row columns (País, Contacto,
+// Email) -- used to test the diagnostic capture/traceability pieces without assuming these are
+// the ONLY real header names (the code checks several candidates; these are simply one concrete,
+// realistic example used for testing).
+function campanaASheetValuesWithContacts(dataRows) {
+  return [['Marketing DGL Report'], ['Summary line'], [], ['Cuenta', 'Account Owner', 'Motivo campana', 'Prioridad', 'País', 'Contacto', 'Email']].concat(dataRows);
+}
 
 // 13. The source spreadsheet id resolves from the Script Property when configured, and falls
 // back to the real, Drive-confirmed default id when it is not -- mirroring the established
@@ -462,6 +469,136 @@ function campanaASheetValues(dataRows) {
   assert.equal(out.audit.realSendsDetected, 0);
   assert.equal(ctx.__sentEmails.length, 0);
   console.log('campana-a test 18 (full end-to-end regenerate against a real readable source produces real accounts/recipients/jobs, zero real sends): PASS');
+})();
+
+// 19. The ingest captures every real header name found in the tab (headersFound) and persists a
+// diagnostic row per source row -- including a country column, under whatever real name it has
+// -- BEFORE any accept/reject decision, so nothing is silently lost even if it turns out
+// unused downstream.
+(function sourceRowsCapturedWithRealHeadersTest() {
+  var tables = {};
+  var sheetValues = campanaASheetValuesWithContacts([
+    ['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Brasil', 'Joao Silva', 'joao@progeral.com']
+  ]);
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
+  var ingest = ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  assert.equal(ingest.status, 'OK');
+  assert.deepEqual(ingest.headersFound, ['Cuenta', 'Account Owner', 'Motivo campana', 'Prioridad', 'País', 'Contacto', 'Email']);
+  assert.equal(ingest.rowsWithCountry, 1);
+  assert.equal(ingest.rowsWithContactOrEmail, 1);
+  var sourceRow = tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS[0];
+  assert.equal(sourceRow.country, 'Brasil');
+  assert.equal(sourceRow.countryHeader, 'País');
+  assert.equal(sourceRow.email, 'joao@progeral.com');
+  assert.equal(sourceRow.contactName, 'Joao Silva');
+  console.log('campana-a test 19 (real headers and per-row country/contact/email are captured before any accept/reject decision): PASS');
+})();
+
+// 20. Language traceability: the tab's own country column is used as the primary country source
+// (per DGL's instruction), ahead of whatever MKT_CONTACTS_SECURE/MKT_ACCOUNTS may or may not
+// carry, and every job records languageSource/languageReason -- never a bare, unexplained value.
+(function languageTraceabilityTabCountryPrimaryTest() {
+  var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
+  var sheetValues = campanaASheetValuesWithContacts([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Brasil', '', '']]);
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
+  ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  var realAccountId = tables.MKT_AURA_GMAIL_OPPORTUNITIES[0].accountId;
+  tables.MKT_ACCOUNTS.push({ accountId: realAccountId, accountName: 'Progeral Corp', country: 'United States' });
+  tables.MKT_CONTACTS_SECURE.push({ contactId: 'CON-1', accountId: realAccountId, firstName: 'Joao', email: 'joao@progeral.com' });
+  ctx.v6AuraCampanaABuildQueue_();
+  var job = tables.MKT_EMAIL_QUEUE[0];
+  assert.equal(job.preferredLanguage, 'PT', 'the tab\'s own country (Brasil) must win over the MKT_ACCOUNTS country (United States)');
+  assert.equal(job.languageSource, 'CAMPANA_A_TAB_COUNTRY');
+  assert(job.languageReason.indexOf('Brasil') >= 0, 'the reason must name the real value that drove the decision');
+  console.log('campana-a test 20 (the Campana A tab\'s own country is the primary source, ahead of the matched account\'s record, with a named reason): PASS');
+})();
+
+// 21. Broadened language-value normalization: a real contact-level 'language' field spelled out
+// in full ('Spanish') still resolves correctly, and is still ranked ahead of the tab's country.
+(function languageValueNormalizationTest() {
+  var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
+  var sheetValues = campanaASheetValuesWithContacts([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Brasil', '', '']]);
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
+  ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  var realAccountId = tables.MKT_AURA_GMAIL_OPPORTUNITIES[0].accountId;
+  tables.MKT_ACCOUNTS.push({ accountId: realAccountId, accountName: 'Progeral Corp' });
+  tables.MKT_CONTACTS_SECURE.push({ contactId: 'CON-1', accountId: realAccountId, firstName: 'Joao', email: 'joao@progeral.com', language: 'Spanish' });
+  ctx.v6AuraCampanaABuildQueue_();
+  var job = tables.MKT_EMAIL_QUEUE[0];
+  assert.equal(job.preferredLanguage, 'ES', "a full-word value ('Spanish') must be recognized, not just the bare 'ES' code");
+  assert.equal(job.languageSource, 'CONTACT_EXPLICIT_SIGNAL');
+  console.log('campana-a test 21 (a full-word language value like Spanish/English/Portuguese is recognized, still ranked above the tab country): PASS');
+})();
+
+// 22. STOPPED breakdown reports exact, real counts by stage and by the prior campaignId that
+// produced the stop -- never a guessed percentage -- reading back exactly what
+// v6AuraCampanaABuildQueue_ captured onto each job, without changing what counts as stopped.
+(function stoppedBreakdownRealCountsTest() {
+  var tables = {
+    MKT_AURA_GMAIL_OPPORTUNITIES: [gmailOpp('ACC-1', 'Responded Co', 'Owner'), gmailOpp('ACC-2', 'Quoted Co', 'Owner'), gmailOpp('ACC-3', 'Active Co', 'Owner')],
+    MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Responded Co' }, { accountId: 'ACC-2', accountName: 'Quoted Co' }, { accountId: 'ACC-3', accountName: 'Active Co' }],
+    MKT_CONTACTS_SECURE: [
+      { contactId: 'CON-1', accountId: 'ACC-1', firstName: 'A', email: 'a@respondedco.com', country: 'USA' },
+      { contactId: 'CON-2', accountId: 'ACC-2', firstName: 'B', email: 'b@quotedco.com', country: 'USA' },
+      { contactId: 'CON-3', accountId: 'ACC-3', firstName: 'C', email: 'c@activeco.com', country: 'USA' }
+    ],
+    MKT_ACCOUNT_PIPELINE: [
+      { accountId: 'ACC-1', currentStage: 'RESPONDED', responseAt: '2026-06-01T00:00:00Z', campaignId: 'CMP-OLD-QNB-1' },
+      { accountId: 'ACC-2', currentStage: 'QUOTED', responseAt: '2026-05-15T00:00:00Z', campaignId: 'CMP-OLD-QNB-1' }
+    ]
+  };
+  var ctx = makeContext({ tables: tables });
+  ctx.v6AuraCampanaABuildQueue_();
+  var breakdown = ctx.v6AuraCampanaAStoppedBreakdown_();
+  assert.equal(breakdown.totalStopped, 2);
+  assert.equal(breakdown.byStage.RESPONDED, 1);
+  assert.equal(breakdown.byStage.QUOTED, 1);
+  assert.equal(breakdown.byPriorCampaignId['CMP-OLD-QNB-1'], 2, 'both stops must be traceable to the exact prior campaignId that produced them');
+  var activeJob = tables.MKT_EMAIL_QUEUE.filter(function (j) { return j.accountId === 'ACC-3'; })[0];
+  assert.equal(activeJob.status, 'PENDING', 'an account with no advanced pipeline stage must never be reported as stopped');
+  console.log('campana-a test 22 (STOPPED breakdown reports exact real counts by stage and by the prior campaign that caused it): PASS');
+})();
+
+// 23. Match report: a real, deterministic normalized-name match recovers a legitimate spelling
+// difference (a missing "Corp" suffix), while a genuinely different/unmatched account name is
+// reported with a real reason -- never a silent join, never a fuzzy guess.
+(function matchReportDeterministicNormalizationTest() {
+  var tables = {
+    MKT_AURA_GMAIL_OPPORTUNITIES: [gmailOpp('ACC-MATCH', 'Progeral Corp', 'Owner'), gmailOpp('ACC-NOMATCH', 'Totally Unknown Company', 'Owner')],
+    // MKT_ACCOUNTS spells the SAME real company without "Corp" -- a legitimate difference this
+    // deterministic normalizer must recover, without ever guessing across two different names.
+    MKT_ACCOUNTS: [{ accountId: 'ACC-REAL-1', accountName: 'Progeral' }],
+    MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', accountId: 'ACC-REAL-1', firstName: 'Maria', email: 'maria@progeral.com' }]
+  };
+  var ctx = makeContext({ tables: tables });
+  ctx.v6EnsureContactRecipientSchema_ = function () { return { status: 'SCHEMA READY' }; };
+  // Seed MKT_AURA_CAMPANA_A_SOURCE_ROWS directly, as the ingest step would have written it.
+  tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS = [
+    { sourceRow: 5, accountName: 'Progeral Corp', amOwner: 'Owner', contactName: '', email: '', country: '' },
+    { sourceRow: 6, accountName: 'Totally Unknown Company', amOwner: 'Owner', contactName: '', email: '', country: '' }
+  ];
+  var report = ctx.v6AuraCampanaAMatchReport_();
+  assert.equal(report.sourceAccountCount, 2);
+  assert.equal(report.accountsMatched, 1, 'the normalized-name match must recover "Progeral Corp" vs "Progeral"');
+  assert.equal(report.accountsUnmatched, 1);
+  assert.equal(report.unmatchedAccounts[0].accountName, 'Totally Unknown Company');
+  assert(report.unmatchedAccounts[0].reason, 'every unmatched account must carry a real reason, not just a count');
+  console.log('campana-a test 23 (match report recovers a legitimate "Corp" spelling difference deterministically, reports a real unmatched account with a reason): PASS');
+})();
+
+// 24. Match report evaluates whether the tab itself already provides usable contact columns
+// (email) -- the concrete signal for "can Campana A work directly with these contacts without
+// depending on a NOVA account-hash match."
+(function matchReportEvaluatesDirectContactAvailabilityTest() {
+  var tables = { MKT_AURA_GMAIL_OPPORTUNITIES: [gmailOpp('ACC-1', 'Progeral Corp', 'Owner')], MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
+  tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS = [{ sourceRow: 5, accountName: 'Progeral Corp', amOwner: 'Owner', contactName: 'Joao Silva', email: 'joao@progeral.com', country: 'Brasil' }];
+  var ctx = makeContext({ tables: tables });
+  var report = ctx.v6AuraCampanaAMatchReport_();
+  assert.equal(report.tabProvidesContactColumns, true);
+  assert.equal(report.sourceContactCount, 1);
+  assert.equal(report.contactsMatched, 0, 'no MKT_CONTACTS_SECURE row exists yet for this account, so this real email is currently unmatched');
+  assert.equal(report.unmatchedContacts[0].reason, 'NO_CONTACTS_SECURE_ROWS_FOR_ACCOUNT');
+  console.log('campana-a test 24 (match report correctly evaluates whether the tab already provides usable contact/email columns): PASS');
 })();
 
 console.log('V6 AURA Campana A (dedicated tab, per-contact language, name reliability): ALL PASS');
