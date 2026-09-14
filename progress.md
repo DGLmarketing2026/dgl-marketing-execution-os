@@ -2,6 +2,24 @@
 
 Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
+## Pass 12 — Explicit result logging on RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN
+
+A manual run from the Apps Script editor completed successfully but its Cloud Logging entry
+was not available afterward (retention/availability of a given execution's log is not
+guaranteed), leaving no way to read the real result once the run had already finished.
+`v6AuraCampanaARegenerateDryRun_` itself is unchanged -- no logic, no behavior, no return shape
+touched. The public wrapper now logs (`console.log(JSON.stringify(...))`) the full result object
+plus a flat summary carrying exactly the fields needed at a glance
+(`sendMode, recipients, built, blockedNoReplyTo, dispatchSuppressed, dispatchFailed,
+invalidEmailCount, duplicateJobKeys, byLanguage, realSendsDetected, findings`), wrapped in its
+own try/catch so a logging failure can never mask or replace the real returned result.
+
+Tests: `tests/v6-aura-campana-a.test.js` +1 case confirming the wrapper logs both the full
+result and the flat summary (every required field present) while still returning the exact same
+result the underlying function produces.
+
+Full suite: 37 files, 37 pass, 0 fail.
+
 ## Pass 11 — "Campana A - HA prioritaria" dedicated Phase-1 pipeline
 
 First real activation scope: work with EXACTLY ONE tab (65 accounts / 227 contacts) from the

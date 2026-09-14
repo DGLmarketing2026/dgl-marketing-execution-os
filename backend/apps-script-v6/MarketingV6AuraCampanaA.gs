@@ -291,6 +291,30 @@ function v6AuraCampanaARegenerateDryRun_() {
   var audit = v6AuraCampanaAAudit_();
   return { sendMode: v6AuraSendMode_(), build: build, dispatch: dispatch, audit: audit };
 }
+// Logging lives ONLY in this public wrapper -- v6AuraCampanaARegenerateDryRun_ itself is
+// unchanged, so anything calling it directly (tests, the router) sees identical behavior. A
+// human running this from the Apps Script editor has no other way to see the result once the
+// execution ends (the Cloud Logging entry for a given run is not always available/retained), so
+// this prints the exact same object the function already returns, plus the specific fields DGL
+// asked to see at a glance without parsing the full JSON. Never throws on a logging failure --
+// the real result is still returned either way.
 function RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN() {
-  return v6AuraCampanaARegenerateDryRun_();
+  var result = v6AuraCampanaARegenerateDryRun_();
+  try {
+    console.log(JSON.stringify(result));
+    console.log(JSON.stringify({
+      sendMode: result.sendMode,
+      recipients: result.build && result.build.recipients,
+      built: result.build && result.build.built,
+      blockedNoReplyTo: result.build && result.build.blockedNoReplyTo,
+      dispatchSuppressed: result.dispatch && result.dispatch.suppressed,
+      dispatchFailed: result.dispatch && result.dispatch.failed,
+      invalidEmailCount: result.audit && result.audit.invalidEmailCount,
+      duplicateJobKeys: result.audit && result.audit.duplicateJobKeys,
+      byLanguage: result.audit && result.audit.byLanguage,
+      realSendsDetected: result.audit && result.audit.realSendsDetected,
+      findings: result.audit && result.audit.findings
+    }));
+  } catch (err) { /* logging must never mask the real result */ }
+  return result;
 }

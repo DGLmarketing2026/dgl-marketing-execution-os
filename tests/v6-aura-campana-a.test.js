@@ -22,8 +22,10 @@ function makeContext(opts) {
   var tables = opts.tables || {};
   var props = opts.props || {};
   var sentEmails = [];
+  var loggedLines = [];
   var ctx = {
     String: String, Number: Number, Object: Object, Array: Array, Error: Error, Date: Date, JSON: JSON,
+    console: { log: function (line) { loggedLines.push(line); } },
     PropertiesService: fakePropertiesService(props),
     ScriptApp: { getProjectTriggers: function () { return []; } },
     GmailApp: { sendEmail: function (to, subject, text, options) { sentEmails.push({ to: to, subject: subject, text: text, options: options }); } },
@@ -73,7 +75,7 @@ function makeContext(opts) {
   ctx.v6PipelineAdvanced_ = function (stage) { return ['CAMPAIGN ACTIVE', 'RESPONDED', 'RFQ RECEIVED', 'QUOTED', 'LOAD / REACTIVATED', 'RETAINED / EXPANDED', 'COOLDOWN / NURTURE'].indexOf(String(stage || '').toUpperCase()) >= 0; };
   ctx.v6RecordMarketingTouch_ = function () { return {}; };
   ctx.v6RefreshOpportunitiesFromReports_ = function () { return { status: 'REFRESHED' }; };
-  ctx.__tables = tables; ctx.__sentEmails = sentEmails;
+  ctx.__tables = tables; ctx.__sentEmails = sentEmails; ctx.__loggedLines = loggedLines;
   return ctx;
 }
 
@@ -304,6 +306,32 @@ function gmailOpp(accountId, accountName, amOwner, sheetName) {
   assert.equal(filtered.length, 1);
   assert.equal(filtered[0].accountId, 'ACC-9');
   console.log('campana-a test 11 (dedicated-account exclusion filter keeps Campana A accounts out of the shared family pipeline): PASS');
+})();
+
+// 12. RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN logs the full result AND a flat summary carrying
+// every field DGL asked to see in the execution log (Cloud Logging retention for a given run is
+// not always available, so this is the one place a human running it from the editor can read
+// the outcome) -- while still returning the exact same result v6AuraCampanaARegenerateDryRun_
+// itself produces, unchanged.
+(function wrapperLogsResultTest() {
+  var tables = {
+    MKT_AURA_GMAIL_OPPORTUNITIES: [gmailOpp('ACC-1', 'Progeral Corp', 'Owner')],
+    MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Progeral Corp' }],
+    MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', accountId: 'ACC-1', firstName: 'Maria', email: 'maria@progeral.com', country: 'Colombia' }]
+  };
+  var ctx = makeContext({ tables: tables });
+  var result = ctx.RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN();
+  assert.equal(result.sendMode, 'DRY_RUN', 'the wrapper must still return the exact same result unchanged');
+  assert.equal(ctx.__loggedLines.length, 2, 'the wrapper must log the full result plus the flat summary');
+  var full = JSON.parse(ctx.__loggedLines[0]);
+  assert.equal(full.build.recipients, 1);
+  var summary = JSON.parse(ctx.__loggedLines[1]);
+  ['sendMode', 'recipients', 'built', 'blockedNoReplyTo', 'dispatchSuppressed', 'dispatchFailed', 'invalidEmailCount', 'duplicateJobKeys', 'byLanguage', 'realSendsDetected', 'findings'].forEach(function (key) {
+    assert(key in summary, 'summary log is missing required field: ' + key);
+  });
+  assert.equal(summary.realSendsDetected, 0);
+  assert.equal(summary.built, 1);
+  console.log('campana-a test 12 (RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN logs the full result and a flat summary with every required field): PASS');
 })();
 
 console.log('V6 AURA Campana A (dedicated tab, per-contact language, name reliability): ALL PASS');

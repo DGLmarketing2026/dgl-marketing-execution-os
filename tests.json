@@ -456,16 +456,20 @@
         {
           "name": "the shared family scope-builder's dedicated-account exclusion filter keeps Campana A's accounts out of the generic multi-source pipeline",
           "guarantee": "the same 65 accounts are never processed twice under two different campaignIds with two different (one lower-quality) sets of content"
+        },
+        {
+          "name": "(added Pass 12) RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN logs the full result and a flat summary (sendMode, recipients, built, blockedNoReplyTo, dispatchSuppressed, dispatchFailed, invalidEmailCount, duplicateJobKeys, byLanguage, realSendsDetected, findings) while still returning the exact same result the underlying function produces",
+          "guarantee": "a human running this from the Apps Script editor can read the real outcome even when the execution's Cloud Logging entry is unavailable afterward, without any change to Campana A's own logic or return shape"
         }
       ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full suite re-run after every change in this branch, most recently after adding the dedicated 'Campana A - HA prioritaria' Phase-1 pipeline (Pass 11: tab-restricted ingestion, per-contact ES/EN/PT language, generic-name detection, dedicated-account exclusion from the shared pipeline). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
+    "description": "Full suite re-run after every change in this branch, most recently after adding explicit result logging to RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN (Pass 12: console.log of the full result plus a flat summary of every field DGL needs, since a completed execution's Cloud Logging entry is not always available afterward). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
     "totalFiles": 37,
     "passed": 37,
     "failed": 0,
-    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5 through 11's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (36 files carried forward + 1 new this pass: tests/v6-aura-campana-a.test.js).",
+    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5 through 12's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (37 files total; Pass 12 extended tests/v6-aura-campana-a.test.js in place rather than adding a new file).",
     "failedFiles": []
   }
 }
