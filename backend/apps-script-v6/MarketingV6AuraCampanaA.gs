@@ -19,6 +19,67 @@ var CAMPANA_A_SHEET_NAME_ = 'Campana A - HA prioritaria';
 var CAMPANA_A_CAMPAIGN_ID_ = 'CMP-CAMPANA-A-HA-PRIORITARIA';
 var CAMPANA_A_SCOPE_ID_ = 'SCOPE-CAMPANA-A-HA-PRIORITARIA';
 
+// --- Direct source read ------------------------------------------------------------------------
+// Root cause of the 0-recipients run: this pipeline had NO direct reference to the real source
+// workbook at all -- it only ever read MKT_AURA_GMAIL_OPPORTUNITIES, itself populated
+// exclusively by Gmail message parsing (MarketingV6AuraGmailIngest.gs), and no matching message
+// was ever successfully ingested. 'Marketing_DGL_14-09-2026' is its own standalone spreadsheet
+// (confirmed via Drive metadata: a real file named exactly that, mimeType
+// application/vnd.google-apps.spreadsheet, owned by the same AM lead this project's Gmail
+// ingestion already watches for reports (MarketingV6AuraGmailIngest.gs) -- NOT a tab inside
+// DGL_MARKETING_DATA_HUB, which is a completely different file). The Script Property below is
+// the primary, always-checked-first source of truth (the filename carries a date, so a future
+// reporting cycle's replacement file only requires updating this property, never a code
+// redeploy); CAMPANA_A_SOURCE_SPREADSHEET_ID_DEFAULT_ is that same real, Drive-confirmed id,
+// used only as a fallback so this works immediately without requiring that manual step, exactly
+// mirroring the existing AURA_GMAIL_SOURCE_MAILBOX property+fallback pattern
+// (MarketingV6AuraGmailIngest.gs).
+var CAMPANA_A_SOURCE_SPREADSHEET_ID_PROPERTY_ = 'CAMPANA_A_SOURCE_SPREADSHEET_ID';
+var CAMPANA_A_SOURCE_SPREADSHEET_ID_DEFAULT_ = '1GlYvjGKfhCWxPHoNzjEGDz--dT6t7WV4w2YAXvEXJ_c';
+function v6AuraCampanaAResolveSourceSpreadsheetId_() {
+  return v6AuraEmailText_(PropertiesService.getScriptProperties().getProperty(CAMPANA_A_SOURCE_SPREADSHEET_ID_PROPERTY_)) || CAMPANA_A_SOURCE_SPREADSHEET_ID_DEFAULT_;
+}
+// Reads the LIVE 'Campana A - HA prioritaria' tab directly from its own source spreadsheet every
+// time this runs -- never a cached/emailed snapshot, never data copied into code. Reuses the
+// exact same header-detection/column-parsing engine and idempotent upsert the Gmail attachment
+// path already uses (v6AuraGmailParseTable_ / v6AuraGmailUpsertOpportunity_, both pure
+// data-in/data-out functions with no Gmail dependency of their own) so a row accepted this way is
+// indistinguishable from one accepted via email -- one governed opportunity pipeline, two ways to
+// reach it. Fails closed with a specific, distinguishable status at every real failure point
+// (property unset, file inaccessible, tab missing, tab recognized but empty) -- never silently
+// returns zero rows without saying why.
+function v6AuraCampanaAIngestFromSpreadsheet_() {
+  var spreadsheetId = v6AuraCampanaAResolveSourceSpreadsheetId_();
+  if (!spreadsheetId) return { status: 'SPREADSHEET_ID_NOT_CONFIGURED', spreadsheetId: '' };
+  var ss;
+  try { ss = SpreadsheetApp.openById(spreadsheetId); }
+  catch (err) { return { status: 'SPREADSHEET_NOT_ACCESSIBLE', spreadsheetId: spreadsheetId, error: String(err && err.message || err) }; }
+  var sheet = ss.getSheetByName(CAMPANA_A_SHEET_NAME_);
+  if (!sheet) {
+    return {
+      status: 'TAB_NOT_FOUND', spreadsheetId: spreadsheetId, sheetName: CAMPANA_A_SHEET_NAME_,
+      availableSheets: ss.getSheets().map(function (s) { return s.getName(); })
+    };
+  }
+  var values = sheet.getDataRange().getValues();
+  var ctx = { messageId: 'DIRECT_SPREADSHEET_READ:' + spreadsheetId, receivedAt: new Date().toISOString(), sourceFile: 'Marketing_DGL_14-09-2026' };
+  var parsed = v6AuraGmailParseTable_(CAMPANA_A_SHEET_NAME_, values, ctx);
+  if (!parsed || parsed.unrecognizedLayout) {
+    return { status: 'TAB_EMPTY_OR_UNRECOGNIZED_LAYOUT', spreadsheetId: spreadsheetId, sheetName: CAMPANA_A_SHEET_NAME_, rowsInSheet: values.length };
+  }
+  var created = 0, updated = 0;
+  parsed.accepted.forEach(function (candidate) {
+    var result = v6AuraGmailUpsertOpportunity_(candidate, ctx);
+    if (result === 'created') created++; else updated++;
+  });
+  return {
+    status: parsed.accepted.length ? 'OK' : 'TAB_FOUND_BUT_ZERO_ACCEPTED_ROWS',
+    spreadsheetId: spreadsheetId, sheetName: CAMPANA_A_SHEET_NAME_, rowsInSheet: values.length,
+    rowsParsed: parsed.rowCount, accepted: parsed.accepted.length, rejected: parsed.rejected.length,
+    created: created, updated: updated
+  };
+}
+
 // --- Dedicated-account registry ---------------------------------------------------------------
 // Read by v6AuraAutoBuildScopesForFamily_ (MarketingV6AuraAutomation.gs, typeof-guarded) so
 // these accounts are excluded from the shared, multi-source family scope-builder. Written
@@ -153,7 +214,7 @@ function v6AuraCampanaAEnsureCampaignAndScope_() {
 function v6AuraCampanaABuildQueue_() {
   v6EnsureContactRecipientSchema_();
   var setup = v6AuraCampanaAEnsureCampaignAndScope_();
-  var result = { status: 'QUEUE_BUILD_COMPLETE', campaignId: CAMPANA_A_CAMPAIGN_ID_, accounts: setup.count, recipients: 0, built: 0, skippedExisting: 0, skippedIneligible: 0, blockedNoReplyTo: 0, byLanguage: { ES: 0, EN: 0, PT: 0 } };
+  var result = { status: setup.count ? 'QUEUE_BUILD_COMPLETE' : 'SOURCE_EMPTY_OR_NOT_FOUND', campaignId: CAMPANA_A_CAMPAIGN_ID_, accounts: setup.count, recipients: 0, built: 0, skippedExisting: 0, skippedIneligible: 0, blockedNoReplyTo: 0, byLanguage: { ES: 0, EN: 0, PT: 0 } };
   if (!setup.count) return result;
 
   var accountMap = v6AuraCampanaAAccountMap_();
@@ -269,27 +330,43 @@ function v6AuraCampanaAAudit_() {
     if (v6AuraEmailText_(j.replyTo).toLowerCase() !== canonicalReplyTo) nonCanonicalReplyToCount++;
     if (!v6AuraEmailValid_(j.email)) invalidEmailCount++;
   });
+  // Fail-closed: zero accounts ever resolved from the real source tab is a source problem, never
+  // a quiet "nothing to do." This must never report clean:true just because there happened to be
+  // no findings among zero jobs -- an empty/unreachable source is itself the finding.
+  var sourceAccountCount = Object.keys(v6AuraCampanaAAccountMap_()).length;
+  var sourceEmpty = sourceAccountCount === 0;
   return Object.assign({}, base, {
     campaignId: CAMPANA_A_CAMPAIGN_ID_, jobsForCampaignA: jobs.length,
+    sourceStatus: sourceEmpty ? 'SOURCE_EMPTY_OR_NOT_FOUND' : 'SOURCE_OK', sourceAccountCount: sourceAccountCount,
     byLanguage: byLanguage, byStatusForCampaignA: byStatus,
     teamFirstNameCount: teamFirstNameCount, nonCanonicalReplyToCount: nonCanonicalReplyToCount, invalidEmailCount: invalidEmailCount,
-    otherTabsIgnored: v6AuraCampanaAVerifyOtherTabsIgnored_()
+    otherTabsIgnored: v6AuraCampanaAVerifyOtherTabsIgnored_(),
+    clean: sourceEmpty ? false : base.clean
   });
 }
 
 // --- One convenient, no-argument entry point --------------------------------------------------
-// Forces/confirms DRY_RUN first (never auraEnableLiveSending), reprocesses recent Gmail messages
-// (covers the report having already arrived and been ingested before this tab mapping existed),
-// refreshes MKT_OPPORTUNITIES, rebuilds the dedicated campaign/scope/queue, dispatches every
-// pending job (still DRY_RUN, so zero real sends), then runs the full QA audit.
+// Forces/confirms DRY_RUN first (never auraEnableLiveSending). Reads the live source spreadsheet
+// directly (v6AuraCampanaAIngestFromSpreadsheet_ -- the primary, authoritative source) so this
+// always reflects the CURRENT tab content, never a stale copy; the Gmail-message reprocess stays
+// as a non-fatal, best-effort second path (covers a deployment where the report genuinely does
+// arrive by email) and can never block the direct read if it errors. Then refreshes
+// MKT_OPPORTUNITIES, rebuilds the dedicated campaign/scope/queue, dispatches every pending job
+// (still DRY_RUN, so zero real sends), then runs the full QA audit.
 function v6AuraCampanaARegenerateDryRun_() {
   auraDisableLiveSending();
-  if (typeof v6AuraGmailReprocessRecent_ === 'function') v6AuraGmailReprocessRecent_(45);
+  var ingest = v6AuraCampanaAIngestFromSpreadsheet_();
+  if (typeof v6AuraGmailReprocessRecent_ === 'function') {
+    try { v6AuraGmailReprocessRecent_(45); } catch (err) { /* best-effort fallback source only, never fatal to the direct read */ }
+  }
   if (typeof v6RefreshOpportunitiesFromReports_ === 'function') v6RefreshOpportunitiesFromReports_();
   var build = v6AuraCampanaABuildQueue_();
   var dispatch = v6AuraCampanaADispatchAll_();
   var audit = v6AuraCampanaAAudit_();
-  return { sendMode: v6AuraSendMode_(), build: build, dispatch: dispatch, audit: audit };
+  return {
+    status: audit.sourceStatus === 'SOURCE_EMPTY_OR_NOT_FOUND' ? 'SOURCE_EMPTY_OR_NOT_FOUND' : 'REGENERATE_COMPLETE',
+    sendMode: v6AuraSendMode_(), ingest: ingest, build: build, dispatch: dispatch, audit: audit
+  };
 }
 // Logging lives ONLY in this public wrapper -- v6AuraCampanaARegenerateDryRun_ itself is
 // unchanged, so anything calling it directly (tests, the router) sees identical behavior. A
@@ -303,6 +380,8 @@ function RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN() {
   try {
     console.log(JSON.stringify(result));
     console.log(JSON.stringify({
+      status: result.status, sourceStatus: result.audit && result.audit.sourceStatus,
+      spreadsheetId: result.ingest && result.ingest.spreadsheetId, ingestStatus: result.ingest && result.ingest.status,
       sendMode: result.sendMode,
       recipients: result.build && result.build.recipients,
       built: result.build && result.build.built,

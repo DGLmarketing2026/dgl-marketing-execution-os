@@ -2,6 +2,50 @@
 
 Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
+## Pass 13 — Root-cause fix: Campana A had no direct reference to its real source at all
+
+The first real execution returned `accounts: 0 / recipients: 0 / built: 0`. Root cause: this
+pipeline never read any spreadsheet directly for its source data -- it only ever read
+`MKT_AURA_GMAIL_OPPORTUNITIES`, itself populated exclusively by Gmail message parsing, and no
+matching message had ever been successfully ingested. `Marketing_DGL_14-09-2026` turned out to
+be its OWN standalone spreadsheet (confirmed via real Drive metadata: a file named exactly that,
+`mimeType: application/vnd.google-apps.spreadsheet`) -- NOT a tab inside `DGL_MARKETING_DATA_HUB`
+(a completely different file/id), and this pipeline had no code path that ever looked at it.
+
+Fixed with a direct, dynamic read rather than copying the 227 contacts into code: added
+`v6AuraCampanaAIngestFromSpreadsheet_()`, which opens the source spreadsheet by id
+(`SpreadsheetApp.openById`, real-time -- every call re-reads whatever the tab currently
+contains, never a cached snapshot) and reuses the EXACT SAME header-detection/column-parsing
+engine and idempotent upsert the Gmail-attachment path already uses
+(`v6AuraGmailParseTable_`/`v6AuraGmailUpsertOpportunity_`, both pure data-in/data-out with no
+Gmail dependency of their own) -- a row read this way is indistinguishable from one that arrived
+by email. The spreadsheet id is resolved from a Script Property
+(`CAMPANA_A_SOURCE_SPREADSHEET_ID`) first -- since the filename itself carries a date, a future
+reporting cycle's replacement file only requires updating this property, never a redeploy --
+falling back to the real, Drive-confirmed id for the current file, mirroring the exact
+property+fallback pattern `AURA_GMAIL_SOURCE_MAILBOX` already uses. `v6AuraCampanaARegenerateDryRun_`
+now calls this as the primary source and keeps the Gmail-message reprocess only as a
+non-fatal, best-effort second path.
+
+Fails closed at every real failure point instead of a silent zero: `SPREADSHEET_NOT_ACCESSIBLE`,
+`TAB_NOT_FOUND` (lists the tabs that DO exist, for diagnosis), `TAB_EMPTY_OR_UNRECOGNIZED_LAYOUT`,
+`TAB_FOUND_BUT_ZERO_ACCEPTED_ROWS`. Per the explicit requirement that zero recipients must never
+read as a clean audit: `v6AuraCampanaAAudit_` now computes `sourceAccountCount` from the real
+account registry and reports `sourceStatus: 'SOURCE_EMPTY_OR_NOT_FOUND'` with `clean` forced to
+`false` whenever it is zero -- an empty/unreachable source is itself the finding, never a quiet
+"nothing to report." `v6AuraCampanaARegenerateDryRun_`'s top-level `status` mirrors the same
+signal, and the wrapper's log line now also prints `status`/`sourceStatus`/`spreadsheetId`/
+`ingestStatus` alongside the fields already logged in Pass 12.
+
+Tests: `tests/v6-aura-campana-a.test.js` +6 cases: the spreadsheet id resolves from the Script
+Property or falls back to the real default; an inaccessible spreadsheet and a missing tab both
+fail closed with a specific status; reading a real, mock spreadsheet ingests real rows the rest
+of the pipeline picks up exactly like an emailed report would; a genuinely empty source reports
+`SOURCE_EMPTY_OR_NOT_FOUND` end to end with `clean:false`; and a full end-to-end regenerate
+against a real readable source produces real accounts/recipients/jobs with zero real sends.
+
+Full suite: 37 files, 37 pass, 0 fail.
+
 ## Pass 12 — Explicit result logging on RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN
 
 A manual run from the Apps Script editor completed successfully but its Cloud Logging entry

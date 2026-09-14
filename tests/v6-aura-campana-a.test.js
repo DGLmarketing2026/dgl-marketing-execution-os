@@ -10,6 +10,28 @@ function fakePropertiesService(store) {
   store = store || {};
   return { getScriptProperties: function () { return { getProperty: function (k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; }, setProperty: function (k, v) { store[k] = v; return this; } }; } };
 }
+// spec: {throws: true} to simulate an inaccessible spreadsheet, or {sheets: {sheetName: values2D}}
+// to simulate a real, readable workbook. Defaults to an accessible spreadsheet with NO tabs at
+// all (TAB_NOT_FOUND) -- close to the real-world default of "nothing configured yet" and, for
+// tests that don't care about the ingest step (they seed MKT_AURA_GMAIL_OPPORTUNITIES directly),
+// this fails gracefully rather than throwing.
+function fakeSpreadsheetApp(spec) {
+  spec = spec || {};
+  return {
+    openById: function (id) {
+      if (spec.throws) throw new Error('SPREADSHEET NOT ACCESSIBLE: ' + id);
+      var sheets = spec.sheets || {};
+      return {
+        getSheetByName: function (name) {
+          if (!Object.prototype.hasOwnProperty.call(sheets, name)) return null;
+          var values = sheets[name];
+          return { getDataRange: function () { return { getValues: function () { return values; } }; } };
+        },
+        getSheets: function () { return Object.keys(sheets).map(function (n) { return { getName: function () { return n; } }; }); }
+      };
+    }
+  };
+}
 
 // Same testing philosophy as tests/v6-aura-email-dispatcher.test.js: this file isolates what is
 // genuinely NEW in this pass (tab restriction, per-contact language, name reliability, the
@@ -27,6 +49,7 @@ function makeContext(opts) {
     String: String, Number: Number, Object: Object, Array: Array, Error: Error, Date: Date, JSON: JSON,
     console: { log: function (line) { loggedLines.push(line); } },
     PropertiesService: fakePropertiesService(props),
+    SpreadsheetApp: fakeSpreadsheetApp(opts.spreadsheetApp),
     ScriptApp: { getProjectTriggers: function () { return []; } },
     GmailApp: { sendEmail: function (to, subject, text, options) { sentEmails.push({ to: to, subject: subject, text: text, options: options }); } },
     DGL_CONFIG: { DEFAULT_SENDER_NAME: 'DGL' }
@@ -68,6 +91,17 @@ function makeContext(opts) {
     return { audienceResolved: true };
   };
   ctx.v6AuraDeriveExecutionId_ = function (campaignId) { return 'EXEC-' + campaignId; };
+  // Real v6AuraGmailUpsertOpportunity_ (MarketingV6AuraGmailIngest.gs) derives a deterministic
+  // accountId via v6NormAccount_/v6HashKey_ (MarketingV6ReportIngestion.gs, not loaded here --
+  // out of scope for this file). A simple, deterministic stand-in is enough: same normalized
+  // name always maps to the same accountId, which is all the real upsert logic depends on.
+  ctx.v6NormAccount_ = function (v) { return String(v || '').trim().toLowerCase().replace(/\s+/g, ' '); };
+  ctx.v6HashKey_ = function (text) { var s = String(text || ''), h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return 'H' + Math.abs(h).toString(16).toUpperCase(); };
+  // v6AuraGmailRows_/v6AuraGmailEnsureSheet_ (MarketingV6AuraGmailIngest.gs) normally ensure the
+  // real sheet's headers via v6AcqEnsureSheet_ (MarketingV6AcquisitionEngine.gs, not loaded here
+  // -- out of scope). Table existence is already handled by the stubbed v6Rows_/v6UpsertByKey_
+  // above, so this only needs to be a harmless no-op.
+  ctx.v6AcqEnsureSheet_ = function () { return null; };
   ctx.v6AuraPolicyApproved_ = opts.policyApproved === false ? function () { return false; } : function () { return true; };
   ctx.v6FrequencyStatus_ = function () { return { eligible: true, status: 'CLEAR' }; };
   ctx.v6RecipientEmailValid_ = function (email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').toLowerCase()); };
@@ -332,6 +366,102 @@ function gmailOpp(accountId, accountName, amOwner, sheetName) {
   assert.equal(summary.realSendsDetected, 0);
   assert.equal(summary.built, 1);
   console.log('campana-a test 12 (RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN logs the full result and a flat summary with every required field): PASS');
+})();
+
+function campanaASheetValues(dataRows) {
+  return [['Marketing DGL Report'], ['Summary line'], [], ['Cuenta', 'Account Owner', 'Motivo campana', 'Prioridad']].concat(dataRows);
+}
+
+// 13. The source spreadsheet id resolves from the Script Property when configured, and falls
+// back to the real, Drive-confirmed default id when it is not -- mirroring the established
+// AURA_GMAIL_SOURCE_MAILBOX property+fallback pattern.
+(function resolveSourceSpreadsheetIdTest() {
+  var ctx1 = makeContext({});
+  assert.equal(ctx1.v6AuraCampanaAResolveSourceSpreadsheetId_(), '1GlYvjGKfhCWxPHoNzjEGDz--dT6t7WV4w2YAXvEXJ_c');
+  var ctx2 = makeContext({ props: { CAMPANA_A_SOURCE_SPREADSHEET_ID: 'CUSTOM-ID-123' } });
+  assert.equal(ctx2.v6AuraCampanaAResolveSourceSpreadsheetId_(), 'CUSTOM-ID-123', 'an explicitly configured property must override the default');
+  console.log('campana-a test 13 (source spreadsheet id resolves from property, falls back to the real default): PASS');
+})();
+
+// 14. An inaccessible spreadsheet fails closed with a specific, distinguishable status -- never
+// a silent zero.
+(function ingestSpreadsheetNotAccessibleTest() {
+  var ctx = makeContext({ spreadsheetApp: { throws: true } });
+  var out = ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  assert.equal(out.status, 'SPREADSHEET_NOT_ACCESSIBLE');
+  console.log('campana-a test 14 (an inaccessible source spreadsheet fails closed with SPREADSHEET_NOT_ACCESSIBLE): PASS');
+})();
+
+// 15. A spreadsheet that opens fine but has no tab by this exact name fails closed with
+// TAB_NOT_FOUND and lists the tabs that DO exist, for diagnosis.
+(function ingestTabNotFoundTest() {
+  var ctx = makeContext({ spreadsheetApp: { sheets: { 'Campana B': campanaASheetValues([]) } } });
+  var out = ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  assert.equal(out.status, 'TAB_NOT_FOUND');
+  assert.deepEqual(out.availableSheets, ['Campana B']);
+  console.log('campana-a test 15 (a missing exact-name tab fails closed with TAB_NOT_FOUND, listing what does exist): PASS');
+})();
+
+// 16. The real happy path: reading the live source spreadsheet directly ingests real rows into
+// MKT_AURA_GMAIL_OPPORTUNITIES with the correct sourceSheet, which the rest of the pipeline
+// (account map, queue build) then picks up exactly as if it had arrived by email -- proving this
+// is dynamic, not a copy-pasted fixture.
+(function ingestFromSpreadsheetFullPipelineTest() {
+  var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
+  var sheetValues = campanaASheetValues([
+    ['Progeral Corp', 'Luis Simoes', 'HA priority', 'High'],
+    ['Shipper Co', 'Ana Ruiz', 'HA priority', 'High']
+  ]);
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
+  var ingest = ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  assert.equal(ingest.status, 'OK');
+  assert.equal(ingest.accepted, 2);
+  assert.equal(ingest.created, 2);
+  var opp = tables.MKT_AURA_GMAIL_OPPORTUNITIES.filter(function (r) { return r.accountName === 'Progeral Corp'; })[0];
+  assert.equal(opp.sourceSheet, 'Campana A - HA prioritaria');
+  assert.equal(opp.amOwner, 'Luis Simoes');
+  var accountMap = ctx.v6AuraCampanaAAccountMap_();
+  assert.equal(Object.keys(accountMap).length, 2, 'both real rows read directly from the spreadsheet must be picked up by the account registry');
+  console.log('campana-a test 16 (reading the live source spreadsheet directly ingests real rows the rest of the pipeline picks up): PASS');
+})();
+
+// 17. Fail-closed end to end: when the source resolves to zero accounts (nothing ingested), the
+// full regenerate reports status SOURCE_EMPTY_OR_NOT_FOUND at the top level and the audit is
+// NEVER reported clean:true just because there happened to be no findings among zero jobs.
+(function failClosedOnEmptySourceTest() {
+  var ctx = makeContext({ spreadsheetApp: { sheets: {} } });
+  var out = ctx.v6AuraCampanaARegenerateDryRun_();
+  assert.equal(out.status, 'SOURCE_EMPTY_OR_NOT_FOUND');
+  assert.equal(out.build.accounts, 0);
+  assert.equal(out.audit.sourceStatus, 'SOURCE_EMPTY_OR_NOT_FOUND');
+  assert.equal(out.audit.clean, false, 'an empty/unreachable source must never be reported as a clean audit');
+  console.log('campana-a test 17 (zero accounts from the source fails closed: SOURCE_EMPTY_OR_NOT_FOUND, audit never clean:true): PASS');
+})();
+
+// 18. Full end-to-end regenerate against a real, readable source: real accounts, real
+// recipients, real jobs, status REGENERATE_COMPLETE, still zero real sends.
+(function fullEndToEndRegenerateWithRealSourceTest() {
+  var tables = {
+    MKT_ACCOUNTS: [{ accountId: 'ACC-PROGERAL', accountName: 'Progeral Corp' }],
+    MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', accountId: 'ACC-PROGERAL', firstName: 'Maria', email: 'maria@progeral.com', country: 'Colombia' }]
+  };
+  // v6AuraGmailOpportunityId_ derives accountId as 'ACC-' + hash(normalized account name); to
+  // keep this test independent of that exact hash function, seed the contact under whatever
+  // accountId the real ingest actually produced.
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': campanaASheetValues([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High']]) } } });
+  var ingested = ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  var realAccountId = ctx.__tables.MKT_AURA_GMAIL_OPPORTUNITIES[0].accountId;
+  tables.MKT_CONTACTS_SECURE[0].accountId = realAccountId;
+  tables.MKT_ACCOUNTS[0].accountId = realAccountId;
+  var out = ctx.v6AuraCampanaARegenerateDryRun_();
+  assert.equal(out.status, 'REGENERATE_COMPLETE');
+  assert.equal(out.build.accounts, 1);
+  assert.equal(out.build.recipients, 1);
+  assert.equal(out.build.built, 1);
+  assert.equal(out.audit.sourceStatus, 'SOURCE_OK');
+  assert.equal(out.audit.realSendsDetected, 0);
+  assert.equal(ctx.__sentEmails.length, 0);
+  console.log('campana-a test 18 (full end-to-end regenerate against a real readable source produces real accounts/recipients/jobs, zero real sends): PASS');
 })();
 
 console.log('V6 AURA Campana A (dedicated tab, per-contact language, name reliability): ALL PASS');

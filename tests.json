@@ -460,16 +460,36 @@
         {
           "name": "(added Pass 12) RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN logs the full result and a flat summary (sendMode, recipients, built, blockedNoReplyTo, dispatchSuppressed, dispatchFailed, invalidEmailCount, duplicateJobKeys, byLanguage, realSendsDetected, findings) while still returning the exact same result the underlying function produces",
           "guarantee": "a human running this from the Apps Script editor can read the real outcome even when the execution's Cloud Logging entry is unavailable afterward, without any change to Campana A's own logic or return shape"
+        },
+        {
+          "name": "(added Pass 13) the source spreadsheet id resolves from the CAMPANA_A_SOURCE_SPREADSHEET_ID Script Property when configured, and falls back to the real, Drive-confirmed default id otherwise",
+          "guarantee": "a future reporting cycle's replacement file only requires updating one property, never a code redeploy"
+        },
+        {
+          "name": "(added Pass 13) an inaccessible source spreadsheet, and a spreadsheet missing the exact tab name, both fail closed with a specific status (SPREADSHEET_NOT_ACCESSIBLE / TAB_NOT_FOUND, the latter listing the tabs that DO exist)",
+          "guarantee": "a real source-access problem is reported precisely, never silently swallowed into a generic zero"
+        },
+        {
+          "name": "reading a real, readable mock source spreadsheet directly ingests real opportunity rows (correct sourceSheet, correct amOwner) which v6AuraCampanaAAccountMap_ and the rest of the pipeline then pick up exactly as if they had arrived by email",
+          "guarantee": "AURA reads the live, dynamically-updated source every time -- never a snapshot copied into code -- confirmed by exercising the real v6AuraGmailParseTable_/v6AuraGmailUpsertOpportunity_ engines end to end, not a re-mocked contract"
+        },
+        {
+          "name": "(added Pass 13) a genuinely empty/unreachable source reports status SOURCE_EMPTY_OR_NOT_FOUND at the top level of v6AuraCampanaARegenerateDryRun_'s result, and the audit's clean field is forced to false -- never a clean report on zero accounts",
+          "guarantee": "the exact bug DGL found (a 0-recipients run silently reporting clean:true) can never happen again"
+        },
+        {
+          "name": "(added Pass 13) a full end-to-end regenerate against a real, readable source produces real accounts/recipients/jobs and status REGENERATE_COMPLETE, with zero real sends",
+          "guarantee": "the fix genuinely closes the loop from a live source tab to real, personalized, governed MKT_EMAIL_QUEUE jobs -- not just a narrower unit-level claim"
         }
       ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full suite re-run after every change in this branch, most recently after adding explicit result logging to RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN (Pass 12: console.log of the full result plus a flat summary of every field DGL needs, since a completed execution's Cloud Logging entry is not always available afterward). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
+    "description": "Full suite re-run after every change in this branch, most recently after fixing the root cause of the 0-recipients run -- Campana A had no direct reference to its real source spreadsheet at all (Pass 13: v6AuraCampanaAIngestFromSpreadsheet_ reads the live source directly by id, fail-closed status at every real failure point, and the audit can no longer report clean:true on an empty source). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
     "totalFiles": 37,
     "passed": 37,
     "failed": 0,
-    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5 through 12's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (37 files total; Pass 12 extended tests/v6-aura-campana-a.test.js in place rather than adding a new file).",
+    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5 through 13's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (37 files total; Pass 13 extended tests/v6-aura-campana-a.test.js in place rather than adding a new file).",
     "failedFiles": []
   }
 }

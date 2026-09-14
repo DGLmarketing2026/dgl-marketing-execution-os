@@ -139,6 +139,8 @@ function routeMarketingV6_(action, payload) {
       return typeof v6AuraCampanaARegenerateDryRun_ === 'function' ? v6AuraCampanaARegenerateDryRun_(p) : v6RouteMissing_(a, 'v6AuraCampanaARegenerateDryRun_');
     case 'v6AuraCampanaAAudit':
       return typeof v6AuraCampanaAAudit_ === 'function' ? v6AuraCampanaAAudit_(p) : v6RouteMissing_(a, 'v6AuraCampanaAAudit_');
+    case 'v6AuraCampanaAIngestFromSpreadsheet':
+      return typeof v6AuraCampanaAIngestFromSpreadsheet_ === 'function' ? v6AuraCampanaAIngestFromSpreadsheet_(p) : v6RouteMissing_(a, 'v6AuraCampanaAIngestFromSpreadsheet_');
     default:
       return null;
   }
