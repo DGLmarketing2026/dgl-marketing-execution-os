@@ -104,7 +104,18 @@ function v6AuraEmailHtml_(campaign, copy, vars) {
   var proof = MKT_V6_AURA_COPY_SERVICE_PROOF[service] || MKT_V6_AURA_COPY_SERVICE_PROOF.Multiservicio;
   var h = v6AuraSample_(copy.headline, company, service, firstName), b = v6AuraSample_(copy.body, company, service, firstName), b2 = v6AuraSample_(copy.body2, company, service, firstName), pre = v6AuraSample_(copy.preheader, company, service, firstName);
   var proofRow = proof.map(function (p) { return '<td style="padding:0 16px 0 0;font-family:Arial,sans-serif"><div style="width:18px;height:2px;background:#77B82A;margin-bottom:7px"></div><div style="font-size:9px;font-weight:800;line-height:1.35;color:#526071">' + e(p) + '</div></td>'; }).join('');
-  var button = '<table role="presentation" cellspacing="0" cellpadding="0"><tr><td bgcolor="#77B82A" style="border-radius:7px"><a href="#" style="display:inline-block;padding:14px 21px;font-family:Arial,sans-serif;font-size:12px;font-weight:900;color:#071005;text-decoration:none">' + e(copy.cta) + ' &rarr;</a></td></tr></table>';
+  // The CTA must be a real, working action -- never a placeholder href="#". A mailto: to the
+  // exact same canonical DGL address this job's real Reply-To header carries
+  // (v6AuraEmailCanonicalReplyTo_, MarketingV6AuraEmailDispatcher.gs), pre-filled with the
+  // real, already-personalized subject line, so a click genuinely lets the customer reply or
+  // request a movement -- no fabricated URL, no invented alias. v.replyTo is what
+  // v6AuraBuildEmailQueueForCampaign_ passes for a real per-job send; the typeof-guarded call
+  // only covers the scope-level archive/preview call, which has no per-job replyTo yet -- if
+  // MarketingV6AuraEmailDispatcher.gs isn't loaded (it always is in the real deployment), this
+  // degrades to no CTA link rather than duplicating that file's own mailbox literal here.
+  var replyToAddr = v.replyTo || (typeof v6AuraEmailCanonicalReplyTo_ === 'function' ? v6AuraEmailCanonicalReplyTo_() : '');
+  var ctaHref = replyToAddr ? ('mailto:' + replyToAddr + '?subject=' + encodeURIComponent(v6AuraSample_(copy.subjectA, company, service, firstName))) : '';
+  var button = '<table role="presentation" cellspacing="0" cellpadding="0"><tr><td bgcolor="#77B82A" style="border-radius:7px"><a href="' + e(ctaHref) + '" style="display:inline-block;padding:14px 21px;font-family:Arial,sans-serif;font-size:12px;font-weight:900;color:#071005;text-decoration:none">' + e(copy.cta) + ' &rarr;</a></td></tr></table>';
   return '<!doctype html><html><body style="margin:0;background:#F4F5F7">'
     + '<div style="display:none;max-height:0;overflow:hidden">' + e(pre) + '</div>'
     + '<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:34px 12px">'

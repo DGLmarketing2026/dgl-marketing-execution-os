@@ -77,6 +77,21 @@ function v6AuraEmailValid_(email) {
   if (typeof v6RecipientEmailValid_ === 'function') return v6RecipientEmailValid_(email);
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').toLowerCase());
 }
+// The canonical DGL reply-to identity -- the SAME Script Property key
+// (AURA_GMAIL_SOURCE_MAILBOX) MarketingV6AuraGmailIngest.gs already reads for the real AM-report
+// inbox, with the identical hardcoded 'info@dglus.com' fallback that file already uses. No new
+// mailbox/alias is ever invented here: this is the one real, already-configured DGL identity the
+// project sends from (GmailApp.sendEmail runs as this same account) and already monitors for
+// inbound mail, so replies naturally land in a mailbox someone is already reading. Returns ''
+// (never a guessed or malformed address) if the configured value fails basic email validation --
+// callers must treat an empty result as REPLY-TO NOT CONFIGURED and block the send, never invent
+// a substitute.
+var AURA_CANONICAL_REPLY_TO_PROPERTY_KEY_ = 'AURA_GMAIL_SOURCE_MAILBOX';
+var AURA_CANONICAL_REPLY_TO_FALLBACK_ = 'info@dglus.com';
+function v6AuraEmailCanonicalReplyTo_() {
+  var configured = v6AuraEmailText_(PropertiesService.getScriptProperties().getProperty(AURA_CANONICAL_REPLY_TO_PROPERTY_KEY_)) || AURA_CANONICAL_REPLY_TO_FALLBACK_;
+  return v6AuraEmailValid_(configured) ? configured : '';
+}
 function v6AuraEmailAccountById_(accountId) {
   return v6Rows_('MKT_ACCOUNTS').filter(function (r) { return v6AuraEmailText_(r.accountId) === accountId; })[0] || null;
 }
@@ -135,7 +150,7 @@ function v6AuraBuildEmailQueueForCampaign_(campaign) {
       v6AuraEmailText_(r.campaignId) === campaign.campaignId &&
       v6AuraEmailText_(r.eligibilityStatus).toUpperCase() === 'ELIGIBLE';
   });
-  var result = { campaignId: campaign.campaignId, built: 0, skippedExisting: 0, skippedIneligible: 0, recipients: recipients.length };
+  var result = { campaignId: campaign.campaignId, built: 0, skippedExisting: 0, skippedIneligible: 0, blockedNoReplyTo: 0, recipients: recipients.length };
   if (!recipients.length) return result;
 
   var existingIds = {};
@@ -153,10 +168,19 @@ function v6AuraBuildEmailQueueForCampaign_(campaign) {
 
     var account = v6AuraEmailAccountById_(accountId) || {};
     var contact = v6AuraEmailContactById_(contactId) || {};
+    // Reply-To must be a real, already-configured DGL identity -- never invented. A campaign
+    // never sets its own replyTo (MKT_CAMPAIGNS has no such field), so this always resolves to
+    // the one canonical mailbox (see v6AuraEmailCanonicalReplyTo_); if even the hardcoded
+    // fallback there ever failed validation, replyTo comes back '' and the job is built as
+    // SUPPRESSED / MISSING_REPLY_TO_CONFIGURATION instead of ever reaching PENDING -- it can
+    // never be dispatched, in DRY_RUN or LIVE, without a real reply address.
+    var replyTo = campaign.replyTo || v6AuraEmailCanonicalReplyTo_();
+    var replyToBlocked = !replyTo;
     var vars = {
       firstName: v6AuraEmailText_(contact.firstName) || 'Team',
       company: v6AuraEmailText_(account.accountName) || 'your company',
-      service: v6AuraEmailText_(campaign.service) || 'freight'
+      service: v6AuraEmailText_(campaign.service) || 'freight',
+      replyTo: replyTo
     };
     var stopped = v6AuraEmailAccountStopped_(accountId);
     var job = {
@@ -164,9 +188,9 @@ function v6AuraBuildEmailQueueForCampaign_(campaign) {
       accountId: accountId, contactId: contactId, email: v6AuraEmailText_(r.email),
       firstName: vars.firstName, company: vars.company, service: vars.service,
       subject: v6AuraEmailMergeTokens_(copy.subjectA, vars), htmlBody: v6AuraEmailHtml_(campaign, copy, vars),
-      replyTo: campaign.replyTo || '',
-      status: stopped ? 'STOPPED' : (policyApproved ? 'PENDING' : 'REVIEW_REQUIRED'),
-      gmailDraftId: '', createdAt: now, processedAt: '', error: '',
+      replyTo: replyTo,
+      status: stopped ? 'STOPPED' : (replyToBlocked ? 'SUPPRESSED' : (policyApproved ? 'PENDING' : 'REVIEW_REQUIRED')),
+      gmailDraftId: '', createdAt: now, processedAt: '', error: replyToBlocked ? 'MISSING_REPLY_TO_CONFIGURATION' : '',
       requestId: (typeof v6AuraDeriveExecutionId_ === 'function') ? v6AuraDeriveExecutionId_(campaign.campaignId) : '',
       amOwner: campaign.amOwner || '', playbookId: campaign.objective || campaign.campaignType || '',
       sequenceStep: sequenceStep, scheduledAt: now,
@@ -177,6 +201,7 @@ function v6AuraBuildEmailQueueForCampaign_(campaign) {
     v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);
     existingIds[jobId] = true;
     result.built++;
+    if (replyToBlocked) result.blockedNoReplyTo++;
   });
   return result;
 }
@@ -189,8 +214,65 @@ function v6AuraBuildRetentionEmailQueue_() {
     return AURA_EMAIL_QUEUE_FAMILIES_.indexOf(v6AuraEmailText_(c.objective || c.campaignType)) >= 0 && v6AuraEmailText_(c.status) === 'AUTO_ACTIVE';
   });
   var results = campaigns.map(v6AuraBuildEmailQueueForCampaign_);
-  var totals = results.reduce(function (acc, r) { acc.built += r.built; acc.skippedExisting += r.skippedExisting; acc.skippedIneligible += r.skippedIneligible; acc.recipients += r.recipients; return acc; }, { built: 0, skippedExisting: 0, skippedIneligible: 0, recipients: 0 });
+  var totals = results.reduce(function (acc, r) { acc.built += r.built; acc.skippedExisting += r.skippedExisting; acc.skippedIneligible += r.skippedIneligible; acc.blockedNoReplyTo += r.blockedNoReplyTo || 0; acc.recipients += r.recipients; return acc; }, { built: 0, skippedExisting: 0, skippedIneligible: 0, blockedNoReplyTo: 0, recipients: 0 });
   return { status: 'QUEUE_BUILD_COMPLETE', campaigns: campaigns.length, totals: totals, byCampaign: results };
+}
+
+// Repairs content on jobs already built BEFORE a content-level fix like this one (missing
+// replyTo, a placeholder href="#" CTA) existed. v6AuraBuildEmailQueueForCampaign_ only ever
+// creates a job once per (campaignId, contactId, sequenceStep) and never touches it again, so a
+// pure code fix alone does not correct rows already sitting in MKT_EMAIL_QUEUE -- this does,
+// using the exact same real account/contact/campaign data and the exact same
+// replyTo/copy/status derivation the builder uses for a brand-new job, never a second, divergent
+// code path. A job already at status SENT is never touched -- real send history is immutable.
+function v6AuraRepairEmailQueueContent_() {
+  var campaignsById = {};
+  v6Rows_('MKT_CAMPAIGNS').forEach(function (c) { campaignsById[v6AuraEmailText_(c.campaignId)] = c; });
+  var jobs = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) {
+    return v6AuraEmailText_(r.playbookId) === 'Retention' && String(r.status).toUpperCase() !== 'SENT';
+  });
+  var repaired = 0, skippedNoCampaign = 0;
+  jobs.forEach(function (job) {
+    var campaign = campaignsById[v6AuraEmailText_(job.campaignId)];
+    if (!campaign) { skippedNoCampaign++; return; }
+    var account = v6AuraEmailAccountById_(job.accountId) || {};
+    var contact = v6AuraEmailContactById_(job.contactId) || {};
+    var replyTo = campaign.replyTo || v6AuraEmailCanonicalReplyTo_();
+    var replyToBlocked = !replyTo;
+    var vars = {
+      firstName: v6AuraEmailText_(contact.firstName) || v6AuraEmailText_(job.firstName) || 'Team',
+      company: v6AuraEmailText_(account.accountName) || v6AuraEmailText_(job.company) || 'your company',
+      service: v6AuraEmailText_(campaign.service) || v6AuraEmailText_(job.service) || 'freight',
+      replyTo: replyTo
+    };
+    var copy = v6AuraGenerateCopy_({}, campaign);
+    var stopped = v6AuraEmailAccountStopped_(job.accountId);
+    var policyApproved = (typeof v6AuraPolicyApproved_ === 'function') ? v6AuraPolicyApproved_(campaign.objective || campaign.campaignType) : true;
+    job.replyTo = replyTo;
+    job.subject = v6AuraEmailMergeTokens_(copy.subjectA, vars);
+    job.htmlBody = v6AuraEmailHtml_(campaign, copy, vars);
+    job.status = stopped ? 'STOPPED' : (replyToBlocked ? 'SUPPRESSED' : (policyApproved ? 'PENDING' : 'REVIEW_REQUIRED'));
+    job.error = replyToBlocked ? 'MISSING_REPLY_TO_CONFIGURATION' : '';
+    v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);
+    repaired++;
+  });
+  return { status: 'REPAIR_COMPLETE', jobsChecked: jobs.length, repaired: repaired, skippedNoCampaign: skippedNoCampaign };
+}
+
+// One convenient, no-argument call to get a fresh, verifiable DRY_RUN after a content fix:
+// repair existing job content, build any newly-eligible jobs, dispatch once under whatever
+// AURA_SEND_MODE already is (NEVER changed by this function), then run the pre-LIVE audit.
+// Safe to call any number of times; never touches AURA_SEND_MODE, never calls
+// auraEnableLiveSending.
+function v6AuraRegenerateRetentionDryRun_() {
+  var repair = v6AuraRepairEmailQueueContent_();
+  var build = v6AuraBuildRetentionEmailQueue_();
+  var dispatch = auraProcessEmailQueue(50);
+  var audit = v6AuraEmailQueueAudit_();
+  return { status: 'REGENERATE_COMPLETE', sendMode: v6AuraSendMode_(), repair: repair, build: build, dispatch: dispatch, audit: audit };
+}
+function RUN_AURA_REGENERATE_RETENTION_DRY_RUN() {
+  return v6AuraRegenerateRetentionDryRun_();
 }
 
 // The dispatcher. Re-validates every gate at send time (state can change between queue build
@@ -213,6 +295,14 @@ function auraProcessEmailQueue(limit) {
 
       if (v6AuraEmailAccountStopped_(accountId)) {
         job.status = 'STOPPED'; job.processedAt = now; counts.stopped++;
+        return v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);
+      }
+      // Never dispatch -- in DRY_RUN or LIVE -- without a real, valid, already-configured
+      // reply-to. Defense in depth: v6AuraBuildEmailQueueForCampaign_/
+      // v6AuraRepairEmailQueueContent_ already refuse to build a job past PENDING when this is
+      // missing, but a job could reach here from an older build predating that guard.
+      if (!job.replyTo || !v6AuraEmailValid_(job.replyTo)) {
+        job.status = 'SUPPRESSED'; job.error = 'MISSING_REPLY_TO_CONFIGURATION'; job.processedAt = now; counts.suppressed++;
         return v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);
       }
       if (!v6AuraEmailValid_(job.email)) {
@@ -379,9 +469,10 @@ function v6AuraEmailQueueAudit_() {
     if (v6AuraEmailText_(job.service) === 'freight') issues.push('GENERIC_SERVICE_FALLBACK_USED');
     if (/\{\{\w+\}\}/.test(job.subject || '')) issues.push('UNMERGED_TOKEN_IN_SUBJECT');
     if (/\{\{\w+\}\}/.test(job.htmlBody || '')) issues.push('UNMERGED_TOKEN_IN_HTML_BODY');
-    if (/href\s*=\s*"#"/i.test(job.htmlBody || '')) issues.push('BROKEN_CTA_HREF');
+    if (/href\s*=\s*"#"/i.test(job.htmlBody || '') || /href\s*=\s*""/i.test(job.htmlBody || '')) issues.push('BROKEN_CTA_HREF');
+    if (!/href\s*=\s*"mailto:[^"]+"/i.test(job.htmlBody || '')) issues.push('CTA_NOT_FUNCTIONAL');
     if (!/DGL/i.test(job.htmlBody || '')) issues.push('MISSING_SENDER_SIGNATURE');
-    if (!job.replyTo) issues.push('MISSING_REPLY_TO');
+    if (!job.replyTo || !v6AuraEmailValid_(job.replyTo)) issues.push('MISSING_REPLY_TO');
     var dupKey = v6AuraEmailText_(job.campaignId) + '|' + v6AuraEmailText_(job.accountId) + '|' + v6AuraEmailText_(job.contactId) + '|' + v6AuraEmailText_(job.sequenceStep);
     if (duplicateKeys[dupKey]) issues.push('DUPLICATE_JOB_KEY');
     if (job.approvalId && job.approvedAt && String(job.status).toUpperCase() !== 'REVIEW_REQUIRED') issues.push('APPROVAL_RECORDED_BUT_NOT_ENFORCED');

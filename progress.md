@@ -2,6 +2,64 @@
 
 Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
+## Pass 10 — Canonical reply-to + functional CTA (real problems from the pre-LIVE audit)
+
+Running the Pass 9 audit against real `MKT_EMAIL_QUEUE` content surfaced exactly two real
+problems: `replyTo` empty on every job, and the HTML CTA button rendering `href="#"`. Root cause
+of the first: `MKT_CAMPAIGNS` has no `replyTo` field anywhere in the V6 schema and
+`v6AuraEnsureCampaign_` never set one, so `campaign.replyTo` was always `undefined` and
+`v6AuraBuildEmailQueueForCampaign_` fell through to `''`. Root cause of the second:
+`v6AuraEmailHtml_`'s CTA button (`MarketingV6AuraCopyEngine.gs`) hardcoded `href="#"` -- V6
+Retention campaigns never had a real landing/quote URL to link to (that field only exists on the
+legacy V5.5 `MKT_CAMPAIGNS` shape).
+
+Fixed both canonically, reusing an already-configured real identity rather than inventing one:
+added `v6AuraEmailCanonicalReplyTo_()` (`MarketingV6AuraEmailDispatcher.gs`), which reads the
+SAME Script Property key (`AURA_GMAIL_SOURCE_MAILBOX`) `MarketingV6AuraGmailIngest.gs` already
+uses for the real AM-report inbox, with the identical hardcoded fallback literal that file
+already has -- one real DGL mailbox, reused, never a second invented one. Returns `''`
+(never a guessed/malformed address) if the configured value fails email validation.
+`v6AuraBuildEmailQueueForCampaign_` now sets `replyTo` from this resolver, and -- per the explicit
+requirement that a job must never be sendable without a real reply-to -- builds the job as
+`SUPPRESSED` / `MISSING_REPLY_TO_CONFIGURATION` instead of `PENDING` whenever it resolves empty;
+`auraProcessEmailQueue` re-checks the same condition at dispatch time as defense in depth, so an
+older job built before this fix existed can never slip through either. The CTA button
+(`v6AuraEmailHtml_`) now renders a real `mailto:<replyTo>?subject=<the real personalized
+subject>` link instead of `href="#"` -- functional today (no landing page to build or invent),
+using the exact reply-to address the message's own Reply-To header carries.
+
+Because `v6AuraBuildEmailQueueForCampaign_` only ever creates a job once per key and never
+revisits it, the code fix alone does not correct rows already sitting in `MKT_EMAIL_QUEUE` from
+before this pass -- added `v6AuraRepairEmailQueueContent_()`, which re-derives `replyTo`/
+`subject`/`htmlBody`/`status` for every Retention job not already `SENT` using the exact same
+real account/contact/campaign data and the exact same decision logic the builder uses (never a
+second, divergent path), and never touches a job already `SENT` (send history stays immutable).
+`v6AuraRegenerateRetentionDryRun_()` (+ `RUN_AURA_REGENERATE_RETENTION_DRY_RUN()` editor wrapper)
+chains repair -> build -> dispatch -> `v6AuraEmailQueueAudit_` in one call, and never touches
+`AURA_SEND_MODE` -- it dispatches under whatever mode is already set, which stayed `DRY_RUN`
+throughout this pass.
+
+`v6AuraEmailQueueAudit_`'s CTA check split into two: `BROKEN_CTA_HREF` (an explicit `href="#"` or
+`href=""`) and a new `CTA_NOT_FUNCTIONAL` (no `href="mailto:...`" present at all) so a future
+regression can never hide behind "technically not `#`". Its `MISSING_REPLY_TO` check now also
+runs the reply-to through the same email-format validation, not just a truthiness check.
+
+The DGL AM-report inbox address's PII allowlist exception (`tests/v6-no-pii-in-repo.test.js`)
+widened from one approved file to two (`MarketingV6AuraGmailIngest.gs` and, now, `MarketingV6AuraEmailDispatcher.gs`)
+-- same real company mailbox, same non-customer-PII justification, still restricted to exactly
+those two files and asserted absent everywhere else.
+
+Tests: `tests/v6-aura-email-dispatcher.test.js` extended (+4 cases: a fresh build with no Script
+Property configured still resolves the canonical fallback and renders a real mailto CTA; an
+invalid configured reply-to blocks the job at both build time and dispatch time, even under
+LIVE; the repair function fixes an existing broken job in place while never touching a SENT job;
+the regenerate convenience function chains repair/build/dispatch/audit without ever calling
+`auraEnableLiveSending`). Pre-existing dispatcher test fixtures updated to include a `replyTo`
+where the test was validating something else, so each test still isolates the behavior it
+targets.
+
+Full suite: 36 files, 36 pass, 0 fail.
+
 ## Pass 9 — Pre-LIVE content/safety audit for MKT_EMAIL_QUEUE
 
 Requested validation before ever allowing LIVE: real/personalized recipient content, correct

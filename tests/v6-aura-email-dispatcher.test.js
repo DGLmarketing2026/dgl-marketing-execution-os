@@ -144,7 +144,7 @@ function eligibleAudienceRow(over) {
 // 5. DRY_RUN (the default with AURA_SEND_MODE unset) processes every gate but never calls
 // GmailApp.sendEmail -- job lands on status DRY_RUN, not SENT.
 (function dryRunNeverSendsTest() {
-  var tables = { MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'Hi Maria', htmlBody: '<p>Hi Maria</p>', status: 'PENDING', sequenceStep: 1 }] };
+  var tables = { MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'Hi Maria', htmlBody: '<p>Hi Maria</p>', replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1 }] };
   var ctx = makeContext({ tables: tables });
   assert.equal(ctx.v6AuraSendMode_(), 'DRY_RUN', 'default send mode must be DRY_RUN when the property is unset');
   var out = ctx.auraProcessEmailQueue();
@@ -158,7 +158,7 @@ function eligibleAudienceRow(over) {
 // 6. LIVE mode (only reachable via the explicit auraEnableLiveSending() switch) actually sends,
 // records the frequency-ledger touch and the MKT_TOUCHES row, and marks the job SENT.
 (function liveModeSendsAndRecordsTouchTest() {
-  var tables = { MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'Hi Maria', htmlBody: '<p>Hi Maria, Shipper Co</p>', status: 'PENDING', sequenceStep: 1, playbookId: 'Retention' }] };
+  var tables = { MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'Hi Maria', htmlBody: '<p>Hi Maria, Shipper Co</p>', replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1, playbookId: 'Retention' }] };
   var ctx = makeContext({ tables: tables });
   ctx.auraEnableLiveSending();
   assert.equal(ctx.v6AuraSendMode_(), 'LIVE');
@@ -178,7 +178,7 @@ function eligibleAudienceRow(over) {
 // 7. An active MKT_EXCLUSIONS row suppresses the job at dispatch time even if it was queued
 // before the exclusion existed -- never sent.
 (function activeExclusionSuppressesAtDispatchTest() {
-  var tables = { MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', status: 'PENDING', sequenceStep: 1 }] };
+  var tables = { MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1 }] };
   var ctx = makeContext({ tables: tables, activeExclusion: function () { return { reasonCode: 'UNSUBSCRIBE' }; } });
   ctx.auraEnableLiveSending();
   var out = ctx.auraProcessEmailQueue();
@@ -193,7 +193,7 @@ function eligibleAudienceRow(over) {
 // automation for that account -- the job is marked STOPPED, never sent, regardless of mode.
 (function respondedAccountStopsAutomationTest() {
   var tables = {
-    MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', status: 'PENDING', sequenceStep: 1 }],
+    MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1 }],
     MKT_ACCOUNT_PIPELINE: [{ accountId: 'ACC-1', currentStage: 'RESPONDED' }]
   };
   var ctx = makeContext({ tables: tables });
@@ -208,7 +208,7 @@ function eligibleAudienceRow(over) {
 // 9. Frequency cap blocks the send (SKIPPED), reusing v6FrequencyStatus_ verbatim -- no
 // duplicated frequency logic in this file.
 (function frequencyCapSkipsTest() {
-  var tables = { MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', status: 'PENDING', sequenceStep: 1 }] };
+  var tables = { MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1 }] };
   var ctx = makeContext({ tables: tables, frequencyStatus: function () { return { eligible: false, status: 'FREQUENCY CAP' }; } });
   ctx.auraEnableLiveSending();
   var out = ctx.auraProcessEmailQueue();
@@ -224,8 +224,8 @@ function eligibleAudienceRow(over) {
 (function duplicateSentNeverDoubleSendsTest() {
   var tables = {
     MKT_EMAIL_QUEUE: [
-      { jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', status: 'SENT', sequenceStep: 1 },
-      { jobId: 'JOB:CMP-RET-1:CON-1:1:RETRY', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', status: 'PENDING', sequenceStep: 1 }
+      { jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', replyTo: 'am@dglus.com', status: 'SENT', sequenceStep: 1 },
+      { jobId: 'JOB:CMP-RET-1:CON-1:1:RETRY', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1 }
     ]
   };
   var ctx = makeContext({ tables: tables });
@@ -254,7 +254,7 @@ function eligibleAudienceRow(over) {
 // findings, zero real sends detected, masked email in output.
 (function auditCleanJobTest() {
   var tables = {
-    MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'maria@shipperco.com', firstName: 'Maria', company: 'Shipper Co', service: 'FTL', subject: 'Maria, seguimos cerca de Shipper Co', htmlBody: '<p>Hola Maria de Shipper Co</p><a href="https://dglus.com/quote">ENVIAR MOVIMIENTO</a> DGL Freight Broker', replyTo: 'am@dglus.com', status: 'DRY_RUN', sequenceStep: 1, playbookId: 'Retention' }],
+    MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'maria@shipperco.com', firstName: 'Maria', company: 'Shipper Co', service: 'FTL', subject: 'Maria, seguimos cerca de Shipper Co', htmlBody: '<p>Hola Maria de Shipper Co</p><a href="mailto:am@dglus.com?subject=RE%20Maria%2C%20seguimos%20cerca">ENVIAR MOVIMIENTO</a> DGL Freight Broker', replyTo: 'am@dglus.com', status: 'DRY_RUN', sequenceStep: 1, playbookId: 'Retention' }],
     MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }],
     MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria', email: 'maria@shipperco.com' }]
   };
@@ -291,13 +291,100 @@ function eligibleAudienceRow(over) {
   var job1 = audit.findings.filter(function (f) { return f.jobId === 'JOB:CMP-RET-1:CON-1:1'; })[0];
   assert(job1, 'the generic/broken/mismatched job must appear in findings');
   assert(job1.email.indexOf('***') >= 0, 'the audit must mask the local part of every email');
-  ['GENERIC_COMPANY_FALLBACK_USED', 'GENERIC_FIRSTNAME_FALLBACK_USED', 'GENERIC_SERVICE_FALLBACK_USED', 'UNMERGED_TOKEN_IN_SUBJECT', 'UNMERGED_TOKEN_IN_HTML_BODY', 'BROKEN_CTA_HREF', 'MISSING_REPLY_TO', 'EMAIL_MISMATCH_WITH_CONTACT_RECORD', 'COMPANY_MISMATCH_WITH_ACCOUNT_RECORD', 'FIRSTNAME_MISMATCH_WITH_CONTACT_RECORD'].forEach(function (code) {
+  ['GENERIC_COMPANY_FALLBACK_USED', 'GENERIC_FIRSTNAME_FALLBACK_USED', 'GENERIC_SERVICE_FALLBACK_USED', 'UNMERGED_TOKEN_IN_SUBJECT', 'UNMERGED_TOKEN_IN_HTML_BODY', 'BROKEN_CTA_HREF', 'CTA_NOT_FUNCTIONAL', 'MISSING_REPLY_TO', 'EMAIL_MISMATCH_WITH_CONTACT_RECORD', 'COMPANY_MISMATCH_WITH_ACCOUNT_RECORD', 'FIRSTNAME_MISMATCH_WITH_CONTACT_RECORD'].forEach(function (code) {
     assert(job1.issues.indexOf(code) >= 0, 'missing expected finding: ' + code);
   });
   var dupJobs = audit.findings.filter(function (f) { return f.jobId.indexOf('CON-3') >= 0; });
   assert(dupJobs.length >= 1 && dupJobs.some(function (f) { return f.issues.indexOf('DUPLICATE_JOB_KEY') >= 0; }), 'the duplicated (campaign,account,contact,step) pair must be flagged');
   assert.equal(audit.clean, false);
   console.log('dispatcher test 13 (pre-LIVE audit: every real problem category is detected, including a real SENT job): PASS');
+})();
+
+// 14. With no Script Property configured, a freshly built job still resolves the canonical
+// fallback reply-to ('info@dglus.com', the same real DGL mailbox MarketingV6AuraGmailIngest.gs
+// already uses) and its CTA is a real, working mailto: link -- never empty, never href="#".
+(function buildResolvesCanonicalReplyToAndFunctionalCtaTest() {
+  var tables = { MKT_AUDIENCES: [eligibleAudienceRow()], MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }], MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria' }] };
+  var ctx = makeContext({ tables: tables });
+  ctx.v6AuraBuildEmailQueueForCampaign_(campaign());
+  var job = tables.MKT_EMAIL_QUEUE[0];
+  assert.equal(job.replyTo, 'info@dglus.com', 'with no Script Property set, the hardcoded canonical fallback must be used, never left empty');
+  assert.equal(job.status, 'PENDING');
+  assert(/href="mailto:info@dglus\.com\?subject=/.test(job.htmlBody), 'the CTA must be a real mailto: link to the same canonical reply-to address');
+  assert(job.htmlBody.indexOf('href="#"') < 0, 'the CTA must never be a placeholder href="#"');
+  console.log('dispatcher test 14 (build resolves the canonical reply-to and a functional mailto CTA): PASS');
+})();
+
+// 15. If the configured reply-to Script Property is invalid (not a real email), the job is
+// built as SUPPRESSED / MISSING_REPLY_TO_CONFIGURATION -- never PENDING -- and the dispatcher
+// refuses to send it even under LIVE mode (defense in depth).
+(function invalidConfiguredReplyToBlocksLiveTest() {
+  var tables = { MKT_AUDIENCES: [eligibleAudienceRow()], MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }], MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria' }] };
+  var ctx = makeContext({ tables: tables, props: { AURA_GMAIL_SOURCE_MAILBOX: 'not-an-email' } });
+  ctx.v6AuraBuildEmailQueueForCampaign_(campaign());
+  var job = tables.MKT_EMAIL_QUEUE[0];
+  assert.equal(job.status, 'SUPPRESSED');
+  assert.equal(job.error, 'MISSING_REPLY_TO_CONFIGURATION');
+  assert.equal(job.replyTo, '', 'an invalid configured value must never be used as-is; it must resolve to empty, never a guessed address');
+  // Force it to PENDING to prove the dispatcher's own independent, defense-in-depth check also
+  // refuses to send it, not just the build-time gate.
+  job.status = 'PENDING';
+  ctx.auraEnableLiveSending();
+  var out = ctx.auraProcessEmailQueue();
+  assert.equal(out.sent, 0);
+  assert.equal(ctx.__sentEmails.length, 0, 'a job with no valid reply-to must never be sent, even under LIVE');
+  assert.equal(tables.MKT_EMAIL_QUEUE[0].error, 'MISSING_REPLY_TO_CONFIGURATION');
+  console.log('dispatcher test 15 (an invalid/missing configured reply-to blocks LIVE, build-time and dispatch-time): PASS');
+})();
+
+// 16. v6AuraRepairEmailQueueContent_ fixes an existing job built BEFORE this reply-to/CTA fix
+// existed (empty replyTo, href="#") in place -- without creating a second row -- while never
+// touching a job already SENT.
+(function repairFixesExistingBrokenJobsTest() {
+  var tables = {
+    MKT_CAMPAIGNS: [campaign()],
+    MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }, { accountId: 'ACC-2', accountName: 'Other Co' }],
+    MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria' }, { contactId: 'CON-2', firstName: 'Ana' }],
+    MKT_EMAIL_QUEUE: [
+      { jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'maria@shipperco.com', firstName: 'Maria', company: 'Shipper Co', service: 'FTL', subject: 'old subject', htmlBody: '<p>old</p><a href="#">Click</a>', replyTo: '', status: 'PENDING', sequenceStep: 1, playbookId: 'Retention' },
+      { jobId: 'JOB:CMP-RET-1:CON-2:1', campaignId: 'CMP-RET-1', accountId: 'ACC-2', contactId: 'CON-2', email: 'ana@otherco.com', firstName: 'Ana', company: 'Other Co', service: 'FTL', subject: 'already sent', htmlBody: '<p>already sent</p><a href="#">Click</a>', replyTo: '', status: 'SENT', sequenceStep: 1, playbookId: 'Retention' }
+    ]
+  };
+  var ctx = makeContext({ tables: tables });
+  var result = ctx.v6AuraRepairEmailQueueContent_();
+  assert.equal(result.repaired, 1, 'only the non-SENT job may be repaired');
+  var fixed = tables.MKT_EMAIL_QUEUE.filter(function (r) { return r.jobId === 'JOB:CMP-RET-1:CON-1:1'; })[0];
+  assert.equal(fixed.replyTo, 'info@dglus.com');
+  assert(fixed.htmlBody.indexOf('href="#"') < 0);
+  assert(/href="mailto:info@dglus\.com\?subject=/.test(fixed.htmlBody));
+  assert.equal(fixed.status, 'PENDING');
+  var untouched = tables.MKT_EMAIL_QUEUE.filter(function (r) { return r.jobId === 'JOB:CMP-RET-1:CON-2:1'; })[0];
+  assert.equal(untouched.status, 'SENT', 'a job already SENT must never be modified by the repair');
+  assert.equal(untouched.replyTo, '', 'send history must remain exactly as it was, including a since-fixed field');
+  assert.equal(tables.MKT_EMAIL_QUEUE.length, 2, 'repair must update rows in place, never create a new one');
+  console.log('dispatcher test 16 (repair fixes existing broken jobs in place, never touches a SENT job): PASS');
+})();
+
+// 17. v6AuraRegenerateRetentionDryRun_ runs repair -> build -> dispatch -> audit in one call and
+// never touches AURA_SEND_MODE -- it stays DRY_RUN throughout, with zero real sends.
+(function regenerateNeverTouchesSendModeTest() {
+  var tables = {
+    MKT_CAMPAIGNS: [campaign()],
+    MKT_AUDIENCES: [eligibleAudienceRow()],
+    MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }],
+    MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria' }],
+    MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-9:1', campaignId: 'CMP-RET-1', accountId: 'ACC-9', contactId: 'CON-9', email: 'old@shipperco.com', firstName: 'Old', company: 'Shipper Co', service: 'FTL', subject: 'old', htmlBody: '<p>old</p><a href="#">Click</a>', replyTo: '', status: 'PENDING', sequenceStep: 1, playbookId: 'Retention' }]
+  };
+  var ctx = makeContext({ tables: tables });
+  var out = ctx.v6AuraRegenerateRetentionDryRun_();
+  assert.equal(out.sendMode, 'DRY_RUN');
+  assert.equal(ctx.v6AuraSendMode_(), 'DRY_RUN', 'regenerate must never call auraEnableLiveSending');
+  assert.equal(ctx.__sentEmails.length, 0, 'regenerate must never produce a real send');
+  assert.equal(out.audit.realSendsDetected, 0);
+  var repairedJob = tables.MKT_EMAIL_QUEUE.filter(function (r) { return r.jobId === 'JOB:CMP-RET-1:CON-9:1'; })[0];
+  assert.equal(repairedJob.replyTo, 'info@dglus.com');
+  assert.equal(repairedJob.status, 'DRY_RUN', 'the repaired-then-rebuilt-then-dispatched job must land on DRY_RUN, not SENT');
+  console.log('dispatcher test 17 (regenerate runs repair+build+dispatch+audit without ever touching AURA_SEND_MODE): PASS');
 })();
 
 console.log('V6 AURA email dispatcher (queue build + DRY_RUN/LIVE dispatch + gates): ALL PASS');

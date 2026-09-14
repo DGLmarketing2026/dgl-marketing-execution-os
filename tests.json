@@ -387,16 +387,32 @@
         {
           "name": "(added Pass 9) v6AuraEmailQueueAudit_ catches every requested problem category on a deliberately broken/mismatched/duplicated set of jobs -- generic company/firstName/service fallback reaching a real job, an unmerged {{token}} in subject and in HTML, a broken href=\"#\" CTA, a missing reply-to, an email/company/firstName mismatch against the real account/contact record, a duplicate (campaignId,accountId,contactId,sequenceStep) key, and a job already at real status SENT flagged as a CRITICAL realSendsDetected warning",
           "guarantee": "no category of content or governance problem DGL asked to detect before allowing LIVE can pass through this audit unnoticed, and a real send is never silently missed"
+        },
+        {
+          "name": "(added Pass 10) a freshly built job with no AURA_GMAIL_SOURCE_MAILBOX Script Property configured still resolves the same canonical DGL mailbox address MarketingV6AuraGmailIngest.gs already falls back to, and renders a real href=\"mailto:...\" CTA, never an empty replyTo or href=\"#\"",
+          "guarantee": "the two real problems the pre-LIVE audit found (empty replyTo, broken CTA) are fixed canonically -- reusing the one already-configured DGL mailbox, never inventing a new address or a fake URL"
+        },
+        {
+          "name": "(added Pass 10) an invalid configured reply-to value blocks a job at build time (SUPPRESSED / MISSING_REPLY_TO_CONFIGURATION, never PENDING) and independently at dispatch time even under LIVE mode",
+          "guarantee": "a job can never be sent -- in DRY_RUN or LIVE -- without a real, valid, already-configured reply-to; defense in depth catches an older job built before this guard existed too"
+        },
+        {
+          "name": "(added Pass 10) v6AuraRepairEmailQueueContent_ fixes an existing job's replyTo/subject/htmlBody/status in place (never creating a second row) while never modifying a job already at status SENT",
+          "guarantee": "a pure code fix does not by itself correct rows already sitting in MKT_EMAIL_QUEUE from before the fix; the repair does, using the exact same real data and decision logic as a brand-new build, and real send history stays immutable"
+        },
+        {
+          "name": "(added Pass 10) v6AuraRegenerateRetentionDryRun_ chains repair -> build -> dispatch -> audit in one call without ever calling auraEnableLiveSending or otherwise touching AURA_SEND_MODE",
+          "guarantee": "regenerating a fresh, verifiable DRY_RUN after a content fix can never itself be the thing that accidentally goes LIVE"
         }
       ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full suite re-run after every change in this branch, most recently after adding the pre-LIVE MKT_EMAIL_QUEUE content/safety audit (Pass 9: v6AuraEmailQueueAudit_, masked-email findings report, real-send critical detection). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
+    "description": "Full suite re-run after every change in this branch, most recently after fixing the two real problems the pre-LIVE audit found -- empty replyTo and a broken href=\"#\" CTA (Pass 10: canonical v6AuraEmailCanonicalReplyTo_, a real mailto: CTA, and a repair/regenerate path for jobs built before the fix existed). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
     "totalFiles": 36,
     "passed": 36,
     "failed": 0,
-    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5/6/7/8/9's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (36 files total; Pass 9 extended tests/v6-aura-email-dispatcher.test.js in place rather than adding a new file).",
+    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5 through 10's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (36 files total; Pass 10 extended tests/v6-aura-email-dispatcher.test.js and tests/v6-no-pii-in-repo.test.js in place rather than adding a new file).",
     "failedFiles": []
   }
 }
