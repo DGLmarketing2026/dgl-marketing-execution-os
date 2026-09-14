@@ -365,22 +365,27 @@ function eligibleAudienceRow(over) {
   console.log('dispatcher test 16 (repair fixes existing broken jobs in place, never touches a SENT job): PASS');
 })();
 
-// 17. v6AuraRegenerateRetentionDryRun_ runs repair -> build -> dispatch -> audit in one call and
-// never touches AURA_SEND_MODE -- it stays DRY_RUN throughout, with zero real sends.
-(function regenerateNeverTouchesSendModeTest() {
+// 17. v6AuraRegenerateRetentionDryRun_ forces/confirms DRY_RUN, runs repair -> build -> dispatch
+// -> audit in one call, and returns the flat {sendMode, queued, dryRun, clean,
+// realSendsDetected, findings} shape -- with zero real sends, even if LIVE was left on.
+(function regenerateForcesDryRunAndReturnsFlatShapeTest() {
   var tables = {
     MKT_CAMPAIGNS: [campaign()],
-    MKT_AUDIENCES: [eligibleAudienceRow()],
-    MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }],
-    MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria' }],
+    MKT_ACCOUNTS: [{ accountId: 'ACC-9', accountName: 'Shipper Co' }],
+    MKT_CONTACTS_SECURE: [{ contactId: 'CON-9', firstName: 'Old', email: 'old@shipperco.com' }],
     MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-9:1', campaignId: 'CMP-RET-1', accountId: 'ACC-9', contactId: 'CON-9', email: 'old@shipperco.com', firstName: 'Old', company: 'Shipper Co', service: 'FTL', subject: 'old', htmlBody: '<p>old</p><a href="#">Click</a>', replyTo: '', status: 'PENDING', sequenceStep: 1, playbookId: 'Retention' }]
   };
   var ctx = makeContext({ tables: tables });
+  ctx.auraEnableLiveSending(); // deliberately left LIVE from a prior call
   var out = ctx.v6AuraRegenerateRetentionDryRun_();
-  assert.equal(out.sendMode, 'DRY_RUN');
-  assert.equal(ctx.v6AuraSendMode_(), 'DRY_RUN', 'regenerate must never call auraEnableLiveSending');
-  assert.equal(ctx.__sentEmails.length, 0, 'regenerate must never produce a real send');
-  assert.equal(out.audit.realSendsDetected, 0);
+  assert.equal(out.sendMode, 'DRY_RUN', 'regenerate must force DRY_RUN even if LIVE was left on');
+  assert.equal(ctx.v6AuraSendMode_(), 'DRY_RUN');
+  assert.equal(ctx.__sentEmails.length, 0, 'regenerate must never produce a real send, even recovering from a LIVE mode left on');
+  assert.equal(out.realSendsDetected, 0);
+  assert.equal(out.clean, true);
+  assert.equal(out.queued, 1);
+  assert.equal(out.dryRun, 1);
+  assert.deepEqual(out.findings, []);
   var repairedJob = tables.MKT_EMAIL_QUEUE.filter(function (r) { return r.jobId === 'JOB:CMP-RET-1:CON-9:1'; })[0];
   assert.equal(repairedJob.replyTo, 'info@dglus.com');
   assert.equal(repairedJob.status, 'DRY_RUN', 'the repaired-then-rebuilt-then-dispatched job must land on DRY_RUN, not SENT');

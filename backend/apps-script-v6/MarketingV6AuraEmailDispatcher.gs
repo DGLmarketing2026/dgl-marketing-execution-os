@@ -259,17 +259,27 @@ function v6AuraRepairEmailQueueContent_() {
   return { status: 'REPAIR_COMPLETE', jobsChecked: jobs.length, repaired: repaired, skippedNoCampaign: skippedNoCampaign };
 }
 
-// One convenient, no-argument call to get a fresh, verifiable DRY_RUN after a content fix:
-// repair existing job content, build any newly-eligible jobs, dispatch once under whatever
-// AURA_SEND_MODE already is (NEVER changed by this function), then run the pre-LIVE audit.
-// Safe to call any number of times; never touches AURA_SEND_MODE, never calls
-// auraEnableLiveSending.
+// One convenient, no-argument call to get a fresh, verifiable DRY_RUN: forces/confirms
+// AURA_SEND_MODE = DRY_RUN first (this function's one job is safe verification, so it never
+// trusts whatever mode was left set -- it never calls auraEnableLiveSending, only
+// auraDisableLiveSending), repairs existing Retention job content (replyTo, the mailto: CTA,
+// subject/htmlBody), builds any newly-eligible jobs, dispatches once (now guaranteed DRY_RUN,
+// so zero real sends are possible), then runs the pre-LIVE audit. Safe to call any number of
+// times.
 function v6AuraRegenerateRetentionDryRun_() {
-  var repair = v6AuraRepairEmailQueueContent_();
-  var build = v6AuraBuildRetentionEmailQueue_();
-  var dispatch = auraProcessEmailQueue(50);
+  auraDisableLiveSending();
+  v6AuraRepairEmailQueueContent_();
+  v6AuraBuildRetentionEmailQueue_();
+  auraProcessEmailQueue(50);
   var audit = v6AuraEmailQueueAudit_();
-  return { status: 'REGENERATE_COMPLETE', sendMode: v6AuraSendMode_(), repair: repair, build: build, dispatch: dispatch, audit: audit };
+  return {
+    sendMode: v6AuraSendMode_(),
+    queued: audit.jobsChecked,
+    dryRun: audit.byStatus.DRY_RUN || 0,
+    clean: audit.clean,
+    realSendsDetected: audit.realSendsDetected,
+    findings: audit.findings
+  };
 }
 function RUN_AURA_REGENERATE_RETENTION_DRY_RUN() {
   return v6AuraRegenerateRetentionDryRun_();
