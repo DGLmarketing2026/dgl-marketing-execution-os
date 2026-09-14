@@ -400,3 +400,10 @@ function v6AuraEmailQueueAudit_() {
     clean: findings.length === 0 && realSendsDetected === 0
   };
 }
+// Public, no-underscore wrapper purely so this can be run directly from the Apps Script editor's
+// function picker (or `clasp run RUN_AURA_EMAIL_QUEUE_AUDIT`) without relying on the "_"-suffix
+// convention -- same pattern as v6AuraBootstrapAndRun(). No logic lives here, it only forwards to
+// the real function above, unchanged.
+function RUN_AURA_EMAIL_QUEUE_AUDIT() {
+  return v6AuraEmailQueueAudit_();
+}
