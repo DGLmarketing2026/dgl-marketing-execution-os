@@ -55,7 +55,8 @@ function handleMarketingV55Api_(e, method) {
 // GitHub Pages frontend is presentation-only, per this project's own stated architecture,
 // and must never be a second way to trigger a real send.
 'v6AuraRetentionDashboard', 'v6AuraCampanaAAudit', 'v6AuraCampanaAMatchReport',
-'v6AuraCampanaAStoppedBreakdown', 'v6AuraExecutionReport', 'v6AuraAutomaticReportStatus'
+'v6AuraCampanaAStoppedBreakdown', 'v6AuraExecutionReport', 'v6AuraAutomaticReportStatus',
+'v6AuraCampanaALatestRunSummary'
 ];
   
   if (allowed.indexOf(action) === -1) return null;
@@ -88,6 +89,7 @@ case 'v6AuraCampanaAMatchReport':
 case 'v6AuraCampanaAStoppedBreakdown':
 case 'v6AuraExecutionReport':
 case 'v6AuraAutomaticReportStatus':
+case 'v6AuraCampanaALatestRunSummary':
   result = routeMarketingV6_(action, req);
   break;
  case 'v6IngestAuthoritativeContacts':

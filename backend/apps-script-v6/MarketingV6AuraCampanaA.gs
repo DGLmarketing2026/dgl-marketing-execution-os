@@ -675,7 +675,7 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
     if (reason === 'CLEAR') eligible.push(cand); else excluded.push(cand);
   });
 
-  return { eligible: eligible, excluded: excluded, candidates: candidates };
+  return { eligible: eligible, excluded: excluded, candidates: candidates, sourceContactsWithEmail: sourceRows.length };
 }
 
 // --- Queue build (idempotent; never rebuilds a job that already exists) ----------------------
@@ -722,6 +722,7 @@ function v6AuraCampanaABuildQueue_() {
   var recipients = resolved.eligible;
   result.recipients = recipients.length;
   result.candidates = resolved.candidates.length;
+  result.sourceContacts = resolved.sourceContactsWithEmail;
   result.recipientSourceBreakdown = { MERGED: 0, CAMPANA_A_SOURCE: 0, CONTACTS_SECURE: 0 };
   resolved.candidates.forEach(function (c) { result.recipientSourceBreakdown[c.recipientSource] = (result.recipientSourceBreakdown[c.recipientSource] || 0) + 1; });
   result.excludedByReason = {};
@@ -1118,8 +1119,85 @@ function v6AuraCampanaAAudit_() {
 // merged profile (SOURCE_READ_MS/PARSE_MS from ingest, MATCH_MS/LANGUAGE_MS/ELIGIBILITY_MS/
 // COPY_MS/QUEUE_WRITE_MS from build, AUDIT_MS here, TOTAL_MS for the whole call) is returned on
 // result.profile -- the exact fields DGL asked this pass to report.
+// --- Durable per-run audit trail: never depend on the Apps Script execution log -----------------
+// A real incident (2026-09-16): a completed, non-erroring run's execution log ended up showing
+// only its final matchReport section in the Apps Script editor's log panel, not the earlier
+// full-result JSON -- and DGL correctly refused to re-run the campaign just to recover a log.
+// The execution log is inherently ephemeral and was never a database; every field DGL asked to
+// see in a preflight/result summary is now written to MKT_AURA_CAMPANA_A_RUN_SUMMARY, ONE row
+// per run (keyed by a real, unique runId), the moment v6AuraCampanaARegenerateDryRun_ finishes --
+// inspectable directly in the Data Hub spreadsheet or via v6AuraCampanaALatestRunSummary_/the
+// AURA dashboard, independent of the log. Pure function: takes the exact result object
+// v6AuraCampanaARegenerateDryRun_ already returns, no I/O of its own.
+// Kept OUT of MKT_V6_CONTACT_RECIPIENT_SCHEMA (MarketingV6SchemaMigration.gs) deliberately -- that
+// map's v6EnsureContactRecipientSchema_/v6AuditContactRecipientSchema_ throw SCHEMA MIGRATION
+// REQUIRED for ANY table listed there that doesn't already exist, which is correct for real
+// commercial tables (MKT_ACCOUNTS, MKT_CONTACTS_SECURE, ...) and would have made the shared AURA
+// bootstrap flow (MarketingV6AuraBootstrap.gs) -- and even this file's OWN build queue, which
+// calls that same ensure function first -- fail on a fresh deployment before this table's first
+// write ever ran. Uses the exact same self-contained, auto-creating pattern already proven safe
+// for MKT_AURA_CAMPANA_A_SOURCE_ROWS above (v6AcqEnsureSheet_, MarketingV6AcquisitionEngine.gs --
+// creates the tab itself if missing, appends any missing header additively otherwise).
+var MKT_AURA_CAMPANA_A_RUN_SUMMARY_SCHEMA_ = ['runId', 'runAt', 'status', 'sendMode', 'totalMs',
+  'sourceAccounts', 'sourceContacts', 'recipients',
+  'recipientsMerged', 'recipientsCampanaASourceOnly', 'recipientsContactsSecureOnly',
+  'byLanguageEs', 'byLanguageEn', 'byLanguagePt',
+  'built', 'skippedExisting', 'skippedIneligible', 'blockedNoReplyTo',
+  'excludedTotal', 'excludedByReasonJson',
+  'preflightTotalPending', 'preflightWouldSend', 'preflightSuppressed', 'preflightReadyForLive',
+  'dispatchSent', 'dispatchDryRun', 'dispatchSuppressed', 'dispatchStopped', 'dispatchSkipped', 'dispatchReviewRequired', 'dispatchFailed',
+  'statusStoppedTotal', 'stoppedByStageJson', 'stoppedOverriddenTotal', 'stoppedByOverrideReasonJson',
+  'invalidEmailCount', 'duplicateJobKeys', 'nonCanonicalReplyToCount', 'teamFirstNameCount', 'realSendsDetected', 'clean',
+  'matchReportAccountsUnmatched', 'matchReportContactsUnmatched', 'matchReportNote'];
+function v6AuraCampanaAEnsureRunSummarySheet_() { return v6AcqEnsureSheet_('MKT_AURA_CAMPANA_A_RUN_SUMMARY', MKT_AURA_CAMPANA_A_RUN_SUMMARY_SCHEMA_); }
+function v6AuraCampanaABuildRunSummaryRecord_(runId, result) {
+  var build = result.build || {}, preflight = result.preflight || {}, dispatch = result.dispatch || {}, audit = result.audit || {};
+  var byLang = build.byLanguage || {}, srcBreak = build.recipientSourceBreakdown || {}, excludedByReason = build.excludedByReason || {};
+  var stopped = audit.stoppedBreakdown || {};
+  var matchReport = audit.matchReport || {};
+  var excludedTotal = 0; Object.keys(excludedByReason).forEach(function (k) { excludedTotal += Number(excludedByReason[k]) || 0; });
+  var now = new Date().toISOString();
+  return {
+    runId: runId, runAt: now, status: result.status, sendMode: result.sendMode, totalMs: (result.profile || {}).TOTAL_MS || 0,
+    sourceAccounts: build.accounts || 0, sourceContacts: build.sourceContacts || 0, recipients: build.recipients || 0,
+    recipientsMerged: srcBreak.MERGED || 0, recipientsCampanaASourceOnly: srcBreak.CAMPANA_A_SOURCE || 0, recipientsContactsSecureOnly: srcBreak.CONTACTS_SECURE || 0,
+    byLanguageEs: byLang.ES || 0, byLanguageEn: byLang.EN || 0, byLanguagePt: byLang.PT || 0,
+    built: build.built || 0, skippedExisting: build.skippedExisting || 0, skippedIneligible: build.skippedIneligible || 0, blockedNoReplyTo: build.blockedNoReplyTo || 0,
+    excludedTotal: excludedTotal, excludedByReasonJson: JSON.stringify(excludedByReason),
+    preflightTotalPending: preflight.totalPending || 0, preflightWouldSend: preflight.wouldSend || 0, preflightSuppressed: preflight.suppressedByPreflight || 0, preflightReadyForLive: preflight.readyForLive ? 'YES' : 'NO',
+    dispatchSent: dispatch.sent || 0, dispatchDryRun: dispatch.dryRun || 0, dispatchSuppressed: dispatch.suppressed || 0, dispatchStopped: dispatch.stopped || 0, dispatchSkipped: dispatch.skipped || 0, dispatchReviewRequired: dispatch.reviewRequired || 0, dispatchFailed: dispatch.failed || 0,
+    statusStoppedTotal: stopped.totalStopped || 0, stoppedByStageJson: JSON.stringify(stopped.byStage || {}), stoppedOverriddenTotal: stopped.totalOverridden || 0, stoppedByOverrideReasonJson: JSON.stringify(stopped.byOverrideReason || {}),
+    invalidEmailCount: audit.invalidEmailCount || 0, duplicateJobKeys: audit.duplicateJobKeys || 0, nonCanonicalReplyToCount: audit.nonCanonicalReplyToCount || 0, teamFirstNameCount: audit.teamFirstNameCount || 0, realSendsDetected: audit.realSendsDetected || 0, clean: audit.clean ? 'YES' : 'NO',
+    // These two counts are the SAME diagnostic-only "not yet synced to NOVA" signal
+    // v6AuraCampanaAMatchReport_ always reported -- matchReportNote makes explicit, in the
+    // durable row itself, that they were never a recipient gate: every one of them that named a
+    // real, resolvable account is still reflected in recipientsCampanaASourceOnly above.
+    matchReportAccountsUnmatched: matchReport.accountsUnmatched || 0, matchReportContactsUnmatched: matchReport.contactsUnmatched || 0,
+    matchReportNote: 'DIAGNOSTIC ONLY (NOVA sync coverage) -- never excludes a recipient; see recipientsCampanaASourceOnly for the real CONTACT_SOURCE_ONLY inclusion count'
+  };
+}
+function v6AuraCampanaAPersistRunSummary_(runId, result) {
+  v6AuraCampanaAEnsureRunSummarySheet_();
+  var record = v6AuraCampanaABuildRunSummaryRecord_(runId, result);
+  v6UpsertByKey_('MKT_AURA_CAMPANA_A_RUN_SUMMARY', ['runId'], record);
+  return record;
+}
+// Read-only: the most recent run's full, durable summary -- the one function DGL (or the AURA
+// dashboard) should ever need to answer "what happened in the last Campana A run," without the
+// execution log and without re-running anything.
+function v6AuraCampanaALatestRunSummary_() {
+  var rows = v6Rows_('MKT_AURA_CAMPANA_A_RUN_SUMMARY');
+  if (!rows.length) return { found: false, status: 'NO_RUN_RECORDED' };
+  var latest = rows.reduce(function (a, b) { return v6AuraEmailText_(b.runAt) > v6AuraEmailText_(a.runAt) ? b : a; });
+  // `status` here is intentionally the run's OWN outcome (REGENERATE_COMPLETE/
+  // SOURCE_EMPTY_OR_NOT_FOUND/CHECKPOINTED_TIME_BUDGET_EXCEEDED, from the row itself) -- `found`
+  // is the separate "a row exists at all" signal, so the two are never conflated.
+  return Object.assign({ found: true }, latest);
+}
+
 function v6AuraCampanaARegenerateDryRun_() {
-  v6AuraCampanaALog_('REGENERATE_START');
+  var runId = 'RUN-CAMPANA-A-' + Utilities.getUuid().slice(0, 8).toUpperCase();
+  v6AuraCampanaALog_('REGENERATE_START (runId=' + runId + ')');
   var tTotal0 = Date.now();
   auraDisableLiveSending();
   // Idempotent (checks existing triggers by handler name before creating one -- never
@@ -1192,12 +1270,19 @@ function v6AuraCampanaARegenerateDryRun_() {
     { AUDIT_MS: auditMs, GMAIL_REPROCESS_MS: gmailReprocessMs, REFRESH_OPPORTUNITIES_MS: refreshOpportunitiesMs }
   );
   profile.TOTAL_MS = Date.now() - tTotal0;
-  v6AuraCampanaALog_('REGENERATE_END (TOTAL_MS=' + profile.TOTAL_MS + ')');
-  return {
+  var result = {
+    runId: runId,
     status: audit.sourceStatus === 'SOURCE_EMPTY_OR_NOT_FOUND' ? 'SOURCE_EMPTY_OR_NOT_FOUND' : (build.status === 'CHECKPOINTED_TIME_BUDGET_EXCEEDED' ? 'CHECKPOINTED_TIME_BUDGET_EXCEEDED' : 'REGENERATE_COMPLETE'),
     sendMode: v6AuraSendMode_(), triggerStatus: triggerStatus, ingest: ingest, gmailReprocess: gmailReprocess, refreshOpportunities: refreshOpportunities, build: build, preflight: preflight, dispatch: dispatch, audit: audit,
     profile: profile
   };
+  // Persisted BEFORE the final log line, so even if the Apps Script log panel truncates or the
+  // human closes it before scrolling, the durable row already exists -- never dependent on the
+  // log being read at all. Never throws: a persistence failure must not mask the real result the
+  // caller (and, in DRY_RUN, the whole go-live decision) depends on.
+  try { v6AuraCampanaAPersistRunSummary_(runId, result); } catch (err) { v6AuraCampanaALog_('RUN_SUMMARY_PERSIST_FAILED (' + String(err && err.message || err) + ')'); }
+  v6AuraCampanaALog_('REGENERATE_END (runId=' + runId + ', TOTAL_MS=' + profile.TOTAL_MS + ')');
+  return result;
 }
 // A human running this from the Apps Script editor has no other way to see the FINAL result once
 // the execution ends (the Cloud Logging entry for a given run is not always available/retained),

@@ -62,7 +62,8 @@ function makeContext(opts) {
       };
     })(),
     GmailApp: { sendEmail: function (to, subject, text, options) { sentEmails.push({ to: to, subject: subject, text: text, options: options }); } },
-    DGL_CONFIG: { DEFAULT_SENDER_NAME: 'DGL' }
+    DGL_CONFIG: { DEFAULT_SENDER_NAME: 'DGL' },
+    Utilities: { getUuid: (function () { var n = 0; return function () { n++; return String(n).padStart(8, '0') + '-0000-0000-0000-000000000000'; }; })() }
   };
   vm.createContext(ctx);
   vm.runInContext(gmailIngestSource, ctx, { filename: 'MarketingV6AuraGmailIngest.gs' });
@@ -101,6 +102,7 @@ function makeContext(opts) {
     return { created: created, updated: updated };
   };
   ctx.v6EnsureContactRecipientSchema_ = function () { return { status: 'SCHEMA READY' }; };
+  ctx.v6AuraCampanaAEnsureRunSummarySheet_ = function () { return { status: 'ALREADY_EXISTS' }; };
   ctx.v6AuraEnsureCampaignScope_ = function (p) {
     var scopeRows = tables.MKT_CAMPAIGN_SCOPES || (tables.MKT_CAMPAIGN_SCOPES = []);
     scopeRows.push({ scopeId: p.scopeId, campaignId: p.campaignId });
@@ -639,6 +641,7 @@ function campanaASheetValuesWithContacts(dataRows) {
   };
   var ctx = makeContext({ tables: tables });
   ctx.v6EnsureContactRecipientSchema_ = function () { return { status: 'SCHEMA READY' }; };
+  ctx.v6AuraCampanaAEnsureRunSummarySheet_ = function () { return { status: 'ALREADY_EXISTS' }; };
   // Seed MKT_AURA_CAMPANA_A_SOURCE_ROWS directly, as the ingest step would have written it.
   tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS = [
     { sourceRow: 5, accountName: 'Progeral Corp', amOwner: 'Owner', contactName: '', email: '', country: '' },
@@ -1097,6 +1100,46 @@ function campanaASheetValuesWithContacts(dataRows) {
   assert.equal(audit.byRecipientSource.CAMPANA_A_SOURCE, 1);
   assert.equal(audit.byRecipientSource.MERGED, 1);
   console.log('campana-a test 42 (the audit reports an accurate byRecipientSource breakdown from the durable job records): PASS');
+})();
+
+// 43. Durable run-summary audit trail (2026-09-16, third finding): the Apps Script execution log
+// is ephemeral and its panel truncated to only the final matchReport section for a completed,
+// non-erroring run -- DGL asked to never depend on it. Every regenerate call now persists one
+// full row to MKT_AURA_CAMPANA_A_RUN_SUMMARY, readable via v6AuraCampanaALatestRunSummary_
+// without the log and without re-running anything.
+(function runSummaryPersistedDurablyTest() {
+  var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
+  var sheetValues = campanaASheetValuesWithContacts([
+    ['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Brasil', 'Joao Silva', 'joao@progeral.com'],
+    ['Shipper Co', 'Ana Ruiz', 'HA priority', 'High', 'Colombia', '', 'not-an-email']
+  ]);
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
+  var out = ctx.v6AuraCampanaARegenerateDryRun_();
+  assert(out.runId, 'the regenerate result must carry a real runId');
+  var persisted = ctx.__tables.MKT_AURA_CAMPANA_A_RUN_SUMMARY;
+  assert.equal(persisted.length, 1, 'exactly one durable row must be written per run');
+  var row = persisted[0];
+  assert.equal(row.runId, out.runId);
+  assert.equal(row.sourceAccounts, out.build.accounts);
+  assert.equal(row.sourceContacts, out.build.sourceContacts);
+  assert.equal(row.recipients, out.build.recipients);
+  assert.equal(row.recipientsCampanaASourceOnly, out.build.recipientSourceBreakdown.CAMPANA_A_SOURCE);
+  assert.equal(row.byLanguagePt, out.build.byLanguage.PT);
+  assert.equal(row.invalidEmailCount, out.audit.invalidEmailCount);
+  assert.equal(row.realSendsDetected, 0);
+  assert(row.matchReportNote.indexOf('DIAGNOSTIC ONLY') >= 0, 'the durable row must itself state that the match report is diagnostic-only, not a gate');
+
+  var latest = ctx.v6AuraCampanaALatestRunSummary_();
+  assert.equal(latest.found, true);
+  assert.equal(latest.status, out.status, "the reader must expose the run's own outcome status, not a generic wrapper value");
+  assert.equal(latest.runId, out.runId, 'the latest-run reader must return this exact run, not a stale one');
+
+  // A second run must persist a SECOND row (never overwrite/lose the prior run's audit trail),
+  // and the reader must then return the newer one.
+  var out2 = ctx.v6AuraCampanaARegenerateDryRun_();
+  assert.equal(ctx.__tables.MKT_AURA_CAMPANA_A_RUN_SUMMARY.length, 2, 'a second run must add a second durable row, never overwrite the first');
+  assert.equal(ctx.v6AuraCampanaALatestRunSummary_().runId, out2.runId);
+  console.log('campana-a test 43 (every run persists a full, durable audit row -- readable without the Apps Script execution log, never overwritten by a later run): PASS');
 })();
 
 console.log('V6 AURA Campana A (dedicated tab, per-contact language, name reliability): ALL PASS');

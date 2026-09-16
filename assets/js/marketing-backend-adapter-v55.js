@@ -194,7 +194,8 @@
     v6AuraCampanaAMatchReport:()=>mutate("v6AuraCampanaAMatchReport",{},false),
     v6AuraCampanaAStoppedBreakdown:()=>mutate("v6AuraCampanaAStoppedBreakdown",{},false),
     v6AuraExecutionReport:()=>mutate("v6AuraExecutionReport",{},false),
-    v6AuraAutomaticReportStatus:()=>mutate("v6AuraAutomaticReportStatus",{},false)
+    v6AuraAutomaticReportStatus:()=>mutate("v6AuraAutomaticReportStatus",{},false),
+    v6AuraCampanaALatestRunSummary:()=>mutate("v6AuraCampanaALatestRunSummary",{},false)
   };
   Object.defineProperty(adapter,"mode",{enumerable:true,get:()=>state===STATES.PRIVATE_BACKEND?"PRIVATE_BACKEND":"LOCAL_DEMO"});
   global.DGL_MARKETING_BACKEND_ADAPTER_V55=adapter;
