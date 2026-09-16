@@ -91,22 +91,49 @@
     </div>`;
   }
 
+  // Pass 18: the Campana A tab is now the PRIMARY recipient source -- a contact this report
+  // calls "sin match" (not yet synced into MKT_CONTACTS_SECURE/NOVA) is still a real, governed
+  // recipient (recipientSource CAMPANA_A_SOURCE), never excluded from the campaign for that
+  // reason alone. This card is explicitly framed as a NOVA-sync-coverage diagnostic, not an
+  // eligibility gate -- see recipientSourceCard below for actual campaign-inclusion counts.
   function matchReportCard(report) {
     if (!report) return "";
     return `
     <div class="card card-pad">
-      <h3 class="aura-subhead">Matching cuentas / contactos · Campaña A</h3>
+      <h3 class="aura-subhead">Cobertura de sincronización NOVA · Campaña A (diagnóstico, no filtra destinatarios)</h3>
+      <p class="text-secondary">"Sin match" aquí significa que la cuenta/contacto aún no está sincronizado en MKT_CONTACTS_SECURE — no significa excluido de la campaña. Ver "Origen de destinatarios" abajo para el conteo real de inclusión.</p>
       <div class="kpi-grid" style="margin-bottom:14px">
         ${kpi("building-2", "Cuentas fuente", report.sourceAccountCount)}
-        ${kpi("check-circle-2", "Cuentas con match", report.accountsMatched)}
-        ${kpi("alert-triangle", "Cuentas sin match", report.accountsUnmatched)}
+        ${kpi("check-circle-2", "Cuentas con match NOVA", report.accountsMatched)}
+        ${kpi("alert-triangle", "Cuentas sin match NOVA", report.accountsUnmatched)}
         ${kpi("users", "Contactos con email en la pestaña", report.sourceContactCount)}
-        ${kpi("user-check", "Contactos con match", report.contactsMatched)}
-        ${kpi("user-x", "Contactos sin match", report.contactsUnmatched)}
+        ${kpi("user-check", "Contactos con match NOVA", report.contactsMatched)}
+        ${kpi("user-x", "Contactos sin match NOVA", report.contactsUnmatched)}
       </div>
       <div class="aura-two-col">
-        <div><div class="aura-mini-label">Cuentas sin match (motivo)</div>${unmatchedList("accounts", report.unmatchedAccounts, "accountName")}</div>
-        <div><div class="aura-mini-label">Contactos sin match (motivo)</div>${unmatchedList("contacts", report.unmatchedContacts, "email")}</div>
+        <div><div class="aura-mini-label">Cuentas sin match NOVA (motivo)</div>${unmatchedList("accounts", report.unmatchedAccounts, "accountName")}</div>
+        <div><div class="aura-mini-label">Contactos sin match NOVA (motivo)</div>${unmatchedList("contacts", report.unmatchedContacts, "email")}</div>
+      </div>
+    </div>`;
+  }
+
+  // Pass 18: real, after-the-fact campaign-inclusion breakdown by recipientSource -- MERGED (tab
+  // email matched a real MKT_CONTACTS_SECURE record), CAMPANA_A_SOURCE (present on the tab only --
+  // the required CONTACT_SOURCE_ONLY case, still a full recipient), CONTACTS_SECURE (already
+  // known in MKT_CONTACTS_SECURE, not listed with an email on this tab extract).
+  function recipientSourceCard(byRecipientSource) {
+    if (!byRecipientSource) return "";
+    const b = byRecipientSource;
+    const total = (Number(b.MERGED) || 0) + (Number(b.CAMPANA_A_SOURCE) || 0) + (Number(b.CONTACTS_SECURE) || 0);
+    return `
+    <div class="card card-pad">
+      <h3 class="aura-subhead">Origen de destinatarios · Campaña A</h3>
+      <p class="text-secondary">La pestaña 'Campana A - HA prioritaria' es la fuente primaria de destinatarios. MKT_CONTACTS_SECURE enriquece y gobierna (DNC, frequency, stopOnResponse) — nunca excluye por falta de sincronización.</p>
+      <div class="kpi-grid">
+        ${kpi("file-spreadsheet", "Total destinatarios", total)}
+        ${kpi("link-2", "MERGED (pestaña + NOVA)", b.MERGED)}
+        ${kpi("user-plus", "CONTACT_SOURCE_ONLY (solo pestaña)", b.CAMPANA_A_SOURCE)}
+        ${kpi("database", "Solo MKT_CONTACTS_SECURE", b.CONTACTS_SECURE)}
       </div>
     </div>`;
   }
@@ -158,6 +185,7 @@
       ${languageRow(c.byLanguage)}
     </div>
 
+    ${recipientSourceCard(c.byRecipientSource)}
     ${stoppedBreakdownCard(c.stoppedBreakdown)}
     ${matchReportCard(c.matchReport)}
 
