@@ -2,6 +2,87 @@
 
 Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
+## Pass 15 — Go-live pass: definitive Campana A fixes, preflight, AURA dashboard, trigger install
+
+Turns Pass 14's diagnostics into real fixes, adds the final pre-LIVE preflight gate, and gives
+AURA a real, live-data presence inside `dgl-marketing-execution-os` (not just Sheets/Apps
+Script) -- all still on this feature branch, still DRY_RUN, still zero real sends.
+
+**Recipient gap, definitively fixed (not just diagnosed).** `v6AuraCampanaAEnsureCampaignAndScope_`
+now resolves each source account to its REAL `MKT_ACCOUNTS.accountId`
+(`v6AuraCampanaARealAccountId_`: the hash id first, falling back to the same deterministic
+normalized-name match `v6AuraCampanaAMatchReport_` already used only for reporting) and scopes
+the campaign by that real id -- so `v6ResolveRecipients_` actually joins against real
+`MKT_CONTACTS_SECURE` rows instead of an id that only matched when the tab's spelling was
+byte-identical to NOVA's. `v6AuraDedicatedAccountIds_` now excludes an account under BOTH ids,
+so the shared family pipeline still never double-processes it.
+
+**Governed override for a stale, cross-family historical response.** New
+`v6AuraCampanaAStopOverrideCheck_`: CLOSED/SUPPRESSED and an ongoing/successful relationship
+(LOAD/REACTIVATED, RETAINED/EXPANDED) are NEVER overridable. Only RESPONDED/RFQ
+RECEIVED/QUOTED/COOLDOWN-NURTURE are even eligible, and only when the prior campaign's real
+objective (looked up from `MKT_CAMPAIGNS`, never guessed) is a different family than Retention
+AND the response is older than `CAMPANA_A_STALE_RESPONSE_OVERRIDE_DAYS_` (90 -- a separate,
+explicit constant from the unrelated 30-day send-frequency cap). Every decision is captured on
+the job (`stopOverrideApplied`/`stopOverrideReason`, additive) and rolled up in
+`v6AuraCampanaAStoppedBreakdown_`. No suppression/frequency/DNC/stopOnResponse rule was relaxed.
+
+**Final preflight gate.** New `v6AuraCampanaAPreflight_`, run automatically inside
+`v6AuraCampanaARegenerateDryRun_` right before dispatch (DRY_RUN or LIVE alike): re-validates
+every PENDING job's email, reply-to, safely-determined language, and any exclusion that appeared
+since the job was built. A failing job is individually marked `SUPPRESSED` with the specific
+reason and never blocks any other job. Returns the exact recipients/language/suppression summary
+DGL asked to review before ever approving LIVE, plus `readyForLive` (true only when at least one
+job is safely sendable).
+
+**Trigger install folded into the same manual step.** `v6AuraCampanaARegenerateDryRun_` now also
+calls `auraInstallTriggers()` (already idempotent -- checks existing triggers by handler name
+first) so the one execution DGL runs also confirms the dispatcher's hourly trigger exists,
+without a second manual action.
+
+**AURA is now visible inside the Marketing Execution OS frontend**, not only Sheets/Apps Script.
+Investigated the existing frontend first (`index.html` + 40+ `assets/js/*` modules + `components/`,
+GitHub-Pages-hosted, hash-routed SPA) rather than building a parallel one -- confirmed
+`marketing-backend-adapter-v55.js` already has a generic, token-gated bridge
+(`mutate(actionName, payload)` -> `MarketingV55Backend.gs`'s `handleMarketingV55Api_` ->
+`routeMarketingV6_`) that every existing V6 panel already uses. Reused it exactly: added
+`v6AuraRetentionDashboard`/`v6AuraCampanaAAudit`/`v6AuraCampanaAMatchReport`/
+`v6AuraCampanaAStoppedBreakdown`/`v6AuraExecutionReport`/`v6AuraAutomaticReportStatus` to
+`MarketingV55Backend.gs`'s allowlist+switch (bridging to the already-built, already-tested V6
+router handlers) and to the frontend adapter -- deliberately READ-ONLY: no function that builds
+a queue, dispatches, or could ever send a real email is exposed this way, since this is a public
+GitHub Pages page and must stay presentation-only, per this project's own stated architecture.
+Brought the live-only `MarketingV55Backend.gs` under version control (`backend/apps-script-legacy-v55/`)
+before editing it, matching this project's established practice for any live file it needs to
+touch. New `assets/js/aura-dashboard-v1.js` + `assets/css/aura-dashboard-v1.css` (isolated,
+reviewable/removable independently) render a real "AURA Overview" page: last Retention run,
+Campana A source/eligible/stopped counts, ES/EN/PT distribution, the real STOPPED
+stage/override breakdown, the real account/contact match report (with named unmatched reasons),
+and every AURA campaign family's real send/response/RFQ/quote/load counts from
+`MKT_AURA_EXECUTION_REPORT` -- zero hardcoded/sample data. New "AURA" nav group + "AURA
+Overview" entry in `app.js`'s existing module registry (`components/sidebar.js` already renders
+whatever `app.js` registers -- no sidebar code changed). "Landing Pages" already exists as its
+own nav item/module in this frontend -- not duplicated or rebuilt.
+
+**GitHub Pages / `main` finding.** Confirmed by fetching the live Pages URL
+(`https://dglmarketing2026.github.io/dgl-marketing-execution-os/`) and diffing its exact HTML
+against every branch: Pages serves from `main`, byte-for-byte. This branch
+(`retention/v1-aura-integration-20260911`) -- where 100% of this session's AURA work lives --
+has never been merged to `main`, per this engagement's own standing, explicitly-repeated
+instruction never to merge to main or open a PR. That instruction was not overridden by this
+pass's go-live request, so it was not merged. See the GO-LIVE REPORT for the exact, minimal
+unblock action.
+
+Tests: `tests/v6-aura-campana-a.test.js` +6 cases (real-account resolution actually recovers a
+recipient via normalized-name matching, not just a diagnostic; the full governed-override matrix
+-- overridden / too-recent / same-family / CLOSED-SUPPRESSED / LOAD-REACTIVATED, each asserted
+independently; the STOPPED breakdown's override statistics; preflight suppressing only the
+failing job without blocking the rest of the campaign; preflight's not-ready-for-live case; and
+the dispatcher trigger installing idempotently inside regenerate).
+
+Full suite: 37 files, 37 pass, 0 fail. `RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN` was NOT executed
+in this pass.
+
 ## Pass 14 — Diagnosing the first real run's three anomalies (100% EN, 69% STOPPED, 170/227 recipients)
 
 The first real run (post Pass 13 fix) returned real, non-zero data -- 64 accounts, 170

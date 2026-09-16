@@ -506,14 +506,43 @@
           "guarantee": "gives a concrete, evidence-based answer to whether Campana A could work directly from the tab's own contact data, without guessing or requiring a pre-existing NOVA hash match"
         }
       ]
+    },
+    {
+      "file": "tests/v6-aura-campana-a.test.js (Pass 15 additions)",
+      "cases": [
+        {
+          "name": "a legitimate account-name spelling difference (e.g. a missing 'Corp' suffix) now recovers the REAL contact into MKT_EMAIL_QUEUE, scoped under the real MKT_ACCOUNTS id -- not just reported as a diagnostic",
+          "guarantee": "the definitive fix for the recipient gap: v6ResolveRecipients_ now joins against the real contact records instead of an id that only matched on byte-identical spelling"
+        },
+        {
+          "name": "the governed stale-cross-family STOPPED override: a >90-day RESPONDED from a different campaign family is overridden; a recent one, a same-family (Retention) one, CLOSED/SUPPRESSED, and an ongoing engaged relationship (LOAD/REACTIVATED) are each independently asserted to NEVER be overridden",
+          "guarantee": "a historical response to an unrelated campaign no longer blocks Retention indefinitely, while every real hard-stop and every genuinely engaged account stays fully protected"
+        },
+        {
+          "name": "v6AuraCampanaAStoppedBreakdown_ reports accurate totalOverridden and byOverrideReason counts",
+          "guarantee": "the override is auditable in aggregate, not just per job"
+        },
+        {
+          "name": "the final preflight suppresses only the one job that fails a real check (invalid email), by a specific reason, without affecting a different valid job in the same campaign",
+          "guarantee": "a single bad record can never hold back the rest of a real campaign, and the failure reason is always named, never silent"
+        },
+        {
+          "name": "preflight reports readyForLive:false when nothing is safely sendable, and runs automatically inside the regenerate cycle before dispatch",
+          "guarantee": "LIVE can never be approved on a queue that was never actually preflighted"
+        },
+        {
+          "name": "the regenerate cycle installs the dispatcher's hourly trigger idempotently (TRIGGER_INSTALLED once, TRIGGER_EXISTS on every later call, never a duplicate)",
+          "guarantee": "the one manual execution DGL runs also confirms automation is wired, without requiring a second manual step or ever risking a duplicate trigger"
+        }
+      ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full suite re-run after every change in this branch, most recently after adding real diagnostic capture/traceability for the first run's three anomalies -- 100% EN language, 69% STOPPED, and a 170/227 recipient gap (Pass 14: tab-country-primary language with full traceability, a real per-stage/per-prior-campaign STOPPED breakdown, and a deterministic account/contact match report -- no suppression, frequency, or stop rule was changed). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
+    "description": "Full suite re-run after every change in this branch, most recently after the go-live pass: definitive fixes for all three Pass 14 anomalies (real-account resolution for the recipient gap, a governed stale-cross-family STOPPED override), a final pre-LIVE preflight gate, idempotent trigger install folded into the same manual step, and a real, read-only AURA dashboard added to the existing dgl-marketing-execution-os frontend (Pass 15). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
     "totalFiles": 37,
     "passed": 37,
     "failed": 0,
-    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5 through 14's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (37 files total; Pass 14 extended tests/v6-aura-campana-a.test.js in place rather than adding a new file).",
+    "history": "Pass 4's regression run recorded 24 files / 17 passed / 7 failed, with the 7 failures independently reproduced on main via git stash (stale index.html cache-busting version strings and V5.5 frontend/backend-adapter assertions unrelated to any Retention V1 file). As of Pass 5 through 15's runs (node --test tests/*.test.js), all 7 of those previously-failing files pass; nothing in any of these passes touched any of them, so no fix was authored here -- this note only records that the full suite is currently green end to end (37 files total; Pass 15 extended tests/v6-aura-campana-a.test.js in place rather than adding a new test file -- its frontend/legacy-router changes have no Node test harness and were verified by syntax check plus live-content diffing instead).",
     "failedFiles": []
   }
 }

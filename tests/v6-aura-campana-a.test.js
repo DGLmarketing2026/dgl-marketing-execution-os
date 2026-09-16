@@ -50,7 +50,17 @@ function makeContext(opts) {
     console: { log: function (line) { loggedLines.push(line); } },
     PropertiesService: fakePropertiesService(props),
     SpreadsheetApp: fakeSpreadsheetApp(opts.spreadsheetApp),
-    ScriptApp: { getProjectTriggers: function () { return []; } },
+    ScriptApp: (function () {
+      var triggers = (opts.scriptState || (opts.scriptState = {})).triggers || (opts.scriptState.triggers = []);
+      var nextId = 1;
+      return {
+        getProjectTriggers: function () { return triggers.slice(); },
+        deleteTrigger: function (t) { triggers = triggers.filter(function (x) { return x !== t; }); opts.scriptState.triggers = triggers; },
+        newTrigger: function (handler) {
+          return { timeBased: function () { return { everyHours: function (h) { return { create: function () { var id = 'TRIGGER-' + (nextId++); var trig = { getHandlerFunction: function () { return handler; }, getUniqueId: function () { return id; }, _everyHours: h }; triggers.push(trig); return trig; } }; } }; } };
+        }
+      };
+    })(),
     GmailApp: { sendEmail: function (to, subject, text, options) { sentEmails.push({ to: to, subject: subject, text: text, options: options }); } },
     DGL_CONFIG: { DEFAULT_SENDER_NAME: 'DGL' }
   };
@@ -599,6 +609,190 @@ function campanaASheetValuesWithContacts(dataRows) {
   assert.equal(report.contactsMatched, 0, 'no MKT_CONTACTS_SECURE row exists yet for this account, so this real email is currently unmatched');
   assert.equal(report.unmatchedContacts[0].reason, 'NO_CONTACTS_SECURE_ROWS_FOR_ACCOUNT');
   console.log('campana-a test 24 (match report correctly evaluates whether the tab already provides usable contact/email columns): PASS');
+})();
+
+// 25. The real recipient-gap fix: an account whose MKT_ACCOUNTS name legitimately differs from
+// the tab's spelling only by a corporate suffix ("Progeral" vs "Progeral Corp") is now scoped by
+// its REAL account id, so v6ResolveRecipients_ actually finds and queues its real contact --
+// not just reported as a diagnostic, a genuine recipient recovery.
+(function realAccountResolutionRecoversRecipientTest() {
+  var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
+  var sheetValues = campanaASheetValues([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High']]);
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
+  ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  var hashAccountId = tables.MKT_AURA_GMAIL_OPPORTUNITIES[0].accountId;
+  // The REAL account in MKT_ACCOUNTS/MKT_CONTACTS_SECURE uses a DIFFERENT id (as it would coming
+  // from NOVA) and a legitimately different spelling of the same company -- no "Corp" suffix.
+  var realAccountId = 'ACC-NOVA-REAL-42';
+  tables.MKT_ACCOUNTS.push({ accountId: realAccountId, accountName: 'Progeral' });
+  tables.MKT_CONTACTS_SECURE.push({ contactId: 'CON-REAL-1', accountId: realAccountId, firstName: 'Maria', email: 'maria@progeral.com', country: 'Colombia' });
+  assert.notEqual(hashAccountId, realAccountId, 'sanity check: the hash id and the real NOVA id must genuinely differ for this test to be meaningful');
+
+  var build = ctx.v6AuraCampanaABuildQueue_();
+  assert.equal(build.built, 1, 'the real contact must be recovered and queued via normalized-name matching, not silently dropped');
+  var job = tables.MKT_EMAIL_QUEUE[0];
+  assert.equal(job.accountId, realAccountId, 'the job must be scoped under the REAL MKT_ACCOUNTS id, not the hash id, so downstream stage/frequency/pipeline lookups work correctly');
+  assert.equal(job.company, 'Progeral');
+  assert.equal(job.email, 'maria@progeral.com');
+
+  var dedicated = ctx.v6AuraDedicatedAccountIds_();
+  assert(dedicated[hashAccountId], 'the hash id must still be excluded from the shared family pipeline');
+  assert(dedicated[realAccountId], 'the resolved real id must ALSO be excluded from the shared family pipeline');
+  console.log('campana-a test 25 (a legitimate account-name spelling difference now recovers the real contact into the queue, not just a diagnostic report): PASS');
+})();
+
+// 26. The governed stale-cross-family override: a RESPONDED stage from a DIFFERENT campaign
+// family, more than 90 days old, no longer blocks Retention -- but a recent one, a
+// same-family(Retention) one, and a CLOSED/SUPPRESSED or LOAD/RETAINED stage are never
+// overridden. Every decision is captured on the job for audit.
+(function staleCrossFamilyOverrideTest() {
+  function scenario(pipelineRow, priorCampaignRow) {
+    var tables = {
+      MKT_AURA_GMAIL_OPPORTUNITIES: [gmailOpp('ACC-1', 'Old Response Co', 'Owner')],
+      MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Old Response Co' }],
+      MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', accountId: 'ACC-1', firstName: 'Ana', email: 'ana@oldresponseco.com', country: 'USA' }],
+      MKT_ACCOUNT_PIPELINE: [Object.assign({ accountId: 'ACC-1' }, pipelineRow)],
+      MKT_CAMPAIGNS: priorCampaignRow ? [priorCampaignRow] : []
+    };
+    var ctx = makeContext({ tables: tables });
+    ctx.v6AuraCampanaABuildQueue_();
+    return tables.MKT_EMAIL_QUEUE[0];
+  }
+  var oldDate = new Date(Date.now() - 120 * 86400000).toISOString();
+  var recentDate = new Date(Date.now() - 10 * 86400000).toISOString();
+
+  // (a) Stale (120d) RESPONDED from a DIFFERENT family (QNB) -> overridden, job proceeds.
+  var overridden = scenario(
+    { currentStage: 'RESPONDED', responseAt: oldDate, campaignId: 'CMP-OLD-QNB' },
+    { campaignId: 'CMP-OLD-QNB', objective: 'Quoted Not Booked' }
+  );
+  assert.notEqual(overridden.status, 'STOPPED', 'a stale, cross-family response must no longer block Retention');
+  assert.equal(overridden.stopOverrideApplied, 'YES');
+  assert.equal(overridden.stopOverrideReason, 'STALE_CROSS_FAMILY_RESPONSE');
+
+  // (b) Recent (10d) RESPONDED from a different family -> NOT overridden (too recent).
+  var recent = scenario(
+    { currentStage: 'RESPONDED', responseAt: recentDate, campaignId: 'CMP-OLD-QNB' },
+    { campaignId: 'CMP-OLD-QNB', objective: 'Quoted Not Booked' }
+  );
+  assert.equal(recent.status, 'STOPPED', 'a recent response must still block, regardless of family');
+  assert.equal(recent.stopOverrideApplied, 'NO');
+  assert.equal(recent.stopOverrideReason, 'RESPONSE_NOT_YET_STALE');
+
+  // (c) Stale RESPONDED, but from the SAME family (Retention) -> NOT overridden.
+  var sameFamily = scenario(
+    { currentStage: 'RESPONDED', responseAt: oldDate, campaignId: 'CMP-OLD-RETENTION' },
+    { campaignId: 'CMP-OLD-RETENTION', objective: 'Retention' }
+  );
+  assert.equal(sameFamily.status, 'STOPPED', 'a still-active Retention-family response must never be overridden by this rule');
+  assert.equal(sameFamily.stopOverrideReason, 'SAME_FAMILY_RETENTION_STILL_ACTIVE');
+
+  // (d) CLOSED / SUPPRESSED, even if old and cross-family -> NEVER overridden (hard stop).
+  var closed = scenario(
+    { currentStage: 'CLOSED / SUPPRESSED', responseAt: oldDate, campaignId: 'CMP-OLD-QNB' },
+    { campaignId: 'CMP-OLD-QNB', objective: 'Quoted Not Booked' }
+  );
+  assert.equal(closed.status, 'STOPPED', 'CLOSED / SUPPRESSED must always be a hard stop, never overridden');
+  assert.equal(closed.stopOverrideReason, 'HARD_STOP_CLOSED_SUPPRESSED');
+
+  // (e) LOAD / REACTIVATED (an ongoing, successful relationship), old and cross-family -> NEVER
+  // overridden -- this is a real engaged account, not a stale one-off response.
+  var engaged = scenario(
+    { currentStage: 'LOAD / REACTIVATED', responseAt: oldDate, campaignId: 'CMP-OLD-QNB' },
+    { campaignId: 'CMP-OLD-QNB', objective: 'Quoted Not Booked' }
+  );
+  assert.equal(engaged.status, 'STOPPED', 'an ongoing engaged relationship (LOAD/REACTIVATED) must never be overridden');
+  assert.equal(engaged.stopOverrideReason, 'STAGE_NOT_ELIGIBLE_FOR_OVERRIDE');
+
+  console.log('campana-a test 26 (governed stale-cross-family override: only a stale, different-family, non-terminal response is overridden -- never CLOSED/SUPPRESSED or an ongoing engaged relationship): PASS');
+})();
+
+// 27. v6AuraCampanaAStoppedBreakdown_ reports override statistics accurately.
+(function stoppedBreakdownReportsOverridesTest() {
+  var oldDate = new Date(Date.now() - 120 * 86400000).toISOString();
+  var tables = {
+    MKT_AURA_GMAIL_OPPORTUNITIES: [gmailOpp('ACC-1', 'Overridden Co', 'Owner'), gmailOpp('ACC-2', 'Still Stopped Co', 'Owner')],
+    MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Overridden Co' }, { accountId: 'ACC-2', accountName: 'Still Stopped Co' }],
+    MKT_CONTACTS_SECURE: [
+      { contactId: 'CON-1', accountId: 'ACC-1', firstName: 'A', email: 'a@overriddenco.com', country: 'USA' },
+      { contactId: 'CON-2', accountId: 'ACC-2', firstName: 'B', email: 'b@stillstoppedco.com', country: 'USA' }
+    ],
+    MKT_ACCOUNT_PIPELINE: [
+      { accountId: 'ACC-1', currentStage: 'RESPONDED', responseAt: oldDate, campaignId: 'CMP-OLD-QNB' },
+      { accountId: 'ACC-2', currentStage: 'CLOSED / SUPPRESSED', responseAt: oldDate, campaignId: 'CMP-OLD-QNB' }
+    ],
+    MKT_CAMPAIGNS: [{ campaignId: 'CMP-OLD-QNB', objective: 'Quoted Not Booked' }]
+  };
+  var ctx = makeContext({ tables: tables });
+  ctx.v6AuraCampanaABuildQueue_();
+  var breakdown = ctx.v6AuraCampanaAStoppedBreakdown_();
+  assert.equal(breakdown.totalStopped, 1, 'only the CLOSED/SUPPRESSED account remains stopped');
+  assert.equal(breakdown.totalOverridden, 1, 'the stale cross-family RESPONDED account must be counted as overridden');
+  assert.equal(breakdown.byOverrideReason.STALE_CROSS_FAMILY_RESPONSE, 1);
+  assert.equal(breakdown.byOverrideReason.HARD_STOP_CLOSED_SUPPRESSED, 1);
+  console.log('campana-a test 27 (STOPPED breakdown reports accurate override counts and reasons): PASS');
+})();
+
+// 28. Preflight: a job that fails a real check (invalid email) is individually suppressed with a
+// specific reason and does NOT block any other job in the campaign; a job that passes everything
+// is counted toward wouldSend and its real language, and readyForLive reflects the real outcome.
+(function preflightSuppressesOnlyTheFailingJobTest() {
+  var tables = {
+    MKT_EMAIL_QUEUE: [
+      { jobId: 'JOB:CMP-CAMPANA-A-HA-PRIORITARIA:CON-BAD:1', campaignId: 'CMP-CAMPANA-A-HA-PRIORITARIA', accountId: 'ACC-1', contactId: 'CON-BAD', email: 'not-an-email', replyTo: 'info@dglus.com', status: 'PENDING', preferredLanguage: 'ES' },
+      { jobId: 'JOB:CMP-CAMPANA-A-HA-PRIORITARIA:CON-GOOD:1', campaignId: 'CMP-CAMPANA-A-HA-PRIORITARIA', accountId: 'ACC-2', contactId: 'CON-GOOD', email: 'good@shipperco.com', replyTo: 'info@dglus.com', status: 'PENDING', preferredLanguage: 'EN' }
+    ]
+  };
+  var ctx = makeContext({ tables: tables });
+  var preflight = ctx.v6AuraCampanaAPreflight_();
+  assert.equal(preflight.totalPending, 2);
+  assert.equal(preflight.suppressedByPreflight, 1);
+  assert.equal(preflight.wouldSend, 1);
+  assert.equal(preflight.byLanguage.EN, 1);
+  assert.equal(preflight.readyForLive, true, 'at least one safely-determined job exists, so the campaign is ready for live review');
+  var badJob = tables.MKT_EMAIL_QUEUE.filter(function (j) { return j.contactId === 'CON-BAD'; })[0];
+  assert.equal(badJob.status, 'SUPPRESSED');
+  assert(badJob.error.indexOf('INVALID_EMAIL') >= 0);
+  var goodJob = tables.MKT_EMAIL_QUEUE.filter(function (j) { return j.contactId === 'CON-GOOD'; })[0];
+  assert.equal(goodJob.status, 'PENDING', 'a job that fails preflight must never affect a different, valid job in the same campaign');
+  console.log('campana-a test 28 (preflight suppresses only the failing job, by specific reason, without blocking the rest of the campaign): PASS');
+})();
+
+// 29. Preflight reports readyForLive:false when every pending job fails, and runs automatically
+// inside the regenerate cycle, before dispatch, without ever touching AURA_SEND_MODE.
+(function preflightNotReadyWhenAllFailTest() {
+  var tables = {
+    MKT_EMAIL_QUEUE: [{ jobId: 'JOB:X:CON-BAD:1', campaignId: 'CMP-CAMPANA-A-HA-PRIORITARIA', accountId: 'ACC-1', contactId: 'CON-BAD', email: 'nope', replyTo: '', status: 'PENDING', preferredLanguage: 'ES' }]
+  };
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: {} } });
+  var preflight = ctx.v6AuraCampanaAPreflight_();
+  assert.equal(preflight.readyForLive, false);
+  assert.equal(preflight.wouldSend, 0);
+
+  var out = ctx.v6AuraCampanaARegenerateDryRun_();
+  assert.equal(out.sendMode, 'DRY_RUN');
+  assert(out.preflight, 'the regenerate cycle must run preflight automatically, before dispatch');
+  console.log('campana-a test 29 (preflight correctly reports not-ready-for-live when nothing is safely sendable, and runs automatically inside regenerate): PASS');
+})();
+
+// 30. Regenerate installs the dispatcher's hourly trigger (idempotently -- never duplicated on a
+// second run), so the one manual execution DGL runs also confirms automation is wired, without a
+// second manual step.
+(function regenerateInstallsDispatcherTriggerIdempotentlyTest() {
+  var tables = {
+    MKT_AURA_GMAIL_OPPORTUNITIES: [gmailOpp('ACC-1', 'Progeral Corp', 'Owner')],
+    MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Progeral Corp' }],
+    MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', accountId: 'ACC-1', firstName: 'Maria', email: 'maria@progeral.com', country: 'Colombia' }]
+  };
+  var scriptState = {};
+  var ctx = makeContext({ tables: tables, scriptState: scriptState });
+  var first = ctx.v6AuraCampanaARegenerateDryRun_();
+  assert.equal(first.triggerStatus.status, 'TRIGGER_INSTALLED');
+  assert.equal(scriptState.triggers.length, 1);
+  var second = ctx.v6AuraCampanaARegenerateDryRun_();
+  assert.equal(second.triggerStatus.status, 'TRIGGER_EXISTS');
+  assert.equal(scriptState.triggers.length, 1, 'a second regenerate call must never install a duplicate dispatcher trigger');
+  console.log('campana-a test 30 (regenerate installs the dispatcher trigger idempotently, never duplicated): PASS');
 })();
 
 console.log('V6 AURA Campana A (dedicated tab, per-contact language, name reliability): ALL PASS');

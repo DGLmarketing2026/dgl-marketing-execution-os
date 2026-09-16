@@ -31,7 +31,10 @@ var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
   // (MarketingV6AuraCampanaA.gs). languageSource/languageReason and
   // stopReasonStage/stopReasonAt/stopReasonCampaignId added so a language decision or a STOPPED
   // status is traceable to exactly why, per job, instead of an opaque final value.
-  MKT_EMAIL_QUEUE:['jobId','campaignId','audienceId','accountId','contactId','email','firstName','company','service','subject','htmlBody','replyTo','status','gmailDraftId','createdAt','processedAt','error','requestId','amOwner','playbookId','sequenceStep','scheduledAt','approvalId','approvedAt','approvedBy','stopOnResponse','country','preferredLanguage','languageSource','languageReason','stopReasonStage','stopReasonAt','stopReasonCampaignId'],
+  // stopOverrideApplied/stopOverrideReason added for the governed stale-cross-family-response
+  // override (MarketingV6AuraCampanaA.gs, v6AuraCampanaAStopOverrideCheck_) -- records, per job,
+  // whether an otherwise-stopping stage was overridden and exactly why/why not.
+  MKT_EMAIL_QUEUE:['jobId','campaignId','audienceId','accountId','contactId','email','firstName','company','service','subject','htmlBody','replyTo','status','gmailDraftId','createdAt','processedAt','error','requestId','amOwner','playbookId','sequenceStep','scheduledAt','approvalId','approvedAt','approvedBy','stopOnResponse','country','preferredLanguage','languageSource','languageReason','stopReasonStage','stopReasonAt','stopReasonCampaignId','stopOverrideApplied','stopOverrideReason'],
   // Pre-existing legacy table (MarketingDataHub.gs); listed here only so
   // v6RequireContactRecipientHeaders_/v6EnsureContactRecipientSchema_ can validate it before
   // the dispatcher logs a real send touch into it -- no column added or changed.

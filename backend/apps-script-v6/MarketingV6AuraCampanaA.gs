@@ -230,9 +230,36 @@ function v6AuraCampanaAMatchReport_() {
     tabProvidesContactColumns: contactsWithEmail.length > 0
   };
 }
+// --- Real-account resolution: closes the actual recipient gap ---------------------------------
+// The hash-derived accountId (v6AuraGmailOpportunityId_'s scheme) only matches MKT_ACCOUNTS when
+// the account name is byte-identical between the tab and NOVA. Root cause of the 170/227
+// recipient gap: any account whose name differs even by a legitimate spelling variant (a missing
+// "Corp"/"Inc" suffix, punctuation, casing) NEVER matches, so v6ResolveRecipients_ finds zero
+// MKT_CONTACTS_SECURE rows for it and every one of its real contacts is silently dropped. This
+// resolves the REAL MKT_ACCOUNTS.accountId to use for scope-building: the hash id first (exact,
+// unchanged behavior when it already matches), falling back to the SAME deterministic normalized
+// name used by v6AuraCampanaAMatchReport_ (never fuzzy -- never matches two different real
+// companies) only when the hash id itself is not a real MKT_ACCOUNTS row. When neither resolves,
+// the hash id is returned unchanged (safe, inert -- v6ResolveRecipients_ simply finds no contacts
+// for it, exactly as before this fix, and it shows up in the match report as unmatched).
+function v6AuraCampanaARealAccountId_(hashAccountId, accountName) {
+  var accounts = v6Rows_('MKT_ACCOUNTS');
+  var direct = accounts.filter(function (a) { return v6AuraEmailText_(a.accountId) === hashAccountId; })[0];
+  if (direct) return hashAccountId;
+  var normalized = v6AuraCampanaANormalizeAccountName_(accountName);
+  var byName = accounts.filter(function (a) { return v6AuraCampanaANormalizeAccountName_(a.accountName) === normalized; })[0];
+  return byName ? v6AuraEmailText_(byName.accountId) : hashAccountId;
+}
+// Every account this dedicated pipeline touches, under EITHER identity (the hash id it was
+// detected under, and the real MKT_ACCOUNTS id it resolves to) -- so the shared family
+// scope-builder's exclusion never misses an account just because the two ids differ.
 function v6AuraDedicatedAccountIds_() {
   var out = {};
-  Object.keys(v6AuraCampanaAAccountMap_()).forEach(function (id) { out[id] = true; });
+  var accountMap = v6AuraCampanaAAccountMap_();
+  Object.keys(accountMap).forEach(function (hashId) {
+    out[hashId] = true;
+    out[v6AuraCampanaARealAccountId_(hashId, accountMap[hashId].accountName)] = true;
+  });
   return out;
 }
 
@@ -363,7 +390,14 @@ function v6AuraCampanaASubject_(template, vars) {
 // --- Campaign + scope (idempotent) ----------------------------------------------------------
 function v6AuraCampanaAEnsureCampaignAndScope_() {
   var accountMap = v6AuraCampanaAAccountMap_();
-  var accountIds = Object.keys(accountMap).filter(Boolean);
+  // Scope by the REAL MKT_ACCOUNTS id (falls back to the hash id only when no real account
+  // resolves at all) so v6ResolveRecipients_ joins against the actual contact records instead of
+  // an id that only matches when the tab's spelling happens to be byte-identical to NOVA's.
+  var realIdSet = {};
+  Object.keys(accountMap).filter(Boolean).forEach(function (hashId) {
+    realIdSet[v6AuraCampanaARealAccountId_(hashId, accountMap[hashId].accountName)] = true;
+  });
+  var accountIds = Object.keys(realIdSet);
   var now = new Date().toISOString();
   v6UpsertByKey_('MKT_CAMPAIGNS', ['campaignId'], {
     campaignId: CAMPANA_A_CAMPAIGN_ID_, scopeId: CAMPANA_A_SCOPE_ID_,
@@ -378,6 +412,43 @@ function v6AuraCampanaAEnsureCampaignAndScope_() {
   return { accountIds: accountIds, count: accountIds.length };
 }
 
+// --- Governed override: a stale, cross-family historical response must not block Retention
+// forever -----------------------------------------------------------------------------------
+// Explicit, narrow, and logged -- never a general relaxation of stopOnResponse. CLOSED /
+// SUPPRESSED and an ongoing/successful relationship (LOAD / REACTIVATED, RETAINED / EXPANDED)
+// are NEVER overridable -- those are real, current outcomes this pipeline must always respect.
+// Only RESPONDED / RFQ RECEIVED / QUOTED / COOLDOWN-NURTURE are even eligible, and only when
+// ALL of the following are true: the prior campaign's real objective/campaignType (looked up
+// from MKT_CAMPAIGNS, never guessed) is a DIFFERENT family than Retention; a real timestamp
+// exists to evaluate age against; and that timestamp is older than
+// CAMPANA_A_STALE_RESPONSE_OVERRIDE_DAYS_ (90 -- a deliberately separate, explicit constant from
+// the unrelated 30-day SEND-frequency cap in MarketingV6FrequencyControl.gs; this one measures
+// response/engagement staleness, not send pressure). Every decision -- overridden or not -- is
+// captured onto the job (stopOverrideApplied/stopOverrideReason) so it is auditable per account,
+// never a silent behavior change.
+var CAMPANA_A_STALE_RESPONSE_OVERRIDE_DAYS_ = 90;
+var CAMPANA_A_STALE_OVERRIDE_ELIGIBLE_STAGES_ = ['RESPONDED', 'RFQ RECEIVED', 'QUOTED', 'COOLDOWN / NURTURE'];
+function v6AuraCampanaAPriorCampaignFamily_(campaignId) {
+  if (!campaignId) return '';
+  var row = v6Rows_('MKT_CAMPAIGNS').filter(function (c) { return v6AuraEmailText_(c.campaignId) === campaignId; })[0];
+  if (!row) return '';
+  return v6AuraEmailText_(row.objective || row.campaignType).toUpperCase();
+}
+function v6AuraCampanaAStopOverrideCheck_(currentStage, pipelineRow) {
+  var p = pipelineRow || {};
+  if (currentStage === 'CLOSED / SUPPRESSED') return { overridable: false, reason: 'HARD_STOP_CLOSED_SUPPRESSED' };
+  if (CAMPANA_A_STALE_OVERRIDE_ELIGIBLE_STAGES_.indexOf(currentStage) < 0) return { overridable: false, reason: 'STAGE_NOT_ELIGIBLE_FOR_OVERRIDE' };
+  var priorFamily = v6AuraCampanaAPriorCampaignFamily_(v6AuraEmailText_(p.campaignId));
+  if (priorFamily === 'RETENTION') return { overridable: false, reason: 'SAME_FAMILY_RETENTION_STILL_ACTIVE' };
+  if (!priorFamily) return { overridable: false, reason: 'PRIOR_CAMPAIGN_FAMILY_UNKNOWN' };
+  var at = v6AuraEmailText_(p.responseAt || p.enteredStageAt);
+  var atDate = at ? new Date(at) : null;
+  if (!at || !atDate || isNaN(atDate.getTime())) return { overridable: false, reason: 'NO_TIMESTAMP_TO_EVALUATE_AGE' };
+  var ageDays = Math.floor((Date.now() - atDate.getTime()) / 86400000);
+  if (ageDays < CAMPANA_A_STALE_RESPONSE_OVERRIDE_DAYS_) return { overridable: false, reason: 'RESPONSE_NOT_YET_STALE', ageDays: ageDays };
+  return { overridable: true, reason: 'STALE_CROSS_FAMILY_RESPONSE', ageDays: ageDays, priorFamily: priorFamily };
+}
+
 // --- Queue build (idempotent; never rebuilds a job that already exists) ----------------------
 function v6AuraCampanaABuildQueue_() {
   v6EnsureContactRecipientSchema_();
@@ -386,6 +457,14 @@ function v6AuraCampanaABuildQueue_() {
   if (!setup.count) return result;
 
   var accountMap = v6AuraCampanaAAccountMap_();
+  // recipients below are keyed by the REAL MKT_ACCOUNTS accountId (v6AuraCampanaAEnsureCampaignAndScope_
+  // scopes by that id now, not always the hash id) -- this re-keys the same Gmail-opportunity data
+  // (accountName/amOwner) by that real id so every lookup below finds it regardless of which of
+  // the two ids ended up being the real match.
+  var gmailOppByRealAccountId = {};
+  Object.keys(accountMap).filter(Boolean).forEach(function (hashId) {
+    gmailOppByRealAccountId[v6AuraCampanaARealAccountId_(hashId, accountMap[hashId].accountName)] = accountMap[hashId];
+  });
   var campaign = v6Rows_('MKT_CAMPAIGNS').filter(function (c) { return v6AuraEmailText_(c.campaignId) === CAMPANA_A_CAMPAIGN_ID_; })[0] || {};
   v6ResolveRecipients_({ campaignId: CAMPANA_A_CAMPAIGN_ID_ });
   var recipients = v6Rows_('MKT_AUDIENCES').filter(function (r) {
@@ -426,7 +505,7 @@ function v6AuraCampanaABuildQueue_() {
 
     var account = accountsById[accountId] || {};
     var contact = contactsById[contactId] || {};
-    var gmailOpp = accountMap[accountId] || {};
+    var gmailOpp = gmailOppByRealAccountId[accountId] || {};
     var tabCountry = tabCountryByAccountName[v6AuraEmailText_(gmailOpp.accountName)] || '';
     var langInfo = v6AuraCampanaAPreferredLanguage_(contact, account, tabCountry);
     result.byLanguage[langInfo.language] = (result.byLanguage[langInfo.language] || 0) + 1;
@@ -443,7 +522,9 @@ function v6AuraCampanaABuildQueue_() {
     // v6AuraEmailAccountStopped_ already uses -- this does not change what counts as stopped.
     var pipelineRow = accountPipelineById[accountId] || null;
     var currentStage = pipelineRow ? String(pipelineRow.currentStage || '').toUpperCase() : '';
-    var stopped = !!currentStage && (currentStage === 'CLOSED / SUPPRESSED' || (typeof v6PipelineAdvanced_ === 'function' && v6PipelineAdvanced_(currentStage)));
+    var rawStopped = !!currentStage && (currentStage === 'CLOSED / SUPPRESSED' || (typeof v6PipelineAdvanced_ === 'function' && v6PipelineAdvanced_(currentStage)));
+    var overrideCheck = rawStopped ? v6AuraCampanaAStopOverrideCheck_(currentStage, pipelineRow) : { overridable: false, reason: 'NOT_STOPPED' };
+    var stopped = rawStopped && !overrideCheck.overridable;
     var now = new Date().toISOString();
     var country = tabCountry || v6AuraEmailText_(contact.country || contact.Country || account.country || account.Country || '');
     var job = {
@@ -459,8 +540,9 @@ function v6AuraCampanaABuildQueue_() {
       approvalId: policyApproved ? '' : ('APR:' + CAMPANA_A_CAMPAIGN_ID_), approvedAt: '', approvedBy: '',
       stopOnResponse: true, country: country, preferredLanguage: langInfo.language,
       languageSource: langInfo.source, languageReason: langInfo.reason,
-      stopReasonStage: stopped ? currentStage : '', stopReasonAt: stopped ? v6AuraEmailText_(pipelineRow.responseAt || pipelineRow.enteredStageAt) : '',
-      stopReasonCampaignId: stopped ? v6AuraEmailText_(pipelineRow.campaignId) : ''
+      stopReasonStage: rawStopped ? currentStage : '', stopReasonAt: rawStopped ? v6AuraEmailText_(pipelineRow.responseAt || pipelineRow.enteredStageAt) : '',
+      stopReasonCampaignId: rawStopped ? v6AuraEmailText_(pipelineRow.campaignId) : '',
+      stopOverrideApplied: overrideCheck.overridable ? 'YES' : 'NO', stopOverrideReason: rawStopped ? overrideCheck.reason : ''
     };
     v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);
     existingIds[jobId] = true;
@@ -476,17 +558,60 @@ function v6AuraCampanaABuildQueue_() {
 // grouped for a real, auditable answer to "how many of these were RESPONDED vs QUOTED vs closed,
 // and from which prior campaign."
 function v6AuraCampanaAStoppedBreakdown_() {
-  var jobs = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) { return v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && r.status === 'STOPPED'; });
-  var byStage = {}, byPriorCampaignId = {};
+  var allJobs = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) { return v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_; });
+  var jobs = allJobs.filter(function (r) { return r.status === 'STOPPED'; });
+  var overridden = allJobs.filter(function (r) { return r.stopOverrideApplied === 'YES'; });
+  var byStage = {}, byPriorCampaignId = {}, byOverrideReason = {};
   jobs.forEach(function (j) {
     var stage = v6AuraEmailText_(j.stopReasonStage) || 'UNKNOWN';
     byStage[stage] = (byStage[stage] || 0) + 1;
     var priorCampaign = v6AuraEmailText_(j.stopReasonCampaignId) || 'UNKNOWN';
     byPriorCampaignId[priorCampaign] = (byPriorCampaignId[priorCampaign] || 0) + 1;
   });
+  allJobs.forEach(function (j) { if (v6AuraEmailText_(j.stopReasonStage)) { var reason = v6AuraEmailText_(j.stopOverrideReason) || 'NOT_STOPPED'; byOverrideReason[reason] = (byOverrideReason[reason] || 0) + 1; } });
   return {
     totalStopped: jobs.length, byStage: byStage, byPriorCampaignId: byPriorCampaignId,
-    sample: jobs.slice(0, 10).map(function (j) { return { accountId: j.accountId, stage: j.stopReasonStage, at: j.stopReasonAt, priorCampaignId: j.stopReasonCampaignId }; })
+    totalOverridden: overridden.length, byOverrideReason: byOverrideReason,
+    sample: jobs.slice(0, 10).map(function (j) { return { accountId: j.accountId, stage: j.stopReasonStage, at: j.stopReasonAt, priorCampaignId: j.stopReasonCampaignId }; }),
+    overriddenSample: overridden.slice(0, 10).map(function (j) { return { accountId: j.accountId, stage: j.stopReasonStage, at: j.stopReasonAt, priorCampaignId: j.stopReasonCampaignId, status: j.status }; })
+  };
+}
+
+// --- Final preflight: the one gate that decides what may ever reach a real send --------------
+// Runs before every dispatch (DRY_RUN or LIVE alike). Re-validates each PENDING job against the
+// exact, minimal set of things that must be safely determined before a real send is even
+// considered: a real, well-formed email address; a real, valid reply-to; and no active
+// suppression/exclusion that appeared after the job was originally built. A job that fails is
+// individually marked SUPPRESSED with the specific reason -- it never blocks or holds back any
+// other job in the campaign. A language resolved via the documented EN fallback (no signal
+// found) still counts as safely determined -- EN is a real, deliberate default, not an unknown.
+// Returns the exact recipient/language/suppression summary DGL asked to review before ever
+// approving LIVE, plus readyForLive: true only when at least one job would actually go out and
+// zero jobs remain in an undetermined state.
+function v6AuraCampanaAPreflight_() {
+  var jobs = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) { return v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && r.status === 'PENDING'; });
+  var wouldSend = 0, suppressedNow = 0, byLanguage = { ES: 0, EN: 0, PT: 0 }, issues = [];
+  jobs.forEach(function (job) {
+    var problems = [];
+    if (!v6AuraEmailValid_(job.email)) problems.push('INVALID_EMAIL');
+    if (!job.replyTo || !v6AuraEmailValid_(job.replyTo)) problems.push('MISSING_OR_INVALID_REPLY_TO');
+    if (['ES', 'EN', 'PT'].indexOf(v6AuraEmailText_(job.preferredLanguage)) < 0) problems.push('LANGUAGE_NOT_SAFELY_DETERMINED');
+    var exclusion = v6AuraEmailActiveExclusion_(job.accountId, job.contactId);
+    if (exclusion) problems.push('ACTIVE_EXCLUSION_' + (exclusion.reasonCode || exclusion.reason || 'FOUND'));
+    if (problems.length) {
+      job.status = 'SUPPRESSED'; job.error = 'PREFLIGHT_FAILED: ' + problems.join(', '); job.processedAt = new Date().toISOString();
+      v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);
+      suppressedNow++;
+      issues.push({ jobId: job.jobId, accountId: job.accountId, email: v6AuraEmailMask_(job.email), problems: problems });
+    } else {
+      wouldSend++;
+      var lang = v6AuraEmailText_(job.preferredLanguage);
+      byLanguage[lang] = (byLanguage[lang] || 0) + 1;
+    }
+  });
+  return {
+    status: 'PREFLIGHT_COMPLETE', totalPending: jobs.length, wouldSend: wouldSend, suppressedByPreflight: suppressedNow,
+    byLanguage: byLanguage, issues: issues, readyForLive: jobs.length > 0 && wouldSend > 0
   };
 }
 
@@ -568,17 +693,26 @@ function v6AuraCampanaAAudit_() {
 // (still DRY_RUN, so zero real sends), then runs the full QA audit.
 function v6AuraCampanaARegenerateDryRun_() {
   auraDisableLiveSending();
+  // Idempotent (checks existing triggers by handler name before creating one -- never
+  // duplicates). Installed here so the one manual execution DGL runs also confirms the
+  // dispatcher's own hourly trigger exists, without requiring a second manual step.
+  var triggerStatus = (typeof auraInstallTriggers === 'function') ? auraInstallTriggers() : { status: 'NOT_AVAILABLE' };
   var ingest = v6AuraCampanaAIngestFromSpreadsheet_();
   if (typeof v6AuraGmailReprocessRecent_ === 'function') {
     try { v6AuraGmailReprocessRecent_(45); } catch (err) { /* best-effort fallback source only, never fatal to the direct read */ }
   }
   if (typeof v6RefreshOpportunitiesFromReports_ === 'function') v6RefreshOpportunitiesFromReports_();
   var build = v6AuraCampanaABuildQueue_();
+  // Preflight runs BEFORE dispatch, every time, in both DRY_RUN and LIVE -- any job that cannot
+  // be safely determined (invalid email, missing/invalid reply-to, an exclusion that appeared
+  // since the job was built) is individually suppressed here and never reaches dispatch at all;
+  // every other job in the campaign proceeds unaffected.
+  var preflight = v6AuraCampanaAPreflight_();
   var dispatch = v6AuraCampanaADispatchAll_();
   var audit = v6AuraCampanaAAudit_();
   return {
     status: audit.sourceStatus === 'SOURCE_EMPTY_OR_NOT_FOUND' ? 'SOURCE_EMPTY_OR_NOT_FOUND' : 'REGENERATE_COMPLETE',
-    sendMode: v6AuraSendMode_(), ingest: ingest, build: build, dispatch: dispatch, audit: audit
+    sendMode: v6AuraSendMode_(), triggerStatus: triggerStatus, ingest: ingest, build: build, preflight: preflight, dispatch: dispatch, audit: audit
   };
 }
 // Logging lives ONLY in this public wrapper -- v6AuraCampanaARegenerateDryRun_ itself is
@@ -599,6 +733,10 @@ function RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN() {
       recipients: result.build && result.build.recipients,
       built: result.build && result.build.built,
       blockedNoReplyTo: result.build && result.build.blockedNoReplyTo,
+      preflightWouldSend: result.preflight && result.preflight.wouldSend,
+      preflightSuppressed: result.preflight && result.preflight.suppressedByPreflight,
+      preflightReadyForLive: result.preflight && result.preflight.readyForLive,
+      preflightByLanguage: result.preflight && result.preflight.byLanguage,
       dispatchSuppressed: result.dispatch && result.dispatch.suppressed,
       dispatchFailed: result.dispatch && result.dispatch.failed,
       invalidEmailCount: result.audit && result.audit.invalidEmailCount,
