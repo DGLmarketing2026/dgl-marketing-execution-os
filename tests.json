@@ -627,10 +627,23 @@
           "guarantee": "the recipient-source mix is auditable after the fact, not just at build time"
         }
       ]
+    },
+    {
+      "file": "tests/v6-aura-campana-a.test.js (Pass 19 addition)",
+      "cases": [
+        {
+          "name": "every regenerate call persists exactly one durable row to MKT_AURA_CAMPANA_A_RUN_SUMMARY with sourceAccounts/sourceContacts/recipients/recipientSource breakdown/byLanguage/invalidEmailCount/realSendsDetected matching the in-memory result exactly, and an explicit note that the match report is diagnostic-only",
+          "guarantee": "DGL can answer every preflight/result question directly from the Data Hub spreadsheet, or via v6AuraCampanaALatestRunSummary_, without ever depending on the ephemeral Apps Script execution log"
+        },
+        {
+          "name": "a second run adds a second durable row and the latest-run reader returns the newer one -- the first run's row is never overwritten or lost",
+          "guarantee": "the audit trail is cumulative, not a single mutable status cell"
+        }
+      ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full suite re-run after every change in this branch, most recently after Pass 18: a completed, non-timing-out execution (Pass 17's fixes worked) revealed the REAL recipient-matching gap DGL had suspected all along -- v6ResolveRecipients_ (the shared engine) sources recipients exclusively from MKT_CONTACTS_SECURE, so a valid, explicitly-listed email on the Campana A tab not yet synced into NOVA/the Data Hub was silently excluded (EMAIL_NOT_FOUND_AMONG_ACCOUNT_CONTACTS / NO_CONTACTS_SECURE_ROWS_FOR_ACCOUNT). Per explicit instruction, Campana A no longer calls the shared v6ResolveRecipients_ at all: a new, dedicated v6AuraCampanaAResolveRecipients_ makes MKT_AURA_CAMPANA_A_SOURCE_ROWS (the captured Campana A tab rows) the PRIMARY recipient source, unions it with MKT_CONTACTS_SECURE by exact (never fuzzy) case-insensitive email match per real account, and tags every recipient recipientSource: CAMPANA_A_SOURCE | CONTACTS_SECURE | MERGED (new additive column on MKT_EMAIL_QUEUE and MKT_AUDIENCES). Every governed check (DNC, strict email-format validation, active exclusion, frequency cap, account-level stopOnResponse) is fully reproduced against the merged candidate list using the same underlying primitives -- no protection was weakened, no contact volume was reduced, and the shared v6ResolveRecipients_ itself is completely unchanged for every other campaign family. All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green (38/38).",
+    "description": "Full suite re-run after every change in this branch, most recently after Pass 19: DGL explicitly authorized merging this branch into main (discovering and reconciling 11 independent commits main had gained via an earlier, separate AURA lineage -- see progress.md Pass 19 for the full conflict-by-conflict resolution), and added a durable per-run audit trail (MKT_AURA_CAMPANA_A_RUN_SUMMARY) so DGL never again depends on the Apps Script execution log to know what a Campana A run actually did -- a real incident where a completed run's log panel showed only its final matchReport section, not the full result, prompted this. Both changes are live: verified via clasp push + a redeploy of the pinned web app version, and via byte-for-byte curl diffs against the public GitHub Pages URL. All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green (45/45 on main).",
     "totalFiles": 37,
     "passed": 37,
     "failed": 0,
