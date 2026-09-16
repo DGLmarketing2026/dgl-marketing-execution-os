@@ -12,7 +12,7 @@
   "use strict";
 
   const adapter = () => global.DGL_MARKETING_BACKEND_ADAPTER_V55;
-  let state = { loading: false, error: "", retention: null, campanaA: null, matchReport: null, stoppedBreakdown: null, execReport: null };
+  let state = { loading: false, error: "", retention: null, campanaA: null, matchReport: null, stoppedBreakdown: null, execReport: null, runSummary: null };
 
   function fmt(n) { return Number(n || 0).toLocaleString("en-US"); }
   function esc(v) { return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
@@ -138,6 +138,31 @@
     </div>`;
   }
 
+  // Pass 19: the durable per-run audit trail (MKT_AURA_CAMPANA_A_RUN_SUMMARY) -- never depend on
+  // the Apps Script execution log to know what the last run actually did. found:false means no
+  // run has ever persisted a summary yet (not an error).
+  function runSummaryCard(summary) {
+    if (!summary) return "";
+    if (summary.found === false) return `<div class="card card-pad"><strong>Última corrida:</strong> aún no hay ninguna corrida registrada en MKT_AURA_CAMPANA_A_RUN_SUMMARY.</div>`;
+    const s = summary;
+    return `
+    <div class="card card-pad">
+      <h3 class="aura-subhead" style="margin-top:0">Última corrida (auditoría durable, no depende del log)</h3>
+      <p class="text-secondary">runId ${esc(s.runId)} · ${esc((s.runAt || "").slice(0, 16).replace("T", " "))} · ${statusBadge(s.status)} · sendMode ${esc(s.sendMode)} · ${fmt(s.totalMs)}ms</p>
+      <div class="kpi-grid">
+        ${kpi("building-2", "Source accounts", s.sourceAccounts)}
+        ${kpi("users", "Source contacts", s.sourceContacts)}
+        ${kpi("send", "Recipients", s.recipients)}
+        ${kpi("mail", "Preflight wouldSend", s.preflightWouldSend)}
+        ${kpi("shield-alert", "Preflight suppressed", s.preflightSuppressed)}
+        ${kpi("shield-off", "STOPPED", s.statusStoppedTotal)}
+        ${kpi("alert-triangle", "Invalid emails", s.invalidEmailCount)}
+        ${kpi("copy", "Duplicate job keys", s.duplicateJobKeys)}
+        ${kpi("send", "Real sends detected", s.realSendsDetected)}
+      </div>
+    </div>`;
+  }
+
   function paint(mount) {
     if (!mount) return;
     const connected = adapter() && adapter().isConnected && adapter().isConnected();
@@ -185,6 +210,7 @@
       ${languageRow(c.byLanguage)}
     </div>
 
+    ${runSummaryCard(state.runSummary)}
     ${recipientSourceCard(c.byRecipientSource)}
     ${stoppedBreakdownCard(c.stoppedBreakdown)}
     ${matchReportCard(c.matchReport)}
@@ -205,16 +231,18 @@
     if (state.loading || !adapter() || !adapter().isConnected()) return;
     state.loading = true; state.error = ""; paint(mount);
     try {
-      const [retention, campanaA, matchReport, stoppedBreakdown, execReport] = await Promise.all([
+      const [retention, campanaA, matchReport, stoppedBreakdown, execReport, runSummary] = await Promise.all([
         adapter().v6AuraRetentionDashboard ? adapter().v6AuraRetentionDashboard() : null,
         adapter().v6AuraCampanaAAudit ? adapter().v6AuraCampanaAAudit() : null,
         adapter().v6AuraCampanaAMatchReport ? adapter().v6AuraCampanaAMatchReport() : null,
         adapter().v6AuraCampanaAStoppedBreakdown ? adapter().v6AuraCampanaAStoppedBreakdown() : null,
-        adapter().v6AuraExecutionReport ? adapter().v6AuraExecutionReport() : null
+        adapter().v6AuraExecutionReport ? adapter().v6AuraExecutionReport() : null,
+        adapter().v6AuraCampanaALatestRunSummary ? adapter().v6AuraCampanaALatestRunSummary() : null
       ]);
       state.retention = retention || {};
       state.campanaA = Object.assign({}, campanaA || {}, { matchReport: matchReport || null, stoppedBreakdown: stoppedBreakdown || null });
       state.execReport = execReport || {};
+      state.runSummary = runSummary || null;
     } catch (error) {
       state.error = "No se pudo cargar AURA: " + (error && error.message || error);
     } finally {
