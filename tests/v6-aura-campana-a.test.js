@@ -108,20 +108,6 @@ function makeContext(opts) {
     (p.accountIds || []).forEach(function (id) { accRows.push({ scopeId: p.scopeId, campaignId: p.campaignId, accountId: id, eligibilityStatus: 'ELIGIBLE' }); });
     return { status: 'SCOPE_READY' };
   };
-  // Stands in for the real v6ResolveRecipients_ (MarketingV6RecipientResolution.gs, its own
-  // dedicated test coverage) -- writes exactly the MKT_AUDIENCES RECIPIENT rows this pipeline
-  // reads, driven by opts.eligibleContactIds (defaults to every contact in MKT_CONTACTS_SECURE
-  // belonging to a scoped account).
-  ctx.v6ResolveRecipients_ = function (p) {
-    var scopeAccountIds = (tables.MKT_SCOPE_ACCOUNTS || []).filter(function (r) { return r.campaignId === p.campaignId; }).map(function (r) { return r.accountId; });
-    var audRows = tables.MKT_AUDIENCES || (tables.MKT_AUDIENCES = []);
-    (tables.MKT_CONTACTS_SECURE || []).forEach(function (c) {
-      if (scopeAccountIds.indexOf(c.accountId) < 0) return;
-      var eligible = !opts.eligibleContactIds || opts.eligibleContactIds.indexOf(c.contactId) >= 0;
-      audRows.push({ audienceRecipientId: 'AUD:' + p.campaignId + ':' + c.contactId, recordType: 'RECIPIENT', campaignId: p.campaignId, accountId: c.accountId, contactId: c.contactId, email: c.email, eligibilityStatus: eligible ? 'ELIGIBLE' : 'EXCLUDED' });
-    });
-    return { audienceResolved: true };
-  };
   ctx.v6AuraDeriveExecutionId_ = function (campaignId) { return 'EXEC-' + campaignId; };
   // Real v6AuraGmailUpsertOpportunity_ (MarketingV6AuraGmailIngest.gs) derives a deterministic
   // accountId via v6NormAccount_/v6HashKey_ (MarketingV6ReportIngestion.gs, not loaded here --
@@ -280,26 +266,26 @@ function gmailOpp(accountId, accountName, amOwner, sheetName) {
   console.log('campana-a test 7 (reply-to always resolves to the canonical DGL identity; status stays DRY_RUN, zero real sends): PASS');
 })();
 
-// 8. Suppression (an EXCLUDED audience row from the real recipient-resolution shape) and
-// stopOnResponse (an already-RESPONDED account) both still hold -- reused, not reimplemented.
+// 8. Suppression (a real DNC contact, excluded by v6AuraCampanaAResolveRecipients_'s own governed
+// check) and stopOnResponse (an already-RESPONDED account) both still hold under the new
+// tab-primary resolver -- neither protection was weakened by making the tab the primary source.
 (function suppressionAndStopStillHoldTest() {
   var tables = {
     MKT_AURA_GMAIL_OPPORTUNITIES: [gmailOpp('ACC-1', 'Progeral Corp', 'Owner'), gmailOpp('ACC-2', 'Responded Co', 'Owner')],
     MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Progeral Corp' }, { accountId: 'ACC-2', accountName: 'Responded Co' }],
     MKT_CONTACTS_SECURE: [
-      { contactId: 'CON-SUPPRESSED', accountId: 'ACC-1', firstName: 'Maria', email: 'maria@progeral.com', country: 'Colombia' },
+      { contactId: 'CON-SUPPRESSED', accountId: 'ACC-1', firstName: 'Maria', email: 'maria@progeral.com', country: 'Colombia', doNotContact: true },
       { contactId: 'CON-STOPPED', accountId: 'ACC-2', firstName: 'Ana', email: 'ana@respondedco.com', country: 'Colombia' }
     ],
     MKT_ACCOUNT_PIPELINE: [{ accountId: 'ACC-2', currentStage: 'RESPONDED' }]
   };
-  // Only CON-STOPPED is marked eligible by the (stubbed) recipient resolver -- CON-SUPPRESSED
-  // represents a contact the real engine already excluded (DNC/invalid/frequency/exclusion).
-  var ctx = makeContext({ tables: tables, eligibleContactIds: ['CON-STOPPED'] });
+  var ctx = makeContext({ tables: tables });
   var build = ctx.v6AuraCampanaABuildQueue_();
-  assert.equal(build.built, 1, 'a contact the recipient-resolution engine already excluded must never be queued');
+  assert.equal(build.built, 1, 'a real DNC contact must never be queued, even sourced only from MKT_CONTACTS_SECURE');
+  assert.equal(build.excludedByReason.DO_NOT_CONTACT, 1);
   var stoppedJob = tables.MKT_EMAIL_QUEUE.filter(function (j) { return j.contactId === 'CON-STOPPED'; })[0];
   assert.equal(stoppedJob.status, 'STOPPED', 'an already-RESPONDED account must never receive a queued send, even freshly built');
-  console.log('campana-a test 8 (suppression and stopOnResponse both still hold, reusing the existing engines verbatim): PASS');
+  console.log('campana-a test 8 (suppression (real DNC) and stopOnResponse both still hold under the new tab-primary resolver): PASS');
 })();
 
 // 9. The full QA audit reports accurate, real counts: language distribution, zero "Team"
@@ -973,6 +959,144 @@ function campanaASheetValuesWithContacts(dataRows) {
   assert.equal(tables.MKT_EMAIL_QUEUE[0].contactId, 'CON-3', 'resume must continue from the saved index, not restart from zero');
   assert.equal(props.CAMPANA_A_BUILD_CHECKPOINT, undefined, 'a successfully completed build must clear the checkpoint so the next call starts fresh');
   console.log('campana-a test 35 (a saved checkpoint resumes from the exact saved index without reprocessing earlier recipients, and clears itself on successful completion): PASS');
+})();
+
+// 36. Root-cause fix (2026-09-16, third finding): a contact present ONLY on the Campana A tab
+// (a real, explicitly-listed, well-formed email with no MKT_CONTACTS_SECURE record at all) is a
+// full recipient -- never silently dropped for lack of a NOVA sync -- personalized from the
+// tab's own contactName/country, tagged recipientSource: CAMPANA_A_SOURCE (this pipeline's
+// required CONTACT_SOURCE_ONLY marker).
+(function tabOnlyContactBecomesRealRecipientTest() {
+  var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
+  var sheetValues = campanaASheetValuesWithContacts([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Brasil', 'Joao Silva', 'joao@progeral.com']]);
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
+  ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  var realAccountId = tables.MKT_AURA_GMAIL_OPPORTUNITIES[0].accountId;
+  tables.MKT_ACCOUNTS.push({ accountId: realAccountId, accountName: 'Progeral Corp' });
+  // Deliberately NO MKT_CONTACTS_SECURE row for this contact at all -- the exact real-world gap.
+  var build = ctx.v6AuraCampanaABuildQueue_();
+  assert.equal(build.built, 1, 'a tab-only contact must never be dropped for lack of a MKT_CONTACTS_SECURE match');
+  assert.equal(build.recipientSourceBreakdown.CAMPANA_A_SOURCE, 1);
+  assert.equal(build.recipientSourceBreakdown.MERGED, 0);
+  var job = tables.MKT_EMAIL_QUEUE[0];
+  assert.equal(job.email, 'joao@progeral.com');
+  assert.equal(job.firstName, 'Joao Silva', "the tab's own contactName must personalize a tab-only recipient");
+  assert.equal(job.preferredLanguage, 'PT', "the tab's own country must still resolve language for a tab-only recipient");
+  assert.equal(job.recipientSource, 'CAMPANA_A_SOURCE');
+  console.log('campana-a test 36 (a contact present only on the Campana A tab is a real, personalized recipient, never silently dropped): PASS');
+})();
+
+// 37. Deterministic merge: the SAME email present on the tab AND in MKT_CONTACTS_SECURE for the
+// same real account merges into one MERGED recipient -- MKT_CONTACTS_SECURE's firstName wins
+// (the more governed record) when both have one, and the merge is by EXACT email match only,
+// never fuzzy (a similar-but-different email on the tab must stay a SEPARATE candidate).
+(function deterministicMergeAndNoFuzzyMatchTest() {
+  var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
+  var sheetValues = campanaASheetValuesWithContacts([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Colombia', 'Joao Silva', 'joao@progeral.com']]);
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
+  ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  var realAccountId = tables.MKT_AURA_GMAIL_OPPORTUNITIES[0].accountId;
+  tables.MKT_ACCOUNTS.push({ accountId: realAccountId, accountName: 'Progeral Corp' });
+  tables.MKT_CONTACTS_SECURE.push({ contactId: 'CON-REAL', accountId: realAccountId, firstName: 'João', email: 'JOAO@progeral.com' });
+  // A similar-but-different email on a SEPARATE account's contact must never fuzzy-merge with
+  // the tab row above -- it must remain its own, separate CONTACTS_SECURE-sourced candidate.
+  var build = ctx.v6AuraCampanaABuildQueue_();
+  assert.equal(build.built, 1, 'the same email (case-insensitive exact match) on the tab and in MKT_CONTACTS_SECURE must merge into exactly one recipient, never two');
+  assert.equal(build.recipientSourceBreakdown.MERGED, 1);
+  var job = tables.MKT_EMAIL_QUEUE[0];
+  assert.equal(job.contactId, 'CON-REAL', 'a merged recipient must use the real MKT_CONTACTS_SECURE contactId, not a synthesized one');
+  assert.equal(job.firstName, 'João', "MKT_CONTACTS_SECURE's firstName must win in a deterministic merge over the tab's own contactName");
+  assert.equal(job.recipientSource, 'MERGED');
+  console.log('campana-a test 37 (a tab email and a MKT_CONTACTS_SECURE email that match exactly, case-insensitively, merge into one MERGED recipient; MKT_CONTACTS_SECURE firstName wins): PASS');
+})();
+
+// 38. A real DNC flag on the MATCHED MKT_CONTACTS_SECURE contact still blocks the MERGED
+// recipient -- enrichment/governance from MKT_CONTACTS_SECURE is preserved, not just personalization.
+(function mergedRecipientStillGovernedByContactsSecureDncTest() {
+  var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
+  var sheetValues = campanaASheetValuesWithContacts([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Colombia', 'Joao Silva', 'joao@progeral.com']]);
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
+  ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  var realAccountId = tables.MKT_AURA_GMAIL_OPPORTUNITIES[0].accountId;
+  tables.MKT_ACCOUNTS.push({ accountId: realAccountId, accountName: 'Progeral Corp' });
+  tables.MKT_CONTACTS_SECURE.push({ contactId: 'CON-REAL', accountId: realAccountId, firstName: 'Joao', email: 'joao@progeral.com', doNotContact: true });
+  var build = ctx.v6AuraCampanaABuildQueue_();
+  assert.equal(build.built, 0, 'a real DNC flag on the matched MKT_CONTACTS_SECURE record must still block the recipient, even though the tab explicitly lists the same email');
+  assert.equal(build.excludedByReason.DO_NOT_CONTACT, 1);
+  console.log('campana-a test 38 (MKT_CONTACTS_SECURE DNC still governs a MERGED recipient -- enrichment does not weaken governance): PASS');
+})();
+
+// 39. A malformed email explicitly present on the tab is still excluded (strict format
+// validation is never relaxed just because the value came from the authoritative current source).
+(function tabOnlyInvalidEmailStillExcludedTest() {
+  var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
+  var sheetValues = campanaASheetValuesWithContacts([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Colombia', 'Joao Silva', 'not-an-email']]);
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
+  ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  var realAccountId = tables.MKT_AURA_GMAIL_OPPORTUNITIES[0].accountId;
+  tables.MKT_ACCOUNTS.push({ accountId: realAccountId, accountName: 'Progeral Corp' });
+  var build = ctx.v6AuraCampanaABuildQueue_();
+  assert.equal(build.built, 0, 'strict email format validation must still apply, even to a value taken verbatim from the authoritative tab');
+  assert.equal(build.excludedByReason.EMAIL_INVALID, 1);
+  console.log('campana-a test 39 (a malformed tab email is still excluded by strict format validation, never relaxed): PASS');
+})();
+
+// 40. Account-level protections (stopOnResponse / account pipeline stage) still fully apply to a
+// CAMPANA_A_SOURCE-only recipient, since they are keyed by accountId, independent of which table
+// produced the contactId -- a tab-only contact of an already-RESPONDED account is still STOPPED.
+(function sourceOnlyRecipientStillStoppedByAccountPipelineTest() {
+  var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
+  var sheetValues = campanaASheetValuesWithContacts([['Responded Co', 'Owner', 'HA priority', 'High', 'USA', 'Ana Lopez', 'ana@respondedco.com']]);
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
+  ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  var realAccountId = tables.MKT_AURA_GMAIL_OPPORTUNITIES[0].accountId;
+  tables.MKT_ACCOUNTS.push({ accountId: realAccountId, accountName: 'Responded Co' });
+  tables.MKT_ACCOUNT_PIPELINE = [{ accountId: realAccountId, currentStage: 'RESPONDED' }];
+  var build = ctx.v6AuraCampanaABuildQueue_();
+  assert.equal(build.built, 1, 'a tab-only contact must still be built as a job so its STOPPED status is recorded and auditable');
+  var job = tables.MKT_EMAIL_QUEUE[0];
+  assert.equal(job.status, 'STOPPED', 'stopOnResponse must still apply to a tab-only recipient -- it is keyed by accountId, not by which table produced the contact');
+  assert.equal(job.recipientSource, 'CAMPANA_A_SOURCE');
+  console.log('campana-a test 40 (account-level stopOnResponse still fully protects a CAMPANA_A_SOURCE-only recipient): PASS');
+})();
+
+// 41. A contact known only in MKT_CONTACTS_SECURE (not listed with an email on this particular
+// tab extract) is still included -- the tab becoming primary never removes a previously-included,
+// real, governed recipient.
+(function contactsSecureOnlyRecipientStillIncludedTest() {
+  var tables = {
+    MKT_AURA_GMAIL_OPPORTUNITIES: [gmailOpp('ACC-1', 'Progeral Corp', 'Owner')],
+    MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Progeral Corp' }],
+    MKT_CONTACTS_SECURE: [{ contactId: 'CON-NOVA', accountId: 'ACC-1', firstName: 'Carla', email: 'carla@progeral.com', country: 'Colombia' }]
+  };
+  var ctx = makeContext({ tables: tables });
+  var build = ctx.v6AuraCampanaABuildQueue_();
+  assert.equal(build.built, 1);
+  assert.equal(build.recipientSourceBreakdown.CONTACTS_SECURE, 1);
+  var job = tables.MKT_EMAIL_QUEUE[0];
+  assert.equal(job.contactId, 'CON-NOVA');
+  assert.equal(job.recipientSource, 'CONTACTS_SECURE');
+  console.log('campana-a test 41 (a contact known only in MKT_CONTACTS_SECURE, not on this tab extract, is still included -- the tab never removes a previously-included recipient): PASS');
+})();
+
+// 42. v6AuraCampanaAAudit_ reports an accurate byRecipientSource breakdown computed from the
+// durable job records themselves.
+(function auditReportsRecipientSourceBreakdownTest() {
+  var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
+  var sheetValues = campanaASheetValuesWithContacts([
+    ['Source Only Co', 'Owner', 'HA priority', 'High', 'USA', 'Alex Source', 'alex@sourceonly.com'],
+    ['Merged Co', 'Owner', 'HA priority', 'High', 'USA', 'Sam Merged', 'sam@mergedco.com']
+  ]);
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
+  ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  var mergedAccountId = tables.MKT_AURA_GMAIL_OPPORTUNITIES.filter(function (o) { return o.accountName === 'Merged Co'; })[0].accountId;
+  tables.MKT_ACCOUNTS.push({ accountId: mergedAccountId, accountName: 'Merged Co' });
+  tables.MKT_CONTACTS_SECURE.push({ contactId: 'CON-MERGED', accountId: mergedAccountId, firstName: 'Sam', email: 'sam@mergedco.com' });
+  ctx.v6AuraCampanaABuildQueue_();
+  var audit = ctx.v6AuraCampanaAAudit_();
+  assert.equal(audit.byRecipientSource.CAMPANA_A_SOURCE, 1);
+  assert.equal(audit.byRecipientSource.MERGED, 1);
+  console.log('campana-a test 42 (the audit reports an accurate byRecipientSource breakdown from the durable job records): PASS');
 })();
 
 console.log('V6 AURA Campana A (dedicated tab, per-contact language, name reliability): ALL PASS');

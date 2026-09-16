@@ -594,10 +594,43 @@
           "guarantee": "a second, independently-discovered performance issue (v6AuraGmailReprocessRecent_ can trigger slow, network-bound Gmail search + XLSX-to-Sheet Drive conversion per recent message) is eliminated for the redundant case without ever skipping it when it is genuinely needed (a failed direct read)"
         }
       ]
+    },
+    {
+      "file": "tests/v6-aura-campana-a.test.js (Pass 18 additions)",
+      "cases": [
+        {
+          "name": "a contact present ONLY on the Campana A tab (no MKT_CONTACTS_SECURE record at all) is a real, personalized recipient (recipientSource: CAMPANA_A_SOURCE), never silently dropped",
+          "guarantee": "the real production gap (EMAIL_NOT_FOUND_AMONG_ACCOUNT_CONTACTS / NO_CONTACTS_SECURE_ROWS_FOR_ACCOUNT silently excluding valid tab emails not yet synced to NOVA) is closed"
+        },
+        {
+          "name": "the same email present on the tab AND in MKT_CONTACTS_SECURE for the same real account merges into exactly one MERGED recipient, matched by EXACT case-insensitive email equality only -- never fuzzy",
+          "guarantee": "deterministic merge as explicitly required; MKT_CONTACTS_SECURE firstName wins when both records have one"
+        },
+        {
+          "name": "a real DNC flag on the matched MKT_CONTACTS_SECURE record still blocks a MERGED recipient",
+          "guarantee": "MKT_CONTACTS_SECURE enrichment does not weaken its own governance role"
+        },
+        {
+          "name": "a malformed email explicitly present on the tab is still excluded (EMAIL_INVALID)",
+          "guarantee": "strict email format validation is never relaxed for the authoritative source"
+        },
+        {
+          "name": "account-level stopOnResponse (MKT_ACCOUNT_PIPELINE) still fully protects a CAMPANA_A_SOURCE-only recipient",
+          "guarantee": "account-keyed protections are independent of which table produced the contactId"
+        },
+        {
+          "name": "a contact known only in MKT_CONTACTS_SECURE (not listed with an email on this particular tab extract) is still included as a recipient (recipientSource: CONTACTS_SECURE)",
+          "guarantee": "making the tab primary never removes a previously-included, real, governed recipient"
+        },
+        {
+          "name": "v6AuraCampanaAAudit_ reports an accurate byRecipientSource breakdown (MERGED/CAMPANA_A_SOURCE/CONTACTS_SECURE) computed from the durable MKT_EMAIL_QUEUE job records",
+          "guarantee": "the recipient-source mix is auditable after the fact, not just at build time"
+        }
+      ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full suite re-run after every change in this branch, most recently after Pass 17: a SECOND real production timeout (RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN, same ~30-minute duration) was reported AFTER the Pass 16 Sheets-I/O batching fix, proving that fix alone was insufficient. Root-caused two additional, previously-unexamined bottlenecks: (1) v6AuraGmailProcessMessage_ (MarketingV6AuraGmailIngest.gs), called by both the always-scheduled hourly Gmail tick and by Campana A's own Gmail-reprocess fallback, had the IDENTICAL per-row v6UpsertByKey_ O(n^2) bug already fixed elsewhere in Pass 16 -- now fixed the same way (batched via v6AuraGmailBuildOpportunityRow_ + v6BatchUpsertByKey_); (2) v6AuraGmailReprocessRecent_ itself performs a genuinely slow, network-bound GmailApp.search plus, per matching message, an XLSX-to-Google-Sheet Drive Advanced Service conversion -- entirely unrelated to Sheets I/O and therefore invisible to the Pass 16 fix -- and was called UNCONDITIONALLY on every Campana A regenerate even though it is documented as a fallback only needed when the primary direct-spreadsheet read fails; it is now skipped (logged explicitly) whenever the direct read already succeeded. Additionally added real-time START/END stage-marker logging (v6AuraCampanaALog_) across every named pipeline stage plus the two newly-discovered ones (GMAIL_REPROCESS, REFRESH_OPPORTUNITIES), visible live in the Apps Script execution transcript during a run, not only in a final profile object a timed-out run never returns. All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green (38/38).",
+    "description": "Full suite re-run after every change in this branch, most recently after Pass 18: a completed, non-timing-out execution (Pass 17's fixes worked) revealed the REAL recipient-matching gap DGL had suspected all along -- v6ResolveRecipients_ (the shared engine) sources recipients exclusively from MKT_CONTACTS_SECURE, so a valid, explicitly-listed email on the Campana A tab not yet synced into NOVA/the Data Hub was silently excluded (EMAIL_NOT_FOUND_AMONG_ACCOUNT_CONTACTS / NO_CONTACTS_SECURE_ROWS_FOR_ACCOUNT). Per explicit instruction, Campana A no longer calls the shared v6ResolveRecipients_ at all: a new, dedicated v6AuraCampanaAResolveRecipients_ makes MKT_AURA_CAMPANA_A_SOURCE_ROWS (the captured Campana A tab rows) the PRIMARY recipient source, unions it with MKT_CONTACTS_SECURE by exact (never fuzzy) case-insensitive email match per real account, and tags every recipient recipientSource: CAMPANA_A_SOURCE | CONTACTS_SECURE | MERGED (new additive column on MKT_EMAIL_QUEUE and MKT_AUDIENCES). Every governed check (DNC, strict email-format validation, active exclusion, frequency cap, account-level stopOnResponse) is fully reproduced against the merged candidate list using the same underlying primitives -- no protection was weakened, no contact volume was reduced, and the shared v6ResolveRecipients_ itself is completely unchanged for every other campaign family. All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green (38/38).",
     "totalFiles": 37,
     "passed": 37,
     "failed": 0,

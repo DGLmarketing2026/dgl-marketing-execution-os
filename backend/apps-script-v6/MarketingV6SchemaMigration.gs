@@ -4,7 +4,11 @@ var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
   MKT_CAMPAIGN_SCOPES:['scopeId','audienceId','campaignId','campaignType','opportunityType','updatedAt'],
   MKT_SCOPE_ACCOUNTS:['scopeId','audienceId','campaignId','accountId','eligibilityStatus','updatedAt'],
   MKT_EXCLUSIONS:['exclusionId','accountId','contactId','status','active','reasonCode','expiresAt','updatedAt'],
-  MKT_AUDIENCES:['audienceRecipientId','recordType','campaignId','scopeId','accountId','contactId','email','eligibilityStatus','exclusionReason','frequencyStatus','audienceResolved','audienceStatus','eligibleContactCount','excludedContactCount','reasonCode','exclusionStatus','exclusionsCleared','resolvedAt','updatedAt'],
+  // recipientSource added (MarketingV6AuraCampanaA.gs, Pass 18): CAMPANA_A_SOURCE |
+  // CONTACTS_SECURE | MERGED -- which real table(s) actually produced this recipient. Additive,
+  // every existing reader/writer of MKT_AUDIENCES (v6ResolveRecipients_ and its own dedicated
+  // tests) is unaffected; only Campana A's own dedicated resolver populates it.
+  MKT_AUDIENCES:['audienceRecipientId','recordType','campaignId','scopeId','accountId','contactId','email','eligibilityStatus','exclusionReason','frequencyStatus','audienceResolved','audienceStatus','eligibleContactCount','excludedContactCount','reasonCode','exclusionStatus','exclusionsCleared','resolvedAt','updatedAt','recipientSource'],
   // Added for the AURA Retention pilot dry-run/AM CSV cycle (MarketingV6RetentionReport.gs).
   // Reuses this same generic additive-schema audit/ensure engine rather than duplicating it;
   // MKT_RETENTION_RUN_SUMMARY is a brand-new table, so its sheet tab must be created once,
@@ -34,7 +38,11 @@ var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
   // stopOverrideApplied/stopOverrideReason added for the governed stale-cross-family-response
   // override (MarketingV6AuraCampanaA.gs, v6AuraCampanaAStopOverrideCheck_) -- records, per job,
   // whether an otherwise-stopping stage was overridden and exactly why/why not.
-  MKT_EMAIL_QUEUE:['jobId','campaignId','audienceId','accountId','contactId','email','firstName','company','service','subject','htmlBody','replyTo','status','gmailDraftId','createdAt','processedAt','error','requestId','amOwner','playbookId','sequenceStep','scheduledAt','approvalId','approvedAt','approvedBy','stopOnResponse','country','preferredLanguage','languageSource','languageReason','stopReasonStage','stopReasonAt','stopReasonCampaignId','stopOverrideApplied','stopOverrideReason'],
+  // recipientSource added (Pass 18): CAMPANA_A_SOURCE | CONTACTS_SECURE | MERGED, per job --
+  // records whether this recipient came from the Campana A tab directly (and was never
+  // gated on already existing in MKT_CONTACTS_SECURE), from MKT_CONTACTS_SECURE alone, or both
+  // (deterministic merge by exact account+email match). See MarketingV6AuraCampanaA.gs.
+  MKT_EMAIL_QUEUE:['jobId','campaignId','audienceId','accountId','contactId','email','firstName','company','service','subject','htmlBody','replyTo','status','gmailDraftId','createdAt','processedAt','error','requestId','amOwner','playbookId','sequenceStep','scheduledAt','approvalId','approvedAt','approvedBy','stopOnResponse','country','preferredLanguage','languageSource','languageReason','stopReasonStage','stopReasonAt','stopReasonCampaignId','stopOverrideApplied','stopOverrideReason','recipientSource'],
   // Pre-existing legacy table (MarketingDataHub.gs); listed here only so
   // v6RequireContactRecipientHeaders_/v6EnsureContactRecipientSchema_ can validate it before
   // the dispatcher logs a real send touch into it -- no column added or changed.

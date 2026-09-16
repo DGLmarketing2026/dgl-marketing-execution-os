@@ -2,6 +2,88 @@
 
 Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
+## Pass 18 — The real recipient-matching gap: the Campana A tab becomes the primary source
+
+**Pass 17's fixes worked**: DGL reported a completed execution (no timeout), which for the first
+time surfaced the REAL, underlying gap the earlier 170/227-style shortfalls had been pointing at
+all along: `EMAIL_NOT_FOUND_AMONG_ACCOUNT_CONTACTS` / `NO_CONTACTS_SECURE_ROWS_FOR_ACCOUNT`. Root
+cause: the shared `v6ResolveRecipients_` engine (`MarketingV6RecipientResolution.gs`, used by
+every campaign family) sources recipients EXCLUSIVELY from `MKT_CONTACTS_SECURE` -- a real,
+explicitly-listed, well-formed email on `Campana A - HA prioritaria` that had not yet synced into
+NOVA/the Data Hub was silently excluded from ever becoming a recipient, even though
+`Marketing_DGL_14-09-2026` (this tab's own workbook) is the authoritative, most current
+commercial source for this campaign.
+
+**Fix, per DGL's explicit instruction**: `MarketingV6AuraCampanaA.gs` no longer calls the shared
+`v6ResolveRecipients_` at all. New, dedicated `v6AuraCampanaAResolveRecipients_`:
+
+- **The tab is now the primary recipient source.** Every row in `MKT_AURA_CAMPANA_A_SOURCE_ROWS`
+  (the real, captured Campana A tab rows) with a present email becomes a candidate, regardless of
+  whether a matching `MKT_CONTACTS_SECURE` record exists yet.
+- **MKT_CONTACTS_SECURE/MKT_ACCOUNTS enrich and govern, never gate.** A tab email is merged with
+  a `MKT_CONTACTS_SECURE` record for the SAME real account by EXACT, case-insensitive email
+  equality only -- never a fuzzy/similarity match. `recipientSource` (new additive column, both
+  `MKT_EMAIL_QUEUE` and `MKT_AUDIENCES`) records which table(s) actually produced each recipient:
+  `MERGED` (found in both -- MKT_CONTACTS_SECURE's firstName wins the deterministic merge over
+  the tab's own contactName, since it is the more governed record), `CAMPANA_A_SOURCE` (tab only
+  -- this pipeline's own required CONTACT_SOURCE_ONLY marker: a full, real candidate, never
+  dropped), or `CONTACTS_SECURE` (already known for the account, not listed with an email on this
+  particular tab extract -- preserves every recipient this pipeline already found before this
+  change).
+- **Every governed check still fully applies**, reproduced against the merged candidate list
+  using the exact same underlying primitives the shared engine itself uses: DNC
+  (`doNotContact`/`dnc`, only available when a MKT_CONTACTS_SECURE record exists -- a
+  CAMPANA_A_SOURCE-only contact simply has no such flag to check, which is correct, not a gap),
+  strict email-FORMAT validation (`v6AuraEmailValid_`, unchanged, never relaxed for the
+  authoritative tab), active exclusion (`v6RecipientActiveExclusion_`, unchanged, pure), frequency
+  cap (`v6FrequencyStatus_`, unchanged). Account-level protections (`stopOnResponse`/pipeline
+  stage) are keyed by `accountId` only, already independent of which table produced the
+  `contactId` -- fully preserved for every recipient regardless of source.
+- A `CAMPANA_A_SOURCE`-only `contactId` is a deterministic, stable hash of `(accountId, email)` --
+  never random -- so idempotency (jobId keying, checkpoint/resume, never duplicating a job) is
+  unaffected.
+- `v6AuraCampanaAMatchReport_` is kept, re-scoped in its own comment as a data-quality/NOVA-sync-
+  coverage diagnostic ("which tab emails have not yet synced to NOVA") -- it is explicitly no
+  longer a recipient gate. `v6AuraCampanaAAudit_` gained `byRecipientSource` (computed from the
+  durable `MKT_EMAIL_QUEUE` job records) for real, after-the-fact reporting.
+- The shared `v6ResolveRecipients_` itself is completely UNCHANGED -- every other campaign family
+  still uses it exactly as before.
+
+### Files changed
+
+- Modified: `backend/apps-script-v6/MarketingV6SchemaMigration.gs` (additive `recipientSource`
+  column on `MKT_AUDIENCES` and `MKT_EMAIL_QUEUE`), `backend/apps-script-v6/MarketingV6AuraCampanaA.gs`
+  (new `v6AuraCampanaAResolveRecipients_` dedicated resolver + two small local helpers
+  `v6AuraCampanaABool_`/`v6AuraCampanaAExclusionReasonCode_`; `v6AuraCampanaABuildQueue_` rewired
+  to use it instead of `v6ResolveRecipients_`; personalization now uses the resolver's own merged
+  `firstName`/row-level country instead of a raw `MKT_CONTACTS_SECURE`-only lookup;
+  `v6AuraCampanaAAudit_` gained `byRecipientSource`; header comments updated).
+- Not modified (deliberately): `backend/apps-script-v6/MarketingV6RecipientResolution.gs` --
+  `v6ResolveRecipients_` is byte-for-byte unchanged; every other campaign family is unaffected.
+- Modified tests: `tests/v6-aura-campana-a.test.js` (removed the now-dead `v6ResolveRecipients_`
+  test stub; rewrote test 8 to use a real DNC flag instead of the stub's `eligibleContactIds`
+  option; added 7 new dedicated tests for the tab-primary/merge/governance behavior -- see
+  `tests.json`).
+- Full suite: 38/38 files passing.
+
+### On the requested complete execution-result breakdown
+
+DGL asked for the full breakdown (duration, source contacts/accounts, matched, source-only,
+unmatched by cause, final recipients, ES/EN/PT, STOPPED by reason, DRY_RUN, invalid emails,
+duplicates, realSendsDetected) of the run that had just completed. That data was never provided
+to this session (only the two error-code strings were quoted) -- it was not fabricated; it was
+requested back from DGL directly in the same reply as this fix.
+
+### What this pass deliberately does NOT do
+
+- Does not reduce contact/account volume, relax any DNC/exclusion/frequency/stopOnResponse/
+  approval gate, or fabricate an email that does not come verbatim from the tab or
+  MKT_CONTACTS_SECURE.
+- Does not fuzzy-match emails under any circumstance -- merge is exact, case-insensitive equality
+  only.
+- Does not change the shared v6ResolveRecipients_ engine or any other campaign family's behavior.
+- Does not attempt `clasp run` / the Execution API again (still categorically blocked).
+
 ## Pass 17 — Second production timeout: the Pass 16 fix was necessary but not sufficient
 
 **DGL reported a SECOND real timeout, same ~30-minute duration**, running the exact function

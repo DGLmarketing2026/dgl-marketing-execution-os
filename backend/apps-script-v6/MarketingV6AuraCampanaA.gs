@@ -6,14 +6,22 @@
 // and generic-name detection that the shared, multi-source Retention pipeline
 // (MarketingV6AuraAutomation.gs, MarketingV6AuraEmailDispatcher.gs) does not need and must not
 // change for every other campaign. Rather than bolt single-purpose behavior onto shared code,
-// this file is a self-contained, dedicated pipeline: it reuses every existing governed engine
-// (v6ResolveRecipients_ for suppression/frequency/DNC/exclusion-vetted eligibility,
-// v6AuraPolicyApproved_ for approval policy, v6AuraEmailCanonicalReplyTo_/v6AuraEmailValid_/
-// v6AuraEmailAccountStopped_/v6AuraEmailJobId_/v6AuraGenerateCopy_/v6AuraEmailHtml_ from the
-// email dispatcher and copy engine) and adds nothing new to those engines except the one
-// exclusion registered in v6AuraAutoBuildScopesForFamily_ (MarketingV6AuraAutomation.gs) that
-// keeps this dedicated pipeline's accounts from ALSO being auto-grouped by the shared,
-// multi-source mechanism.
+// this file is a self-contained, dedicated pipeline: it reuses every existing governed primitive
+// it safely can (v6AuraPolicyApproved_ for approval policy, v6AuraEmailCanonicalReplyTo_/
+// v6AuraEmailValid_/v6AuraEmailAccountStopped_/v6AuraEmailJobId_/v6AuraGenerateCopy_/
+// v6AuraEmailHtml_ from the email dispatcher and copy engine, v6RecipientActiveExclusion_/
+// v6FrequencyStatus_ from the shared recipient-resolution/frequency engines) and adds nothing new
+// to those engines except the one exclusion registered in v6AuraAutoBuildScopesForFamily_
+// (MarketingV6AuraAutomation.gs) that keeps this dedicated pipeline's accounts from ALSO being
+// auto-grouped by the shared, multi-source mechanism.
+//
+// Recipient sourcing (Pass 18, 2026-09-16): this pipeline has its OWN dedicated recipient
+// resolver (v6AuraCampanaAResolveRecipients_) and does NOT call the shared v6ResolveRecipients_
+// (MarketingV6RecipientResolution.gs, still used unchanged by every other campaign family). The
+// shared engine sources recipients exclusively from MKT_CONTACTS_SECURE, which silently dropped
+// every real, explicitly-listed tab email that had not yet synced into NOVA/the Data Hub -- a
+// real production gap DGL asked fixed. See v6AuraCampanaAResolveRecipients_'s own header comment
+// for the full recipientSource (CAMPANA_A_SOURCE/CONTACTS_SECURE/MERGED) model.
 //
 // Performance note (2026-09-16 production incident): a live run against the real ~227-contact
 // audience hit Apps Script's execution-time limit (RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN ran
@@ -228,7 +236,7 @@ function v6AuraCampanaAAccountMap_() {
   return map;
 }
 
-// --- Match report: no silent joins ------------------------------------------------------------
+// --- Match report: data-quality / NOVA-sync-coverage diagnostic, NOT a recipient gate -----------
 // Compares the real, captured source rows (MKT_AURA_CAMPANA_A_SOURCE_ROWS -- written by
 // v6AuraCampanaAIngestFromSpreadsheet_ from the actual tab, before any accept/reject decision)
 // against the real MKT_ACCOUNTS/MKT_CONTACTS_SECURE tables, reporting exact counts and exact
@@ -238,6 +246,12 @@ function v6AuraCampanaAAccountMap_() {
 // name (accounts for legitimate spelling differences like a missing/extra "Corp" -- never a
 // fuzzy/similarity match that could conflate two different real companies). Read-only, O(1)
 // full-table reads (each table read exactly once) -- never called per-contact.
+// Pass 18: an "unmatched" email/account here means "not yet synced into NOVA/MKT_CONTACTS_SECURE"
+// -- it is a real, useful sync-coverage signal for DGL, but it no longer means "excluded from the
+// campaign." v6AuraCampanaAResolveRecipients_ includes every valid tab email as a candidate
+// regardless of what this report finds (see recipientSource: CAMPANA_A_SOURCE on the resulting
+// job). Use v6AuraCampanaAAudit_'s byRecipientSource / excludedByReason for actual campaign
+// inclusion/exclusion counts.
 function v6AuraCampanaAMatchReport_() {
   var sourceRows = v6Rows_('MKT_AURA_CAMPANA_A_SOURCE_ROWS');
   var accountMap = v6AuraCampanaAAccountMap_();
@@ -551,11 +565,124 @@ function v6AuraCampanaAClearBuildCheckpoint_() {
   PropertiesService.getScriptProperties().deleteProperty(CAMPANA_A_BUILD_CHECKPOINT_PROPERTY_);
 }
 
+// --- Recipient resolution: the Campana A tab is the PRIMARY source of recipients ---------------
+// Root cause of the real recipient gap found in production (2026-09-16, after the performance
+// fix finally let a run complete): the shared v6ResolveRecipients_ engine
+// (MarketingV6RecipientResolution.gs) sources recipients EXCLUSIVELY from MKT_CONTACTS_SECURE --
+// a real, explicitly-listed, well-formed email on 'Campana A - HA prioritaria' that has not yet
+// synced into NOVA/the Data Hub was silently dropped, surfaced only as a diagnostic
+// (v6AuraCampanaAMatchReport_'s EMAIL_NOT_FOUND_AMONG_ACCOUNT_CONTACTS /
+// NO_CONTACTS_SECURE_ROWS_FOR_ACCOUNT), never as an actual recipient. Per DGL's explicit
+// instruction, this dedicated pipeline no longer calls the shared v6ResolveRecipients_ at all:
+// the real, captured tab rows (MKT_AURA_CAMPANA_A_SOURCE_ROWS, written by
+// v6AuraCampanaAIngestFromSpreadsheet_ from 'Marketing_DGL_14-09-2026', the authoritative current
+// commercial source for this campaign) are now the PRIMARY recipient source.
+// MKT_CONTACTS_SECURE/MKT_ACCOUNTS are used to ENRICH (firstName/country/language signal/account
+// ownership) and to GOVERN (DNC, exclusion, frequency, stopOnResponse via the pipeline stage
+// check already in the build loop) -- never to gate whether a valid, explicitly-listed tab email
+// becomes a candidate at all.
+//
+// Reproduces every governed check the shared engine performs -- DNC, strict email-FORMAT
+// validation (v6AuraEmailValid_, unchanged), active exclusion (v6RecipientActiveExclusion_,
+// unchanged, pure), frequency cap (v6FrequencyStatus_, unchanged) -- against a MERGED candidate
+// list instead of an MKT_CONTACTS_SECURE-only one:
+//   - MERGED: the tab's email exactly (case-insensitive, NEVER fuzzy) matches an
+//     MKT_CONTACTS_SECURE email for the SAME real account -- firstName/DNC/emailStatus enrich
+//     from the matched MKT_CONTACTS_SECURE row (preferred, since it is the more governed record)
+//     falling back to the tab's own contactName only when MKT_CONTACTS_SECURE's is empty.
+//   - CAMPANA_A_SOURCE: the email exists on the tab only -- this pipeline's own required
+//     CONTACT_SOURCE_ONLY marker. Still a full, real candidate: never dropped for lack of a NOVA
+//     sync, never given a fabricated DNC/exclusion signal it does not actually have (account-level
+//     exclusions/frequency/pipeline-stage checks still fully apply, since those are keyed by
+//     accountId, independent of which table produced the contactId).
+//   - CONTACTS_SECURE: a contact already known for this account in MKT_CONTACTS_SECURE but not
+//     listed with an email on this particular tab extract -- preserves every recipient this
+//     pipeline already found before this change; the tab becoming primary never removes a
+//     previously-included, real, governed recipient.
+// A CAMPANA_A_SOURCE contactId is a deterministic, stable hash of (accountId, email) -- never
+// random, so idempotency (jobId keying, checkpoint/resume, never duplicating a job) is
+// unaffected. Never invents an email: every email comes verbatim from exactly one of these two
+// real tables.
+function v6AuraCampanaABool_(value) {
+  var x = v6AuraEmailText_(value).toUpperCase();
+  return value === true || x === 'TRUE' || x === 'YES' || x === 'SI' || x === 'SÍ' || x === '1' || x === 'Y';
+}
+function v6AuraCampanaAExclusionReasonCode_(row) {
+  var x = v6AuraEmailText_((row || {}).reasonCode || (row || {}).reason || 'ACTIVE_EXCLUSION').toUpperCase().replace(/[^A-Z0-9_ -]/g, '').substring(0, 80);
+  return x || 'ACTIVE_EXCLUSION';
+}
+function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campaignType) {
+  var accountIdSet = {}; accountIds.forEach(function (id) { accountIdSet[id] = true; });
+
+  var sourceRows = v6Rows_('MKT_AURA_CAMPANA_A_SOURCE_ROWS').filter(function (r) { return v6AuraEmailText_(r.email); });
+  var contactsSecure = v6Rows_('MKT_CONTACTS_SECURE').filter(function (c) { return accountIdSet[v6AuraEmailText_(c.accountId)] && v6AuraEmailText_(c.status || 'ACTIVE').toUpperCase() !== 'INACTIVE'; });
+  var contactsSecureByAccountAndEmail = {};
+  contactsSecure.forEach(function (c) {
+    var email = v6AuraEmailText_(c.email).toLowerCase();
+    if (!email) return;
+    contactsSecureByAccountAndEmail[v6AuraEmailText_(c.accountId) + '|' + email] = c;
+  });
+  var matchedContactsSecureKeys = {};
+
+  var candidates = [];
+  sourceRows.forEach(function (r) {
+    var accountId = accountRealIdByName[v6AuraEmailText_(r.accountName)];
+    if (!accountId || !accountIdSet[accountId]) return; // this account never resolved into this campaign's own scope
+    var email = v6AuraEmailText_(r.email).toLowerCase();
+    var key = accountId + '|' + email;
+    var matched = contactsSecureByAccountAndEmail[key];
+    if (matched) matchedContactsSecureKeys[key] = true;
+    candidates.push({
+      accountId: accountId,
+      contactId: matched ? v6AuraEmailText_(matched.contactId) : ('CAMPANA-A-' + v6HashKey_(accountId + '|' + email)),
+      email: email,
+      firstName: (matched && v6AuraEmailText_(matched.firstName)) || v6AuraEmailText_(r.contactName) || '',
+      rowCountry: v6AuraEmailText_(r.country),
+      doNotContact: matched ? v6AuraCampanaABool_(matched.doNotContact || matched.dnc) : false,
+      emailStatus: matched ? v6AuraEmailText_(matched.emailStatus) : '',
+      recipientSource: matched ? 'MERGED' : 'CAMPANA_A_SOURCE'
+    });
+  });
+  contactsSecure.forEach(function (c) {
+    var accountId = v6AuraEmailText_(c.accountId), email = v6AuraEmailText_(c.email).toLowerCase();
+    if (!email || matchedContactsSecureKeys[accountId + '|' + email]) return;
+    candidates.push({
+      accountId: accountId, contactId: v6AuraEmailText_(c.contactId), email: email,
+      firstName: v6AuraEmailText_(c.firstName), rowCountry: '',
+      doNotContact: v6AuraCampanaABool_(c.doNotContact || c.dnc), emailStatus: v6AuraEmailText_(c.emailStatus),
+      recipientSource: 'CONTACTS_SECURE'
+    });
+  });
+
+  var exclusions = v6Rows_('MKT_EXCLUSIONS');
+  var ledgerRows = v6Rows_('MKT_FREQUENCY_LEDGER');
+  var now = new Date();
+  var eligible = [], excluded = [];
+  candidates.forEach(function (cand) {
+    var reason = 'CLEAR';
+    if (cand.doNotContact) reason = 'DO_NOT_CONTACT';
+    else if (!cand.email) reason = 'EMAIL_MISSING';
+    else if (!v6AuraEmailValid_(cand.email) || v6AuraEmailText_(cand.emailStatus).toUpperCase() === 'INVALID') reason = 'EMAIL_INVALID';
+    else {
+      var exclusion = (typeof v6RecipientActiveExclusion_ === 'function') ? v6RecipientActiveExclusion_(exclusions, cand.accountId, cand.contactId, now) : null;
+      if (exclusion) reason = 'EXCLUSION_' + v6AuraCampanaAExclusionReasonCode_(exclusion).replace(/[^A-Z0-9]+/g, '_');
+      else {
+        var frequency = (typeof v6FrequencyStatus_ === 'function') ? v6FrequencyStatus_({ accountId: cand.accountId, contactId: cand.contactId, campaignId: CAMPANA_A_CAMPAIGN_ID_, campaignType: campaignType }, ledgerRows) : { eligible: true, status: 'CLEAR' };
+        if (!frequency.eligible) reason = 'FREQUENCY_' + v6AuraEmailText_(frequency.status).toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+      }
+    }
+    cand.exclusionReason = reason;
+    if (reason === 'CLEAR') eligible.push(cand); else excluded.push(cand);
+  });
+
+  return { eligible: eligible, excluded: excluded, candidates: candidates };
+}
+
 // --- Queue build (idempotent; never rebuilds a job that already exists) ----------------------
 // Every table this needs is read AT MOST ONCE (accounts, contacts, source-row countries, account
 // pipeline stages, campaigns for the stale-override check, existing queue jobs); recipients are
-// resolved via v6ResolveRecipients_'s batchWrite:true mode (ONE MKT_AUDIENCES write instead of
-// one per contact); every new job is collected in memory and written via ONE
+// resolved via v6AuraCampanaAResolveRecipients_ above (tab-primary, ONE MKT_AUDIENCES batch write
+// instead of one per contact); every new job is collected in memory and written via ONE
 // v6BatchUpsertByKey_ call at the end, instead of one v6UpsertByKey_ call per contact. A
 // checkpoint/resume safety net protects against ever needing the whole recipient list to fit in
 // one execution again (see above). Phase timings (MATCH_MS/LANGUAGE_MS/ELIGIBILITY_MS/COPY_MS/
@@ -584,15 +711,37 @@ function v6AuraCampanaABuildQueue_() {
   profile.MATCH_MS += Date.now() - tMatch0;
   v6AuraCampanaALog_('MATCH_END (' + setup.count + ' accounts)');
 
-  v6AuraCampanaALog_('ELIGIBILITY_START (v6ResolveRecipients_, DNC/email/exclusion/frequency)');
+  v6AuraCampanaALog_('ELIGIBILITY_START (dedicated tab-primary resolver: DNC/email/exclusion/frequency)');
   var tElig0 = Date.now();
-  v6ResolveRecipients_({ campaignId: CAMPANA_A_CAMPAIGN_ID_, batchWrite: true });
-  var recipients = v6Rows_('MKT_AUDIENCES').filter(function (r) {
-    return v6AuraEmailText_(r.recordType) === 'RECIPIENT' && v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && v6AuraEmailText_(r.eligibilityStatus).toUpperCase() === 'ELIGIBLE';
+  var accountRealIdByName = {};
+  Object.keys(setup.accountMap).filter(Boolean).forEach(function (hashId) {
+    var name = v6AuraEmailText_(setup.accountMap[hashId].accountName);
+    if (name) accountRealIdByName[name] = setup.realIdByHashId[hashId];
   });
+  var resolved = v6AuraCampanaAResolveRecipients_(setup.accountIds, accountRealIdByName, 'Retention');
+  var recipients = resolved.eligible;
   result.recipients = recipients.length;
+  result.candidates = resolved.candidates.length;
+  result.recipientSourceBreakdown = { MERGED: 0, CAMPANA_A_SOURCE: 0, CONTACTS_SECURE: 0 };
+  resolved.candidates.forEach(function (c) { result.recipientSourceBreakdown[c.recipientSource] = (result.recipientSourceBreakdown[c.recipientSource] || 0) + 1; });
+  result.excludedByReason = {};
+  resolved.excluded.forEach(function (c) { result.excludedByReason[c.exclusionReason] = (result.excludedByReason[c.exclusionReason] || 0) + 1; });
+  // Kept for compatibility with anything else that reads MKT_AUDIENCES for this campaignId
+  // (v6AudienceStatus_, the general dashboard) -- ONE batch write for every candidate
+  // (eligible AND excluded, exactly like the shared engine's own row shape), never per-contact.
+  var audienceStamp = new Date().toISOString();
+  var audienceRecords = resolved.candidates.map(function (cand) {
+    return {
+      audienceRecipientId: 'AUD:' + CAMPANA_A_CAMPAIGN_ID_ + ':' + cand.contactId, recordType: 'RECIPIENT',
+      campaignId: CAMPANA_A_CAMPAIGN_ID_, scopeId: CAMPANA_A_SCOPE_ID_, accountId: cand.accountId, contactId: cand.contactId,
+      email: cand.email, eligibilityStatus: cand.exclusionReason === 'CLEAR' ? 'ELIGIBLE' : 'EXCLUDED',
+      exclusionReason: cand.exclusionReason, frequencyStatus: '', resolvedAt: audienceStamp, updatedAt: audienceStamp,
+      recipientSource: cand.recipientSource
+    };
+  });
+  if (audienceRecords.length) v6BatchUpsertByKey_('MKT_AUDIENCES', ['audienceRecipientId'], audienceRecords);
   profile.ELIGIBILITY_MS += Date.now() - tElig0;
-  v6AuraCampanaALog_('ELIGIBILITY_END (' + recipients.length + ' eligible, ' + profile.ELIGIBILITY_MS + 'ms)');
+  v6AuraCampanaALog_('ELIGIBILITY_END (' + recipients.length + ' eligible of ' + resolved.candidates.length + ' candidates [' + JSON.stringify(result.recipientSourceBreakdown) + '], ' + profile.ELIGIBILITY_MS + 'ms)');
 
   v6AuraCampanaALog_('MATCH_START (per-contact index preload)');
   var tMatch1 = Date.now();
@@ -641,12 +790,24 @@ function v6AuraCampanaABuildQueue_() {
 
     var tLang0 = Date.now();
     var account = accountsById[accountId] || {};
+    // contact enriches from MKT_CONTACTS_SECURE when a real (non-synthesized) contactId matches
+    // one (MERGED/CONTACTS_SECURE recipients) -- correctly empty for a CAMPANA_A_SOURCE-only
+    // recipient, since no such record exists there; v6AuraCampanaAPreferredLanguage_ already
+    // falls through its priority chain (explicit contact signal -> tab row country -> account
+    // country -> EN) exactly as before.
     var contact = contactsById[contactId] || {};
     var gmailOpp = gmailOppByRealAccountId[accountId] || {};
-    var tabCountry = tabCountryByAccountName[v6AuraEmailText_(gmailOpp.accountName)] || '';
+    // The resolver's own per-row country (r.rowCountry) is more precise than the account-level
+    // "first tab row found" fallback below (an account can have multiple contact rows on the tab
+    // with genuinely different countries) -- still the tab, still primary, per DGL's instruction.
+    var tabCountry = r.rowCountry || tabCountryByAccountName[v6AuraEmailText_(gmailOpp.accountName)] || '';
     var langInfo = v6AuraCampanaAPreferredLanguage_(contact, account, tabCountry);
     result.byLanguage[langInfo.language] = (result.byLanguage[langInfo.language] || 0) + 1;
-    var reliableName = v6AuraCampanaANameReliable_(contact.firstName);
+    // Personalization uses the resolver's own merged firstName (r.firstName -- prefers the
+    // MKT_CONTACTS_SECURE record when merged, the tab's own contactName when Campana-A-source-only)
+    // rather than raw contact.firstName, which is empty for a source-only recipient even though a
+    // real name is available directly on the tab.
+    var reliableName = v6AuraCampanaANameReliable_(r.firstName);
     var vars = {
       firstName: reliableName, company: v6AuraEmailText_(account.accountName) || v6AuraEmailText_(gmailOpp.accountName) || 'your company',
       service: 'Multiservicio', replyTo: replyTo
@@ -685,7 +846,8 @@ function v6AuraCampanaABuildQueue_() {
       languageSource: langInfo.source, languageReason: langInfo.reason,
       stopReasonStage: rawStopped ? currentStage : '', stopReasonAt: rawStopped ? v6AuraEmailText_(pipelineRow.responseAt || pipelineRow.enteredStageAt) : '',
       stopReasonCampaignId: rawStopped ? v6AuraEmailText_(pipelineRow.campaignId) : '',
-      stopOverrideApplied: overrideCheck.overridable ? 'YES' : 'NO', stopOverrideReason: rawStopped ? overrideCheck.reason : ''
+      stopOverrideApplied: overrideCheck.overridable ? 'YES' : 'NO', stopOverrideReason: rawStopped ? overrideCheck.reason : '',
+      recipientSource: r.recipientSource
     };
     profile.COPY_MS += Date.now() - tCopy0;
     pendingJobs.push(job);
@@ -925,10 +1087,18 @@ function v6AuraCampanaAAudit_() {
   var sourceEmpty = sourceAccountCount === 0;
   var byLanguageSource = {};
   jobs.forEach(function (j) { var s = v6AuraEmailText_(j.languageSource) || 'UNKNOWN'; byLanguageSource[s] = (byLanguageSource[s] || 0) + 1; });
+  // recipientSource breakdown (Pass 18: the tab is now the primary recipient source) -- computed
+  // from the durable job records themselves, not just the transient build-time stat, so this is
+  // accurate on every audit call regardless of when the queue was built. MERGED = the tab email
+  // matched a real MKT_CONTACTS_SECURE record for the account; CAMPANA_A_SOURCE = present on the
+  // tab only (this pipeline's own required "source-only" recipient, never previously included);
+  // CONTACTS_SECURE = already known in MKT_CONTACTS_SECURE, not listed with an email on this tab.
+  var byRecipientSource = { MERGED: 0, CAMPANA_A_SOURCE: 0, CONTACTS_SECURE: 0 };
+  jobs.forEach(function (j) { var s = v6AuraEmailText_(j.recipientSource) || 'UNKNOWN'; byRecipientSource[s] = (byRecipientSource[s] || 0) + 1; });
   return Object.assign({}, base, {
     campaignId: CAMPANA_A_CAMPAIGN_ID_, jobsForCampaignA: jobs.length,
     sourceStatus: sourceEmpty ? 'SOURCE_EMPTY_OR_NOT_FOUND' : 'SOURCE_OK', sourceAccountCount: sourceAccountCount,
-    byLanguage: byLanguage, byLanguageSource: byLanguageSource, byStatusForCampaignA: byStatus,
+    byLanguage: byLanguage, byLanguageSource: byLanguageSource, byStatusForCampaignA: byStatus, byRecipientSource: byRecipientSource,
     teamFirstNameCount: teamFirstNameCount, nonCanonicalReplyToCount: nonCanonicalReplyToCount, invalidEmailCount: invalidEmailCount,
     otherTabsIgnored: v6AuraCampanaAVerifyOtherTabsIgnored_(),
     stoppedBreakdown: v6AuraCampanaAStoppedBreakdown_(),
