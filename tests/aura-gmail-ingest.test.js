@@ -80,6 +80,21 @@ function makeContext(props,tables){
     if(at<0)rows.push(Object.assign({},record));else rows[at]=Object.assign({},record);
     return record;
   };
+  // Mirrors v6BatchUpsertByKey_'s real semantics (MarketingV6FrequencyControl.gs): one
+  // read+merge+write against the SAME `tables` array regardless of how many records are passed
+  // -- v6AuraGmailProcessMessage_ now writes every accepted/rejected row this way instead of one
+  // v6UpsertByKey_ call per row (2026-09-16 performance fix).
+  ctx.v6BatchUpsertByKey_=function(name,keys,records){
+    var rows=tables[name]||(tables[name]=[]);
+    var indexByKey={};
+    rows.forEach(function(row,i){indexByKey[keys.map(function(k){return String(row[k]||'');}).join('')]=i;});
+    (records||[]).forEach(function(record){
+      var key=keys.map(function(k){return String(record[k]||'');}).join('');
+      var copy=Object.assign({},record);
+      if(Object.prototype.hasOwnProperty.call(indexByKey,key))rows[indexByKey[key]]=copy;else{rows.push(copy);indexByKey[key]=rows.length-1;}
+    });
+    return {created:0,updated:0};
+  };
   ctx.__tables=tables;
   return ctx;
 }

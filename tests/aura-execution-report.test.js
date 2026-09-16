@@ -17,7 +17,9 @@ function makeContext(tables){
   return ctx;
 }
 
-var SAFE_FIELDS=['owner','campaignFamily','service','campaignId','executionId','source','detectedAccounts','eligibleAccounts','suppressedAccounts','recipients','emailGenerated','sent','delivered','opened','bounced','clicks','spamComplaints','replies','rfqs','quotes','loads','campaignStart','campaignEnd','status','updatedAt'];
+// queued/failed added (2026-09-16, real MKT_EMAIL_QUEUE dispatcher counts, MarketingV6AuraAutomation.gs)
+// -- both are safe, non-PII operational counts, same allowlist discipline as every other field here.
+var SAFE_FIELDS=['owner','campaignFamily','service','campaignId','executionId','source','detectedAccounts','eligibleAccounts','suppressedAccounts','recipients','emailGenerated','sent','delivered','opened','bounced','clicks','spamComplaints','replies','rfqs','quotes','loads','campaignStart','campaignEnd','status','updatedAt','queued','failed'];
 
 function row(overrides){
   return Object.assign({
