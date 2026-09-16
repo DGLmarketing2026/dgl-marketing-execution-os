@@ -17,6 +17,12 @@
       ]
     },
     {
+      label: "AURA",
+      items: [
+        { id: "aura-overview", label: "AURA Overview", icon: "sparkles", group: "AURA" }
+      ]
+    },
+    {
       label: "EXISTING ACCOUNT GROWTH",
       items: [
         { id: "campaign-opportunities", label: "Campaign Opportunities", icon: "radar", group: "Existing Account Growth" },

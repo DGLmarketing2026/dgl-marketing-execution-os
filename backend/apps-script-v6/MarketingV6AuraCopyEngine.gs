@@ -1,14 +1,14 @@
-// AURA server-side email generation — Existing Account Growth.
+// AURA server-side email generation -- Existing Account Growth.
 //
 // Ports the SAME approved copy strategy already used by Campaign Studio
 // (assets/js/copy-engine-v5.js / creative-library-v5.js) so automatic
 // campaigns get real, on-brand subject/body/HTML without a human opening
-// Campaign Studio. This file introduces NO new marketing strategy — every
+// Campaign Studio. This file introduces NO new marketing strategy -- every
 // content block below is copied verbatim from the client-side engine and
-// MUST be kept in sync with it (see the "byte-for-byte" note on each table).
-// The default angle per objective and the default language ('es', matching
-// Campaign Studio's own default when no human choice exists) mirror exactly
-// what Campaign Studio itself falls back to for an unconfigured campaign.
+// MUST be kept in sync with it. The default angle per objective and the
+// default language ('es', matching Campaign Studio's own default when no
+// human choice exists) mirror exactly what Campaign Studio itself falls
+// back to for an unconfigured campaign.
 
 var MKT_V6_AURA_COPY_SERVICE_PROOF = {
   FTL: ["53' Dry Van", "Nationwide Capacity", "Bilingual Support"],
@@ -40,8 +40,6 @@ function v6AuraCopyCta_(objective, angle, lg, ctaIntent) {
   return c[lg] || c.es;
 }
 
-// --- Copy tables: verbatim from assets/js/copy-engine-v5.js. Keep both in
-// sync — this is the ONLY approved Existing Account Growth copy strategy. ---
 function v6AuraCopyQnb_(lg, service, window) {
   var w = window || '0-14';
   if (lg === 'en') {
@@ -87,21 +85,37 @@ function v6AuraGenerateCopy_(scope, campaign) {
   return { subjectA: x.subjectA, subjectB: x.subjectB, preheader: x.preheader, headline: x.headline, body: x.body, body2: x.body2, cta: cta, language: lg, angle: angle };
 }
 
-// --- Canonical DGL-branded HTML email, matching the brand system already
-// shown in Campaign Studio (navy #05035C / green #77B82A / Poppins +
-// Montserrat). One clean layout is used for every objective/service — this
-// does not attempt to replicate all six Campaign Studio creative systems,
-// it reuses the same copy, brand colors and structure. ---
 function v6AuraEsc_(v) { return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-function v6AuraSample_(text, company, service) {
-  return String(text || '').replace(/\{\{firstName\}\}/g, 'Team').replace(/\{\{company\}\}/g, company || 'your company').replace(/\{\{service\}\}/g, service || 'freight');
+// firstName is optional (4th arg) and defaults to 'Team' -- byte-identical to the original
+// behavior for every existing caller that only ever passed (text, company, service). Added so
+// MarketingV6AuraEmailDispatcher.gs can merge a REAL contact firstName into the same approved
+// copy instead of duplicating this token-replacement logic.
+function v6AuraSample_(text, company, service, firstName) {
+  return String(text || '').replace(/\{\{firstName\}\}/g, firstName || 'Team').replace(/\{\{company\}\}/g, company || 'your company').replace(/\{\{service\}\}/g, service || 'freight');
 }
-function v6AuraEmailHtml_(campaign, copy) {
-  var e = v6AuraEsc_, company = campaign.campaignName || campaign.amOwner || 'your company', service = campaign.service || 'Multiservicio';
+// vars (3rd arg) is optional and defaults to the exact same sample values used before this
+// parameter existed (campaign.campaignName/amOwner as company, 'Team' as firstName) -- every
+// existing 2-arg call (the scope-level copy archive) is unaffected. When the dispatcher passes
+// real {firstName, company, service}, the SAME brand template renders a genuinely personalized,
+// per-recipient email instead of a generic sample.
+function v6AuraEmailHtml_(campaign, copy, vars) {
+  var e = v6AuraEsc_, v = vars || {};
+  var company = v.company || campaign.campaignName || campaign.amOwner || 'your company', service = v.service || campaign.service || 'Multiservicio', firstName = v.firstName || 'Team';
   var proof = MKT_V6_AURA_COPY_SERVICE_PROOF[service] || MKT_V6_AURA_COPY_SERVICE_PROOF.Multiservicio;
-  var h = v6AuraSample_(copy.headline, company, service), b = v6AuraSample_(copy.body, company, service), b2 = v6AuraSample_(copy.body2, company, service), pre = v6AuraSample_(copy.preheader, company, service);
+  var h = v6AuraSample_(copy.headline, company, service, firstName), b = v6AuraSample_(copy.body, company, service, firstName), b2 = v6AuraSample_(copy.body2, company, service, firstName), pre = v6AuraSample_(copy.preheader, company, service, firstName);
   var proofRow = proof.map(function (p) { return '<td style="padding:0 16px 0 0;font-family:Arial,sans-serif"><div style="width:18px;height:2px;background:#77B82A;margin-bottom:7px"></div><div style="font-size:9px;font-weight:800;line-height:1.35;color:#526071">' + e(p) + '</div></td>'; }).join('');
-  var button = '<table role="presentation" cellspacing="0" cellpadding="0"><tr><td bgcolor="#77B82A" style="border-radius:7px"><a href="#" style="display:inline-block;padding:14px 21px;font-family:Arial,sans-serif;font-size:12px;font-weight:900;color:#071005;text-decoration:none">' + e(copy.cta) + ' &rarr;</a></td></tr></table>';
+  // The CTA must be a real, working action -- never a placeholder href="#". A mailto: to the
+  // exact same canonical DGL address this job's real Reply-To header carries
+  // (v6AuraEmailCanonicalReplyTo_, MarketingV6AuraEmailDispatcher.gs), pre-filled with the
+  // real, already-personalized subject line, so a click genuinely lets the customer reply or
+  // request a movement -- no fabricated URL, no invented alias. v.replyTo is what
+  // v6AuraBuildEmailQueueForCampaign_ passes for a real per-job send; the typeof-guarded call
+  // only covers the scope-level archive/preview call, which has no per-job replyTo yet -- if
+  // MarketingV6AuraEmailDispatcher.gs isn't loaded (it always is in the real deployment), this
+  // degrades to no CTA link rather than duplicating that file's own mailbox literal here.
+  var replyToAddr = v.replyTo || (typeof v6AuraEmailCanonicalReplyTo_ === 'function' ? v6AuraEmailCanonicalReplyTo_() : '');
+  var ctaHref = replyToAddr ? ('mailto:' + replyToAddr + '?subject=' + encodeURIComponent(v6AuraSample_(copy.subjectA, company, service, firstName))) : '';
+  var button = '<table role="presentation" cellspacing="0" cellpadding="0"><tr><td bgcolor="#77B82A" style="border-radius:7px"><a href="' + e(ctaHref) + '" style="display:inline-block;padding:14px 21px;font-family:Arial,sans-serif;font-size:12px;font-weight:900;color:#071005;text-decoration:none">' + e(copy.cta) + ' &rarr;</a></td></tr></table>';
   return '<!doctype html><html><body style="margin:0;background:#F4F5F7">'
     + '<div style="display:none;max-height:0;overflow:hidden">' + e(pre) + '</div>'
     + '<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:34px 12px">'
@@ -118,11 +132,6 @@ function v6AuraEmailHtml_(campaign, copy) {
     + '</table></td></tr></table></body></html>';
 }
 
-// --- Generate + archive real copy/HTML for one campaign, populating
-// copyDriveFileId/emailHtmlDriveFileId on MKT_CAMPAIGN_EXECUTIONS. Reuses
-// the existing, already-deployed archive functions
-// (MarketingV6DriveArchive.gs) exactly as a human-triggered Campaign Studio
-// approval would. ---
 function v6AuraGenerateAndArchiveEmail_(scope, campaign, executionId) {
   var copy = v6AuraGenerateCopy_(scope, campaign);
   var html = v6AuraEmailHtml_(campaign, copy);

@@ -59,6 +59,12 @@ function v6AuraAutoBuildRetentionScopes_(){
 // the safe-aggregate pattern already used by v6SafeOpportunityResponse_ /
 // runV6BackendSmokeTest.
 function v6AuraEvaluateRetention_(){
+  // Fail-closed freshness gate (MarketingV6DataFreshness.gs): AURA must not run a Retention
+  // campaign cycle against commercial data that is already older than the very cycle that
+  // consumes it. Checked before any refresh/scope-build side effect -- STALE short-circuits
+  // immediately, touching neither MKT_OPPORTUNITIES nor any scope table.
+  var freshness=v6AuraResolveFreshnessSource_();
+  if(freshness.status==='STALE_SOURCE')return {status:'BLOCKED_STALE_DATA',freshness:freshness};
   var refresh=v6RefreshOpportunitiesFromReports_();
   var rows=v6Rows_('MKT_OPPORTUNITIES').filter(function(r){return v6AuraText_(r.opportunityType)==='Retention';});
   var detected=0,suppressed=0,reviewRequired=0,byReason={};
@@ -127,12 +133,21 @@ function v6AuraEnsureCampaignScope_(payload){
     campaignType:v6AuraText_(p.campaignType||p.opportunityType||'Retention'),
     opportunityType:v6AuraText_(p.opportunityType||'Retention'),updatedAt:now
   });
-  accountIds.forEach(function(accountId){
-    v6UpsertByKey_('MKT_SCOPE_ACCOUNTS',['scopeId','accountId'],{
-      scopeId:scopeId,audienceId:scopeId,campaignId:campaignId,accountId:accountId,
-      eligibilityStatus:'ELIGIBLE',updatedAt:now
+  // batchWrite:true (opt-in; default false is byte-identical to before) replaces N per-account
+  // v6UpsertByKey_ calls against MKT_SCOPE_ACCOUNTS (each its own full-table read+scan+write, and
+  // the table grows with every prior account processed) with ONE batch read+merge+write.
+  if(p.batchWrite&&typeof v6BatchUpsertByKey_==='function'){
+    v6BatchUpsertByKey_('MKT_SCOPE_ACCOUNTS',['scopeId','accountId'],accountIds.map(function(accountId){
+      return {scopeId:scopeId,audienceId:scopeId,campaignId:campaignId,accountId:accountId,eligibilityStatus:'ELIGIBLE',updatedAt:now};
+    }));
+  }else{
+    accountIds.forEach(function(accountId){
+      v6UpsertByKey_('MKT_SCOPE_ACCOUNTS',['scopeId','accountId'],{
+        scopeId:scopeId,audienceId:scopeId,campaignId:campaignId,accountId:accountId,
+        eligibilityStatus:'ELIGIBLE',updatedAt:now
+      });
     });
-  });
+  }
   return {status:'SCOPE_READY',scopeId:scopeId,campaignId:campaignId,accountsWritten:accountIds.length};
 }
 

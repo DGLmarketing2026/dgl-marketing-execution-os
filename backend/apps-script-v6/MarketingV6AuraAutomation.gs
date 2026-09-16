@@ -28,7 +28,11 @@
 
 var MKT_V6_AURA_SCHEMA = {
   MKT_CAMPAIGNS: ['campaignId', 'scopeId', 'campaignName', 'campaignType', 'objective', 'service', 'amOwner', 'language', 'status', 'createdAt', 'updatedAt'],
-  MKT_AURA_EXECUTION_REPORT: ['reportRowId', 'owner', 'campaignFamily', 'service', 'campaignId', 'executionId', 'source', 'detectedAccounts', 'eligibleAccounts', 'suppressedAccounts', 'recipients', 'emailGenerated', 'sent', 'delivered', 'opened', 'bounced', 'clicks', 'spamComplaints', 'replies', 'rfqs', 'quotes', 'loads', 'campaignStart', 'campaignEnd', 'status', 'updatedAt']
+  // queued/failed appended (additive-only, v6AcqEnsureSheet_ already appends missing headers
+  // to an existing tab): real counts from MKT_EMAIL_QUEUE once MarketingV6AuraEmailDispatcher.gs
+  // has built a queue for a campaign, so 'sent' stops being hardcoded and READY/QUEUED/SENT can
+  // finally be told apart (see v6AuraReportRow_ below).
+  MKT_AURA_EXECUTION_REPORT: ['reportRowId', 'owner', 'campaignFamily', 'service', 'campaignId', 'executionId', 'source', 'detectedAccounts', 'eligibleAccounts', 'suppressedAccounts', 'recipients', 'emailGenerated', 'sent', 'delivered', 'opened', 'bounced', 'clicks', 'spamComplaints', 'replies', 'rfqs', 'quotes', 'loads', 'campaignStart', 'campaignEnd', 'status', 'updatedAt', 'queued', 'failed']
 };
 
 var MKT_V6_AURA_FAMILIES = ['Retention', 'Reactivation', 'Cross-Sell', 'QNB'];
@@ -66,8 +70,14 @@ function v6AuraObjectiveLabel_(familyToken) {
 // it now simply produces a subset of what this function produces).
 function v6AuraAutoBuildScopesForFamily_(opportunityType) {
   var familyToken = v6AuraFamilyToken_(opportunityType);
+  // Accounts already claimed by a dedicated, single-purpose pipeline (e.g.
+  // MarketingV6AuraCampanaA.gs) are excluded here so they are never ALSO auto-grouped and
+  // auto-queued by this shared, multi-source mechanism -- one account, one controlled pipeline,
+  // never two competing sets of jobs for the same contacts. typeof-guarded: with no dedicated
+  // pipeline deployed, v6AuraDedicatedAccountIds_ is absent and behavior is exactly as before.
+  var dedicated = (typeof v6AuraDedicatedAccountIds_ === 'function') ? v6AuraDedicatedAccountIds_() : {};
   var rows = v6Rows_('MKT_OPPORTUNITIES').filter(function (r) {
-    return v6AuraFamilyToken_(r.opportunityType) === familyToken && v6AuraText_(r.eligibilityStatus).toUpperCase() === 'DETECTED';
+    return v6AuraFamilyToken_(r.opportunityType) === familyToken && v6AuraText_(r.eligibilityStatus).toUpperCase() === 'DETECTED' && !dedicated[v6AuraText_(r.accountId)];
   });
   var groups = {};
   rows.forEach(function (r) {
@@ -231,6 +241,21 @@ function v6AuraScopeSourceLabel_(scope, accountSourceByAccountId) {
   if (nova) return 'NOVA / EXISTING SOURCE';
   return 'UNKNOWN';
 }
+// Real per-campaign MKT_EMAIL_QUEUE counts (MarketingV6AuraEmailDispatcher.gs). typeof-guarded
+// so this file has no hard dependency on the dispatcher being deployed -- a project without it
+// gets queueCounts.total===0 for every campaign, which is exactly today's behavior (see below).
+function v6AuraQueueCountsForCampaign_(campaignId) {
+  var rows = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) { return v6AuraText_(r.campaignId) === campaignId; });
+  var counts = { total: rows.length, pending: 0, sent: 0, failed: 0, dryRun: 0 };
+  rows.forEach(function (r) {
+    var s = v6AuraText_(r.status).toUpperCase();
+    if (s === 'PENDING') counts.pending++;
+    else if (s === 'SENT') counts.sent++;
+    else if (s === 'FAILED') counts.failed++;
+    else if (s === 'DRY_RUN') counts.dryRun++;
+  });
+  return counts;
+}
 function v6AuraReportRow_(scope, campaign, prep, invalidCountsByAccount, accountSourceByAccountId) {
   var pipeline = v6Rows_('MKT_ACCOUNT_PIPELINE').filter(function (r) { return v6AuraText_(r.campaignId) === campaign.campaignId; });
   var counts = invalidCountsByAccount || {};
@@ -242,20 +267,37 @@ function v6AuraReportRow_(scope, campaign, prep, invalidCountsByAccount, account
   var rfqs = pipeline.filter(function (r) { return !!r.rfqAt; }).length;
   var quotes = pipeline.filter(function (r) { return !!r.quoteAt; }).length;
   var loads = pipeline.filter(function (r) { return !!r.loadAt; }).length;
-  var status = prep.queue && prep.queue.status === 'BLOCKED' && (prep.queue.reasons || []).length === 1 && prep.queue.reasons[0] === 'BULK PROVIDER NOT CONFIGURED'
-    ? 'READY TO SEND · SEND PROVIDER REQUIRED'
-    : (prep.queue && prep.queue.status) || 'PREPARING';
+  // Real send state (MarketingV6AuraEmailDispatcher.gs) always wins once a queue exists for
+  // this campaign -- today that is only ever true for Retention (the only family the queue
+  // builder runs for), so QNB/Reactivation/Cross-Sell fall straight through to the exact same
+  // gate-based 'SEND PROVIDER REQUIRED' status this function has always reported (queueCounts
+  // stays {total:0,...} for them, unchanged behavior, no regression).
+  var queueCounts = v6AuraQueueCountsForCampaign_(campaign.campaignId);
+  var status;
+  if (!queueCounts.total) {
+    status = prep.queue && prep.queue.status === 'BLOCKED' && (prep.queue.reasons || []).length === 1 && prep.queue.reasons[0] === 'BULK PROVIDER NOT CONFIGURED'
+      ? 'READY TO SEND · SEND PROVIDER REQUIRED'
+      : (prep.queue && prep.queue.status) || 'PREPARING';
+  } else if (queueCounts.sent > 0) {
+    status = queueCounts.pending > 0 ? 'SENDING' : 'ACTIVE';
+  } else if (queueCounts.dryRun > 0) {
+    status = 'READY TO SEND · DRY RUN VALIDATED';
+  } else {
+    status = 'QUEUED';
+  }
   var now = v6AuraNow_();
   var row = {
     reportRowId: campaign.campaignId, owner: campaign.amOwner, campaignFamily: campaign.objective, service: campaign.service,
     campaignId: campaign.campaignId, executionId: prep.executionId, source: v6AuraScopeSourceLabel_(scope, accountSourceByAccountId),
     detectedAccounts: (scope.accountIds || []).length, eligibleAccounts: (scope.accountIds || []).length, suppressedAccounts: 0,
     recipients: prep.audience.eligibleContactCount || 0, emailGenerated: !!prep.email,
-    // Delivered/Opened/Clicks/Spam Complaints stay honestly 0 until a bulk
-    // send provider is connected -- never fabricated engagement.
-    sent: 0, delivered: 0, opened: 0, bounced: bounced, clicks: 0, spamComplaints: 0,
+    // Delivered/Opened/Clicks/Spam Complaints stay honestly 0 until a delivery-tracking
+    // integration exists -- never fabricated engagement. sent/queued/failed below are real,
+    // never hardcoded, once a queue exists for this campaign.
+    sent: queueCounts.sent, delivered: 0, opened: 0, bounced: bounced, clicks: 0, spamComplaints: 0,
     replies: replies, rfqs: rfqs, quotes: quotes, loads: loads,
-    campaignStart: campaign.createdAt, campaignEnd: '', status: status, updatedAt: now
+    campaignStart: campaign.createdAt, campaignEnd: '', status: status, updatedAt: now,
+    queued: queueCounts.pending, failed: queueCounts.failed
   };
   v6UpsertByKey_('MKT_AURA_EXECUTION_REPORT', ['reportRowId'], row);
   return row;
@@ -294,6 +336,15 @@ function v6AuraAutomationTick_() {
     families[built.family] = { scopesBuilt: built.scopesBuilt, accountsScoped: built.accountsScoped };
     built.scopes.forEach(function (scope) {
       var campaign = v6AuraEnsureCampaign_(scope);
+      // Real Gmail-send queue build (MarketingV6AuraEmailDispatcher.gs), Retention only for
+      // now -- the one family DGL asked to activate for real (see that file's header comment).
+      // typeof-guarded and wrapped so a project without the dispatcher, or one build failure,
+      // never breaks the rest of this hourly tick. Must run BEFORE v6AuraPrepareExecution_/
+      // v6AuraReportRow_ below so a newly-built queue is reflected in this SAME tick's report
+      // row instead of lagging one hour behind.
+      if (built.family === 'RETENTION' && typeof v6AuraBuildEmailQueueForCampaign_ === 'function') {
+        try { v6AuraBuildEmailQueueForCampaign_(campaign); } catch (err) { /* non-fatal: report falls back to pre-queue state */ }
+      }
       var prep = v6AuraPrepareExecution_(scope, campaign);
       var reportRow = v6AuraReportRow_(scope, campaign, prep, invalidCountsByAccount, accountSourceByAccountId);
       reportRows.push(reportRow);
@@ -325,7 +376,7 @@ function v6AuraAutomaticReportStatus_() {
 // same human-readable objective label v6AuraEnsureCampaign_ already writes
 // ('Retention' | 'Reactivation' | 'Quoted Not Booked' | 'Cross-Sell'), so the
 // Marketing OS can group/filter without any extra mapping.
-var MKT_V6_AURA_REPORT_SAFE_FIELDS = ['owner', 'campaignFamily', 'service', 'campaignId', 'executionId', 'source', 'detectedAccounts', 'eligibleAccounts', 'suppressedAccounts', 'recipients', 'emailGenerated', 'sent', 'delivered', 'opened', 'bounced', 'clicks', 'spamComplaints', 'replies', 'rfqs', 'quotes', 'loads', 'campaignStart', 'campaignEnd', 'status', 'updatedAt'];
+var MKT_V6_AURA_REPORT_SAFE_FIELDS = ['owner', 'campaignFamily', 'service', 'campaignId', 'executionId', 'source', 'detectedAccounts', 'eligibleAccounts', 'suppressedAccounts', 'recipients', 'emailGenerated', 'sent', 'delivered', 'opened', 'bounced', 'clicks', 'spamComplaints', 'replies', 'rfqs', 'quotes', 'loads', 'campaignStart', 'campaignEnd', 'status', 'updatedAt', 'queued', 'failed'];
 function v6AuraExecutionReport_() {
   var rows = v6AuraRows_('MKT_AURA_EXECUTION_REPORT');
   var records = rows.map(function (r) {
@@ -334,7 +385,7 @@ function v6AuraExecutionReport_() {
     return out;
   });
   var owners = {}, campaigns = records.length, readyToSend = 0, blocked = 0, recipients = 0, eligibleAccounts = 0, suppressedAccounts = 0;
-  var sent = 0, delivered = 0, opened = 0, clicked = 0, bounced = 0, spamComplaints = 0, replies = 0, rfqs = 0, quotes = 0, loads = 0, lastUpdated = '';
+  var sent = 0, delivered = 0, opened = 0, clicked = 0, bounced = 0, spamComplaints = 0, replies = 0, rfqs = 0, quotes = 0, loads = 0, lastUpdated = '', queued = 0, failed = 0;
   var byFamily = { Retention: 0, Reactivation: 0, QNB: 0, 'Cross-Sell': 0 };
   records.forEach(function (r) {
     owners[v6AuraText_(r.owner) || 'Unassigned'] = true;
@@ -357,6 +408,8 @@ function v6AuraExecutionReport_() {
     rfqs += Number(r.rfqs) || 0;
     quotes += Number(r.quotes) || 0;
     loads += Number(r.loads) || 0;
+    queued += Number(r.queued) || 0;
+    failed += Number(r.failed) || 0;
     if (r.updatedAt && String(r.updatedAt) > lastUpdated) lastUpdated = String(r.updatedAt);
   });
   return {
@@ -365,7 +418,8 @@ function v6AuraExecutionReport_() {
       eligibleAccounts: eligibleAccounts, suppressedAccounts: suppressedAccounts, owners: Object.keys(owners).length,
       byFamily: byFamily,
       sent: sent, delivered: delivered, opened: opened, clicked: clicked, bounced: bounced, spamComplaints: spamComplaints,
-      replies: replies, rfqs: rfqs, quotes: quotes, loads: loads, lastUpdated: lastUpdated, lastAuraRun: lastUpdated
+      replies: replies, rfqs: rfqs, quotes: quotes, loads: loads, queued: queued, failed: failed,
+      lastUpdated: lastUpdated, lastAuraRun: lastUpdated
     },
     records: records
   };

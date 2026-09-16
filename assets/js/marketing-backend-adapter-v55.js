@@ -259,7 +259,14 @@
     v6AuraGmailFreshness:()=>mutate("v6AuraGmailFreshness",{},false),
     v6AuraGmailPanel:()=>mutate("v6AuraGmailPanel",{},false),
     v6AuraIngestHistory:()=>mutate("v6AuraIngestHistory",{},false),
-    v6AuraSourceBreakdown:()=>mutate("v6AuraSourceBreakdown",{},false)
+    v6AuraSourceBreakdown:()=>mutate("v6AuraSourceBreakdown",{},false),
+    // AURA dashboard bridge -- read-only reporting only (see MarketingV55Backend.gs's allowlist
+    // comment): never a way to build a queue, dispatch, or send a real email from this page.
+    v6AuraRetentionDashboard:()=>mutate("v6AuraRetentionDashboard",{},false),
+    v6AuraCampanaAAudit:()=>mutate("v6AuraCampanaAAudit",{},false),
+    v6AuraCampanaAMatchReport:()=>mutate("v6AuraCampanaAMatchReport",{},false),
+    v6AuraCampanaAStoppedBreakdown:()=>mutate("v6AuraCampanaAStoppedBreakdown",{},false),
+    v6AuraAutomaticReportStatus:()=>mutate("v6AuraAutomaticReportStatus",{},false)
   };
   Object.defineProperty(adapter,"mode",{enumerable:true,get:()=>state===STATES.PRIVATE_BACKEND?"PRIVATE_BACKEND":"LOCAL_DEMO"});
   global.DGL_MARKETING_BACKEND_ADAPTER_V55=adapter;

@@ -1,6 +1,1023 @@
 # Retention V1 — Progress
 
-Branch: `retention/v1-am-activity-join` (pushed to `origin`).
+Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
+
+## Pass 18 — The real recipient-matching gap: the Campana A tab becomes the primary source
+
+**Pass 17's fixes worked**: DGL reported a completed execution (no timeout), which for the first
+time surfaced the REAL, underlying gap the earlier 170/227-style shortfalls had been pointing at
+all along: `EMAIL_NOT_FOUND_AMONG_ACCOUNT_CONTACTS` / `NO_CONTACTS_SECURE_ROWS_FOR_ACCOUNT`. Root
+cause: the shared `v6ResolveRecipients_` engine (`MarketingV6RecipientResolution.gs`, used by
+every campaign family) sources recipients EXCLUSIVELY from `MKT_CONTACTS_SECURE` -- a real,
+explicitly-listed, well-formed email on `Campana A - HA prioritaria` that had not yet synced into
+NOVA/the Data Hub was silently excluded from ever becoming a recipient, even though
+`Marketing_DGL_14-09-2026` (this tab's own workbook) is the authoritative, most current
+commercial source for this campaign.
+
+**Fix, per DGL's explicit instruction**: `MarketingV6AuraCampanaA.gs` no longer calls the shared
+`v6ResolveRecipients_` at all. New, dedicated `v6AuraCampanaAResolveRecipients_`:
+
+- **The tab is now the primary recipient source.** Every row in `MKT_AURA_CAMPANA_A_SOURCE_ROWS`
+  (the real, captured Campana A tab rows) with a present email becomes a candidate, regardless of
+  whether a matching `MKT_CONTACTS_SECURE` record exists yet.
+- **MKT_CONTACTS_SECURE/MKT_ACCOUNTS enrich and govern, never gate.** A tab email is merged with
+  a `MKT_CONTACTS_SECURE` record for the SAME real account by EXACT, case-insensitive email
+  equality only -- never a fuzzy/similarity match. `recipientSource` (new additive column, both
+  `MKT_EMAIL_QUEUE` and `MKT_AUDIENCES`) records which table(s) actually produced each recipient:
+  `MERGED` (found in both -- MKT_CONTACTS_SECURE's firstName wins the deterministic merge over
+  the tab's own contactName, since it is the more governed record), `CAMPANA_A_SOURCE` (tab only
+  -- this pipeline's own required CONTACT_SOURCE_ONLY marker: a full, real candidate, never
+  dropped), or `CONTACTS_SECURE` (already known for the account, not listed with an email on this
+  particular tab extract -- preserves every recipient this pipeline already found before this
+  change).
+- **Every governed check still fully applies**, reproduced against the merged candidate list
+  using the exact same underlying primitives the shared engine itself uses: DNC
+  (`doNotContact`/`dnc`, only available when a MKT_CONTACTS_SECURE record exists -- a
+  CAMPANA_A_SOURCE-only contact simply has no such flag to check, which is correct, not a gap),
+  strict email-FORMAT validation (`v6AuraEmailValid_`, unchanged, never relaxed for the
+  authoritative tab), active exclusion (`v6RecipientActiveExclusion_`, unchanged, pure), frequency
+  cap (`v6FrequencyStatus_`, unchanged). Account-level protections (`stopOnResponse`/pipeline
+  stage) are keyed by `accountId` only, already independent of which table produced the
+  `contactId` -- fully preserved for every recipient regardless of source.
+- A `CAMPANA_A_SOURCE`-only `contactId` is a deterministic, stable hash of `(accountId, email)` --
+  never random -- so idempotency (jobId keying, checkpoint/resume, never duplicating a job) is
+  unaffected.
+- `v6AuraCampanaAMatchReport_` is kept, re-scoped in its own comment as a data-quality/NOVA-sync-
+  coverage diagnostic ("which tab emails have not yet synced to NOVA") -- it is explicitly no
+  longer a recipient gate. `v6AuraCampanaAAudit_` gained `byRecipientSource` (computed from the
+  durable `MKT_EMAIL_QUEUE` job records) for real, after-the-fact reporting.
+- The shared `v6ResolveRecipients_` itself is completely UNCHANGED -- every other campaign family
+  still uses it exactly as before.
+
+### Files changed
+
+- Modified: `backend/apps-script-v6/MarketingV6SchemaMigration.gs` (additive `recipientSource`
+  column on `MKT_AUDIENCES` and `MKT_EMAIL_QUEUE`), `backend/apps-script-v6/MarketingV6AuraCampanaA.gs`
+  (new `v6AuraCampanaAResolveRecipients_` dedicated resolver + two small local helpers
+  `v6AuraCampanaABool_`/`v6AuraCampanaAExclusionReasonCode_`; `v6AuraCampanaABuildQueue_` rewired
+  to use it instead of `v6ResolveRecipients_`; personalization now uses the resolver's own merged
+  `firstName`/row-level country instead of a raw `MKT_CONTACTS_SECURE`-only lookup;
+  `v6AuraCampanaAAudit_` gained `byRecipientSource`; header comments updated).
+- Not modified (deliberately): `backend/apps-script-v6/MarketingV6RecipientResolution.gs` --
+  `v6ResolveRecipients_` is byte-for-byte unchanged; every other campaign family is unaffected.
+- Modified tests: `tests/v6-aura-campana-a.test.js` (removed the now-dead `v6ResolveRecipients_`
+  test stub; rewrote test 8 to use a real DNC flag instead of the stub's `eligibleContactIds`
+  option; added 7 new dedicated tests for the tab-primary/merge/governance behavior -- see
+  `tests.json`).
+- Full suite: 38/38 files passing.
+
+### On the requested complete execution-result breakdown
+
+DGL asked for the full breakdown (duration, source contacts/accounts, matched, source-only,
+unmatched by cause, final recipients, ES/EN/PT, STOPPED by reason, DRY_RUN, invalid emails,
+duplicates, realSendsDetected) of the run that had just completed. That data was never provided
+to this session (only the two error-code strings were quoted) -- it was not fabricated; it was
+requested back from DGL directly in the same reply as this fix.
+
+### What this pass deliberately does NOT do
+
+- Does not reduce contact/account volume, relax any DNC/exclusion/frequency/stopOnResponse/
+  approval gate, or fabricate an email that does not come verbatim from the tab or
+  MKT_CONTACTS_SECURE.
+- Does not fuzzy-match emails under any circumstance -- merge is exact, case-insensitive equality
+  only.
+- Does not change the shared v6ResolveRecipients_ engine or any other campaign family's behavior.
+- Does not attempt `clasp run` / the Execution API again (still categorically blocked).
+
+## Pass 17 — Second production timeout: the Pass 16 fix was necessary but not sufficient
+
+**DGL reported a SECOND real timeout, same ~30-minute duration**, running the exact function
+Pass 16 had just fixed: `RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN()` started 9:33:56, "Exceeded
+maximum execution time" at 10:03:58. This proved the Pass 16 Sheets-I/O batching fix, while
+correct and necessary, was not the whole story -- something else in the same call chain was
+still slow, and it was NOT covered by Pass 16's own synthetic tests (which only ever exercise
+`MarketingV6AuraCampanaA.gs`'s own I/O, stubbing out everything it calls).
+
+**Two additional, previously-unexamined bottlenecks found by re-tracing the FULL call chain
+`v6AuraCampanaARegenerateDryRun_` actually invokes** (not just the file Pass 16 already fixed):
+
+1. **`v6AuraGmailProcessMessage_`** (`MarketingV6AuraGmailIngest.gs`) -- called both by the
+   always-scheduled hourly Gmail tick AND by Campana A's own `v6AuraGmailReprocessRecent_`
+   fallback (see #2). It had the IDENTICAL per-row bug Pass 16 already fixed elsewhere in this
+   same file: `parsed.accepted.forEach(candidate => v6AuraGmailUpsertOpportunity_(candidate,
+   ctx))` called the shared, per-call-full-table-read upsert once per accepted row across every
+   table in a message -- Pass 16 never touched this specific loop, since it lives in a different
+   file that Campana A's own ingest path doesn't call (Campana A reads the source spreadsheet
+   directly; this loop only runs for Gmail-sourced messages). Fixed identically: every
+   candidate's row shape is now computed in memory (new pure `v6AuraGmailBuildOpportunityRow_`,
+   extracted from `v6AuraGmailUpsertOpportunity_`, which itself is unchanged) and written in ONE
+   `v6BatchUpsertByKey_` call per message; `MKT_AURA_INGEST_REJECTIONS` is batched the same way.
+2. **`v6AuraGmailReprocessRecent_`** itself, called UNCONDITIONALLY by
+   `v6AuraCampanaARegenerateDryRun_` on every run (wrapped only in try/catch for errors, never
+   for slowness). This performs a real `GmailApp.search` and, for every matching message with an
+   `.xlsx` attachment, converts it to a throwaway Google Sheet via the Drive Advanced Service
+   (`Drive.Files.create` + `SpreadsheetApp.openById` + read every tab + `Drive.Files.remove`) --
+   a genuinely slow, network-bound sequence with NO relationship to Sheets read/write counts, and
+   therefore completely invisible to Pass 16's fix. Its own code comment already documents an
+   earlier, unrelated incident with the SAME ~30-minute symptom
+   (`v6AuraGmailIngestTick_`, "an unbounded search... caused v6AcqAutomationTick_ to take ~30
+   minutes per run"). It is explicitly documented as a best-effort FALLBACK, only meant to cover
+   the case where the primary direct-spreadsheet read did not itself succeed -- when the direct
+   read already returns `status: 'OK'`, reprocessing Gmail redundantly re-derives the exact same
+   accounts a second, much slower way. **Fix:** `v6AuraCampanaARegenerateDryRun_` now skips this
+   fallback (logged explicitly as `GMAIL_REPROCESS_SKIPPED`) whenever the direct read already
+   succeeded, and still runs it (unchanged) when the direct read failed. No eligibility,
+   suppression, or governance check is affected -- this only skips a redundant SECOND way of
+   deriving data the direct read already produced.
+
+**Real-time stage logging, new** (`v6AuraCampanaALog_`): every previously-silent phase --
+`SOURCE_READ`, `PARSE`, `MATCH` (account/scope resolution, and separately the per-contact index
+preload), `ELIGIBILITY` (the `v6ResolveRecipients_` call, and separately the per-contact
+stop/override check), `LANGUAGE`, `COPY`, `QUEUE_WRITE`, `PREFLIGHT`, `DISPATCH`, `AUDIT`, plus
+the two newly-discovered `GMAIL_REPROCESS`/`REFRESH_OPPORTUNITIES` phases and
+`TRIGGER_INSTALL`/`REGENERATE` -- now logs a `console.log` line the INSTANT it starts and the
+instant it finishes, plus periodic progress lines every 50 contacts inside the main build loop.
+This is deliberately different from Pass 16's `result.profile` (accumulated totals returned only
+if the function completes): these lines are visible LIVE in the Apps Script execution transcript
+while a manual run is still in progress, so a future timeout is diagnosable from "which STAGE's
+START line has no matching END line" -- exactly where it got stuck -- without needing the run to
+ever finish.
+
+**On not re-estimating from synthetic tests.** This pass does not claim a specific new execution
+time. The two fixes above are real, targeted, and each individually verified (new dedicated
+tests, see `tests.json`), but the Apps Script Execution API remains categorically blocked in this
+environment (confirmed in the original go-live pass), so no fix in this project can be time-
+verified except by DGL's own next run -- which will now show, via the real-time stage logs,
+exactly how long each phase actually takes against the real ~227-contact data and mailbox, even
+if it still does not finish.
+
+### Files changed
+
+- Modified: `backend/apps-script-v6/MarketingV6AuraGmailIngest.gs` (extracted the batching fix
+  into `v6AuraGmailProcessMessage_`'s per-row upsert loop, reusing `v6AuraGmailBuildOpportunityRow_`
+  from Pass 16), `backend/apps-script-v6/MarketingV6AuraCampanaA.gs` (real-time stage logging
+  throughout; `v6AuraCampanaARegenerateDryRun_` now skips the redundant Gmail-reprocess fallback
+  when the direct read already succeeded, and times/logs both that fallback and
+  `v6RefreshOpportunitiesFromReports_`, neither of which Pass 16 had instrumented).
+- Modified tests: `tests/v6-aura-campana-a.test.js` (test 12 updated for the new real-time log
+  lines; new test 12b verifies every stage marker logs in order and that the redundant fallback
+  is explicitly skipped).
+- New tests: `tests/v6-aura-gmail-process-message.test.js` (3 cases covering the
+  `v6AuraGmailProcessMessage_` batching fix in isolation).
+- Full suite: 38/38 files passing.
+
+### What this pass deliberately does NOT do
+
+- Does not change what counts as eligible, suppressed, stopped, or safely determined -- both
+  fixes only remove genuinely redundant or already-duplicated work.
+- Does not touch the separately-scheduled hourly Gmail tick's own search-window bound (already
+  fixed in an earlier, unrelated incident, `v6AuraGmailIngestTick_`'s 45-day `newer_than` clause)
+  -- only its shared per-row upsert cost.
+- Does not attempt `clasp run` / the Execution API again (still categorically blocked) -- the
+  real-time stage logs are the mechanism for the next real run to be diagnosable regardless.
+
+## Pass 16 — Performance fix: the real production execution-time-limit failure
+
+**Production incident.** `RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN()` ran 8:03:08-8:33:08 and was
+terminated by Apps Script with "Exceeded maximum execution time" for the real ~227-contact / 65
+-account Campana A audience. DGL required a governed, non-negotiable fix: no reduction in
+contacts/accounts processed, no protection removed, DRY_RUN/canonical replyTo/ES-EN-PT/
+suppression-DNC-frequency-stopOnResponse all fully preserved, plus checkpoint/resume and
+per-phase profiling, verified by real tests (not just re-running the same architecture again).
+
+**Exact cause, confirmed by code-level trace (not guessed).** Every write in the previous
+pipeline went through the shared `v6UpsertByKey_` (`MarketingV6FrequencyControl.gs`), which does
+a FULL re-read of its target sheet before every single write. That primitive was called once PER
+ROW/PER CONTACT/PER ACCOUNT throughout this pipeline -- O(n) per call, O(n^2) total across a
+loop of n against the same, often already-large, multi-campaign table:
+- `v6AuraCampanaAPersistSourceRows_` -- once per source row (~227) against the growing
+  `MKT_AURA_CAMPANA_A_SOURCE_ROWS` table.
+- `v6AuraGmailUpsertOpportunity_` (called once per accepted candidate, ~227, from
+  `v6AuraCampanaAIngestFromSpreadsheet_`) -- each call did its OWN existence-check full read of
+  `MKT_AURA_GMAIL_OPPORTUNITIES` PLUS `v6UpsertByKey_`'s own full read+write -- 2 full reads + 1
+  write per candidate.
+- `v6AuraEnsureCampaignScope_` -- once per account (~65) against the growing
+  `MKT_SCOPE_ACCOUNTS` table; plus `v6AuraCampanaARealAccountId_` re-reading all of `MKT_ACCOUNTS`
+  fresh on every call, called ~3x per account across different call sites (~190 full reads).
+- `v6ResolveRecipients_` (`MarketingV6RecipientResolution.gs`, shared by every campaign family)
+  -- once per contact (~227): a full `v6Rows_('MKT_FREQUENCY_LEDGER')` read PLUS a full,
+  growing-table `v6UpsertByKey_('MKT_AUDIENCES', ...)` write, against a table shared and
+  continuously appended to by every other campaign in the system.
+- `v6AuraCampanaABuildQueue_`'s own per-contact `v6UpsertByKey_('MKT_EMAIL_QUEUE', ...)` write,
+  plus a fresh `v6Rows_('MKT_CAMPAIGNS')` read per STOPPED contact
+  (`v6AuraCampanaAPriorCampaignFamily_`, ~117 of the 227 in the real run).
+- `v6AuraCampanaAPreflight_` -- a fresh `MKT_EXCLUSIONS` read per pending job, plus a per-failing
+  -job write.
+- `auraProcessEmailQueue` (`MarketingV6AuraEmailDispatcher.gs`, looped up to 20x by
+  `v6AuraCampanaADispatchAll_`) -- per job: fresh reads of `MKT_ACCOUNT_PIPELINE`,
+  `MKT_EXCLUSIONS`, `MKT_EMAIL_QUEUE` (duplicate-sent check), `MKT_FREQUENCY_LEDGER`, plus a
+  write; plus one full `MKT_EMAIL_QUEUE` read per round.
+
+Rough total before this fix: 3,000+ individual Sheets API round trips for one ~227-contact run,
+several against tables shared and grown by every other campaign in the system -- explaining a
+30-minute wall clock for what should be a trivial data volume.
+
+**Fix: batch reads/writes everywhere, preserve every rule verbatim.**
+- New `v6BatchUpsertByKey_(name, keyFields, records)` (`MarketingV6FrequencyControl.gs`, alongside
+  the unchanged `v6UpsertByKey_`) -- ONE full-table read, in-memory merge (later records in the
+  same batch correctly win on a shared key, matching the existing "last row wins" semantic),
+  ONE full-table write, for any number of records.
+- `v6AuraCampanaAPersistSourceRows_`, the opportunity-upsert loop in
+  `v6AuraCampanaAIngestFromSpreadsheet_` (via a new pure `v6AuraGmailBuildOpportunityRow_` row
+  -shape builder extracted from `v6AuraGmailUpsertOpportunity_`, itself unchanged and still used
+  verbatim by every other Gmail-ingest caller), `v6AuraCampanaABuildQueue_`'s `MKT_EMAIL_QUEUE`
+  write, and `v6AuraCampanaAPreflight_`'s suppression write all now call
+  `v6BatchUpsertByKey_` once instead of looping `v6UpsertByKey_`.
+- `v6ResolveRecipients_` gained an additive, opt-in `payload.batchWrite` (default `false` --
+  every existing caller/test, including the shared `v6-recipient-resolution-production.test.js`
+  and `v55-recipient-resolution.test.js`, is byte-for-byte unaffected) that defers every
+  `MKT_AUDIENCES` write to one final `v6BatchUpsertByKey_` call; it also now preloads
+  `MKT_FREQUENCY_LEDGER` ONCE (via a new, additive, backward-compatible optional second argument
+  on `v6FrequencyStatus_`) instead of once per contact, unconditionally, for every caller.
+  Campana A calls it with `batchWrite:true`.
+- `v6AuraEnsureCampaignScope_` gained the same additive `batchWrite:true` opt-in for
+  `MKT_SCOPE_ACCOUNTS` (default unchanged). `v6AuraCampanaARealAccountId_` and
+  `v6AuraCampanaAPriorCampaignFamily_` gained optional preloaded-rows arguments so a caller
+  resolving many accounts/checking many STOPPED contacts shares ONE read instead of one per
+  account/contact; every real call site in `MarketingV6AuraCampanaA.gs` now loads `MKT_ACCOUNTS`/
+  `MKT_CAMPAIGNS` exactly once per run and passes it through.
+- New `v6AuraCampanaADispatchBatch_` replaces the shared, per-job-I/O `auraProcessEmailQueue`
+  for THIS pipeline only (the shared dispatcher is completely unchanged and still serves every
+  other campaign family exactly as before): reads `MKT_EMAIL_QUEUE`/`MKT_EXCLUSIONS`/
+  `MKT_ACCOUNT_PIPELINE`/`MKT_FREQUENCY_LEDGER` exactly once, evaluates the identical
+  stop/reply-to/email/exclusion/duplicate/frequency checks in memory, and writes every updated
+  job in ONE final batch. `v6AuraCampanaADispatchAll_` (the name `v6AuraCampanaARegenerateDryRun_`
+  already called) now delegates to it.
+- Net effect at the real ~227-contact/65-account scale: roughly 3,000+ Sheets API round trips
+  (scaling with contact/account count, several against already-large shared tables) down to
+  roughly 35-40 (constant, independent of contact/account count) -- the O(n^2) growth pattern is
+  eliminated, not just made individually faster.
+
+**Checkpoint/resume**, new: a Script Property (`CAMPANA_A_BUILD_CHECKPOINT`) lets the per-contact
+build loop in `v6AuraCampanaABuildQueue_` stop cleanly before an execution-time budget
+(`CAMPANA_A_BUILD_TIME_BUDGET_MS`, default 270000ms/4.5min -- a safety margin under Apps Script's
+common 6-minute ceiling) is exceeded, save its exact position, and resume from there on the next
+call -- never duplicating a job (every job is still keyed by the existing deterministic,
+idempotent `jobId`, so even a full restart-from-zero would only re-skip already-built jobs, never
+duplicate them). A checkpoint is only trusted when taken against the same campaign and the same
+total recipient count; otherwise the loop safely starts from zero. AURA no longer depends on the
+whole audience fitting inside one execution, at any future scale.
+
+**Profiling**, new: every phase now reports its own timing in milliseconds --
+`SOURCE_READ_MS`/`PARSE_MS` (`v6AuraCampanaAIngestFromSpreadsheet_`), `MATCH_MS`/`LANGUAGE_MS`/
+`ELIGIBILITY_MS`/`COPY_MS`/`QUEUE_WRITE_MS` (`v6AuraCampanaABuildQueue_`), `AUDIT_MS` and
+`TOTAL_MS` (`v6AuraCampanaARegenerateDryRun_`) -- merged onto `result.profile` and included in
+`RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN`'s logged summary, so a future slowdown can be diagnosed
+by phase instead of re-guessed from scratch.
+
+**Estimated execution time after this fix** (analytical, since the Apps Script Execution API
+remains categorically blocked in this environment -- see Pass 15/prior go-live report; cannot be
+confirmed by an actual timed run from here): well under one minute for the current ~227-contact
+scale (likely 10-30 seconds), dominated by the unavoidable per-call latency of ~35-40 real Sheets
+API round trips (each typically 50-300ms) plus opening the source spreadsheet and Gmail-copy
+generation -- not by any remaining O(n) or O(n^2) pattern, since none remain in this pipeline's
+write path.
+
+**The one function to run is unchanged: `RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN()`** -- same
+name, same zero-argument entry point, same DRY_RUN/canonical-replyTo/preflight/audit contract.
+Per DGL's own instruction, this pass does not ask DGL to run it again yet; that request is
+deferred until the user reviews this report.
+
+### Files changed
+
+- Modified: `backend/apps-script-v6/MarketingV6FrequencyControl.gs` (new `v6BatchUpsertByKey_`;
+  `v6FrequencyStatus_` gained an optional preloaded-ledger-rows second argument, additive), `backend/apps-script-v6/MarketingV6AuraGmailIngest.gs`
+  (extracted pure `v6AuraGmailBuildOpportunityRow_`, `v6AuraGmailUpsertOpportunity_` itself
+  unchanged), `backend/apps-script-v6/MarketingV6RecipientResolution.gs` (`v6ResolveRecipients_`
+  gained additive `payload.batchWrite`; new `v6RecipientBatchUpsertAudiences_`),
+  `backend/apps-script-v6/MarketingV6AuraBridge.gs` (`v6AuraEnsureCampaignScope_` gained additive
+  `payload.batchWrite`), `backend/apps-script-v6/MarketingV6AuraCampanaA.gs` (comprehensively
+  rewritten for batched I/O, checkpoint/resume, and profiling -- every existing function name/
+  contract preserved; `v6AuraCampanaADispatchAll_` now delegates to the new
+  `v6AuraCampanaADispatchBatch_` instead of looping the shared `auraProcessEmailQueue`).
+- Not modified (deliberately): `backend/apps-script-v6/MarketingV6AuraEmailDispatcher.gs`'s
+  `auraProcessEmailQueue` -- still serves every other campaign family exactly as before; Campana
+  A no longer calls it at all.
+- Modified tests: `tests/v6-aura-campana-a.test.js` (added a `v6BatchUpsertByKey_` stub with
+  call-count instrumentation, `deleteProperty` on the fake PropertiesService, and 5 new cases --
+  see `tests.json`).
+- Full suite: 37/37 files passing (`node --test tests/*.test.js`), including the two dedicated
+  recipient-resolution test files (`v6-recipient-resolution-production.test.js`,
+  `v55-recipient-resolution.test.js`), confirming the shared engine's default behavior is
+  byte-for-byte unaffected.
+
+### What this pass deliberately does NOT do
+
+- Does not reduce the contact/account volume processed, remove or relax any suppression/DNC/
+  frequency/stopOnResponse/exclusion/approval gate, or change the governed stale-cross-family
+  override introduced in Pass 15.
+- Does not modify the shared `auraProcessEmailQueue` dispatcher -- QNB/Reactivation/Cross-Sell/
+  the general Retention family pipeline dispatch exactly as before.
+- Does not attempt `clasp run` / the Execution API again (confirmed categorically, permanently
+  blocked in this environment in the prior go-live pass) -- profiling is instrumented in-code and
+  will surface real numbers the next time DGL runs the function from the Apps Script editor.
+- Does not touch Landing Pages or the Marketing Execution OS frontend go-live work -- tracked
+  separately, unaffected by this fix (see the prior go-live report for their status).
+
+## Pass 15 — Go-live pass: definitive Campana A fixes, preflight, AURA dashboard, trigger install
+
+Turns Pass 14's diagnostics into real fixes, adds the final pre-LIVE preflight gate, and gives
+AURA a real, live-data presence inside `dgl-marketing-execution-os` (not just Sheets/Apps
+Script) -- all still on this feature branch, still DRY_RUN, still zero real sends.
+
+**Recipient gap, definitively fixed (not just diagnosed).** `v6AuraCampanaAEnsureCampaignAndScope_`
+now resolves each source account to its REAL `MKT_ACCOUNTS.accountId`
+(`v6AuraCampanaARealAccountId_`: the hash id first, falling back to the same deterministic
+normalized-name match `v6AuraCampanaAMatchReport_` already used only for reporting) and scopes
+the campaign by that real id -- so `v6ResolveRecipients_` actually joins against real
+`MKT_CONTACTS_SECURE` rows instead of an id that only matched when the tab's spelling was
+byte-identical to NOVA's. `v6AuraDedicatedAccountIds_` now excludes an account under BOTH ids,
+so the shared family pipeline still never double-processes it.
+
+**Governed override for a stale, cross-family historical response.** New
+`v6AuraCampanaAStopOverrideCheck_`: CLOSED/SUPPRESSED and an ongoing/successful relationship
+(LOAD/REACTIVATED, RETAINED/EXPANDED) are NEVER overridable. Only RESPONDED/RFQ
+RECEIVED/QUOTED/COOLDOWN-NURTURE are even eligible, and only when the prior campaign's real
+objective (looked up from `MKT_CAMPAIGNS`, never guessed) is a different family than Retention
+AND the response is older than `CAMPANA_A_STALE_RESPONSE_OVERRIDE_DAYS_` (90 -- a separate,
+explicit constant from the unrelated 30-day send-frequency cap). Every decision is captured on
+the job (`stopOverrideApplied`/`stopOverrideReason`, additive) and rolled up in
+`v6AuraCampanaAStoppedBreakdown_`. No suppression/frequency/DNC/stopOnResponse rule was relaxed.
+
+**Final preflight gate.** New `v6AuraCampanaAPreflight_`, run automatically inside
+`v6AuraCampanaARegenerateDryRun_` right before dispatch (DRY_RUN or LIVE alike): re-validates
+every PENDING job's email, reply-to, safely-determined language, and any exclusion that appeared
+since the job was built. A failing job is individually marked `SUPPRESSED` with the specific
+reason and never blocks any other job. Returns the exact recipients/language/suppression summary
+DGL asked to review before ever approving LIVE, plus `readyForLive` (true only when at least one
+job is safely sendable).
+
+**Trigger install folded into the same manual step.** `v6AuraCampanaARegenerateDryRun_` now also
+calls `auraInstallTriggers()` (already idempotent -- checks existing triggers by handler name
+first) so the one execution DGL runs also confirms the dispatcher's hourly trigger exists,
+without a second manual action.
+
+**AURA is now visible inside the Marketing Execution OS frontend**, not only Sheets/Apps Script.
+Investigated the existing frontend first (`index.html` + 40+ `assets/js/*` modules + `components/`,
+GitHub-Pages-hosted, hash-routed SPA) rather than building a parallel one -- confirmed
+`marketing-backend-adapter-v55.js` already has a generic, token-gated bridge
+(`mutate(actionName, payload)` -> `MarketingV55Backend.gs`'s `handleMarketingV55Api_` ->
+`routeMarketingV6_`) that every existing V6 panel already uses. Reused it exactly: added
+`v6AuraRetentionDashboard`/`v6AuraCampanaAAudit`/`v6AuraCampanaAMatchReport`/
+`v6AuraCampanaAStoppedBreakdown`/`v6AuraExecutionReport`/`v6AuraAutomaticReportStatus` to
+`MarketingV55Backend.gs`'s allowlist+switch (bridging to the already-built, already-tested V6
+router handlers) and to the frontend adapter -- deliberately READ-ONLY: no function that builds
+a queue, dispatches, or could ever send a real email is exposed this way, since this is a public
+GitHub Pages page and must stay presentation-only, per this project's own stated architecture.
+Brought the live-only `MarketingV55Backend.gs` under version control (`backend/apps-script-legacy-v55/`)
+before editing it, matching this project's established practice for any live file it needs to
+touch. New `assets/js/aura-dashboard-v1.js` + `assets/css/aura-dashboard-v1.css` (isolated,
+reviewable/removable independently) render a real "AURA Overview" page: last Retention run,
+Campana A source/eligible/stopped counts, ES/EN/PT distribution, the real STOPPED
+stage/override breakdown, the real account/contact match report (with named unmatched reasons),
+and every AURA campaign family's real send/response/RFQ/quote/load counts from
+`MKT_AURA_EXECUTION_REPORT` -- zero hardcoded/sample data. New "AURA" nav group + "AURA
+Overview" entry in `app.js`'s existing module registry (`components/sidebar.js` already renders
+whatever `app.js` registers -- no sidebar code changed). "Landing Pages" already exists as its
+own nav item/module in this frontend -- not duplicated or rebuilt.
+
+**GitHub Pages / `main` finding.** Confirmed by fetching the live Pages URL
+(`https://dglmarketing2026.github.io/dgl-marketing-execution-os/`) and diffing its exact HTML
+against every branch: Pages serves from `main`, byte-for-byte. This branch
+(`retention/v1-aura-integration-20260911`) -- where 100% of this session's AURA work lives --
+has never been merged to `main`, per this engagement's own standing, explicitly-repeated
+instruction never to merge to main or open a PR. That instruction was not overridden by this
+pass's go-live request, so it was not merged. See the GO-LIVE REPORT for the exact, minimal
+unblock action.
+
+Tests: `tests/v6-aura-campana-a.test.js` +6 cases (real-account resolution actually recovers a
+recipient via normalized-name matching, not just a diagnostic; the full governed-override matrix
+-- overridden / too-recent / same-family / CLOSED-SUPPRESSED / LOAD-REACTIVATED, each asserted
+independently; the STOPPED breakdown's override statistics; preflight suppressing only the
+failing job without blocking the rest of the campaign; preflight's not-ready-for-live case; and
+the dispatcher trigger installing idempotently inside regenerate).
+
+Full suite: 37 files, 37 pass, 0 fail. `RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN` was NOT executed
+in this pass.
+
+## Pass 14 — Diagnosing the first real run's three anomalies (100% EN, 69% STOPPED, 170/227 recipients)
+
+The first real run (post Pass 13 fix) returned real, non-zero data -- 64 accounts, 170
+recipients, 170 built, 0 real sends -- but three numbers needed real, code-grounded
+investigation rather than a guess: `byLanguage` 100% EN, 117/170 jobs STOPPED, and 170
+recipients against roughly 227 contacts DGL expects. No suppression/frequency/stopOnResponse
+rule was changed in this pass -- only diagnostic capture and traceability were added.
+
+**1. Language.** Traced every place a country/language value could legitimately live:
+`v6IngestAuthoritativeContacts_` (MarketingV6ContactIngestion.gs, the "official" V6 NOVA
+contact path) never writes country, firstName, or language at all -- its record shape is
+strictly identity/email/status fields. A SEPARATE, legacy import bridge (MarketingImport.js,
+`MKT_IMPORT_SHEETS`) DOES declare `country` as an optional `ACCOUNTS` field and `language`/
+`firstName`/`lastName` as optional `CONTACTS` fields, writing additively into the same
+MKT_ACCOUNTS/MKT_CONTACTS_SECURE tabs -- so a real value could exist there today only if that
+import path was actually used for these specific accounts, and even then possibly in a
+different format (e.g. 'Spanish' instead of 'ES') than the exact-match check expected. Fixed on
+two fronts: (a) `v6AuraCampanaANormalizeLanguageValue_` now recognizes full-word/locale-tag
+spellings ('Spanish'/'Español'/'es-MX' -> ES, etc.), not just the bare code; (b)
+per DGL's explicit instruction, the tab itself is now the PRIMARY country source for this
+campaign -- `v6AuraCampanaAParseSourceRows_` captures a country/market column under several
+real, plausible header names (País, Pais, Country, Mercado, Market, Region, Región) directly
+from the tab, persisted to a new diagnostic table, and `v6AuraCampanaAPreferredLanguage_` now
+takes an explicit `tabCountry` parameter checked ahead of the MKT_CONTACTS_SECURE/MKT_ACCOUNTS
+record. Every job now also records `languageSource`
+(`CONTACT_EXPLICIT_SIGNAL`/`CAMPANA_A_TAB_COUNTRY`/`CONTACT_OR_ACCOUNT_COUNTRY`/
+`EN_FALLBACK_...`) and `languageReason` (the real value that drove the decision) -- additive
+`MKT_EMAIL_QUEUE` columns -- so the next real run answers definitively, per contact, why each
+language was chosen instead of a guess.
+
+**2. The 117 STOPPED.** `v6AuraEmailAccountStopped_` only ever produced a boolean; nothing
+recorded WHICH real `MKT_ACCOUNT_PIPELINE.currentStage` caused it, when, or from which prior
+campaignId. No suppression/frequency/DNC/exclusion logic is even involved here -- those already
+run inside `v6ResolveRecipients_` before a contact ever becomes an eligible recipient, so every
+STOPPED job comes from exactly one place: an advanced pipeline stage
+(RESPONDED/RFQ RECEIVED/QUOTED/LOAD.../RETAINED.../COOLDOWN.../CLOSED-SUPPRESSED). Fixed by
+capturing the real stage plus `responseAt`/`enteredStageAt` and `campaignId` onto each STOPPED
+job (`stopReasonStage`, `stopReasonAt`, `stopReasonCampaignId` -- additive columns), and adding
+`v6AuraCampanaAStoppedBreakdown_()`, which reads these back and reports exact counts by stage
+and by prior campaignId -- a real, auditable answer to "how many were RESPONDED vs QUOTED, and
+from which earlier campaign" on the next run, with the stop rule itself completely untouched.
+
+**3. 170 recipients vs ~227 contacts.** `v6AuraGmailParseTable_` treats every recognized tab
+row as ONE ACCOUNT (accountName + amOwner only); it never reads a per-contact email/name
+column even if the real tab has one, and the account-level accountId it derives is a hash of
+the normalized account name -- meaning any account whose exact spelling differs even slightly
+between the tab and the NOVA-synced MKT_ACCOUNTS (e.g. "Progeral Corp" vs "Progeral") never
+matches at all, silently dropping every one of that account's contacts with no visible reason.
+Fixed with three real, verifiable pieces, all additive:
+`v6AuraCampanaAParseSourceRows_` now ALSO captures a contact-name and email column per row (same
+multi-candidate-header approach as country), persisted to the new
+`MKT_AURA_CAMPANA_A_SOURCE_ROWS` diagnostic table regardless of whether
+`v6AuraGmailParseTable_` would have accepted that row -- nothing from the real tab is ever
+discarded before it can be inspected; `v6AuraCampanaANormalizeAccountName_` performs
+deterministic (never fuzzy) normalization -- strips punctuation, whitespace, and a fixed,
+explicit list of common corporate suffixes (Corp, Inc, LLC, S.A., S.A.S, Ltda, Co) -- used only
+to recover a legitimate spelling difference for the SAME real company, never to match two
+different real companies; `v6AuraCampanaAMatchReport_()` compares the captured source rows
+against MKT_ACCOUNTS/MKT_CONTACTS_SECURE and reports exact counts (source accounts, matched,
+unmatched with a real reason each; source contacts with an email, matched, unmatched with a
+real reason each) plus `tabProvidesContactColumns` -- a concrete, evidence-based answer to
+whether Campana A can work directly from the tab's own contact data without depending on the
+NOVA hash-match, evaluated (not yet acted on) pending what the next real run's diagnostic
+output actually shows.
+
+None of `DRY_RUN`/the canonical reply-to identity/scope-to-Campana-A-only/all-eligible-contacts-
+per-account was changed. `RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN` was NOT executed in this pass per explicit
+instruction -- these are code-level fixes and new diagnostics only, verified by tests against
+mock data, not against the live report.
+
+Tests: `tests/v6-aura-campana-a.test.js` +6 cases: real headers and per-row country/contact/
+email are captured before any accept/reject decision; the tab's own country wins over the
+matched account's record, with a named reason; a full-word language value ('Spanish') is
+recognized; the STOPPED breakdown reports exact counts by real stage and by the prior
+campaignId; the match report recovers a legitimate "Corp" spelling difference deterministically
+while reporting a real unmatched account with a reason; the match report correctly evaluates
+whether the tab already provides usable contact/email columns.
+
+Full suite: 37 files, 37 pass, 0 fail.
+
+## Pass 13 — Root-cause fix: Campana A had no direct reference to its real source at all
+
+The first real execution returned `accounts: 0 / recipients: 0 / built: 0`. Root cause: this
+pipeline never read any spreadsheet directly for its source data -- it only ever read
+`MKT_AURA_GMAIL_OPPORTUNITIES`, itself populated exclusively by Gmail message parsing, and no
+matching message had ever been successfully ingested. `Marketing_DGL_14-09-2026` turned out to
+be its OWN standalone spreadsheet (confirmed via real Drive metadata: a file named exactly that,
+`mimeType: application/vnd.google-apps.spreadsheet`) -- NOT a tab inside `DGL_MARKETING_DATA_HUB`
+(a completely different file/id), and this pipeline had no code path that ever looked at it.
+
+Fixed with a direct, dynamic read rather than copying the 227 contacts into code: added
+`v6AuraCampanaAIngestFromSpreadsheet_()`, which opens the source spreadsheet by id
+(`SpreadsheetApp.openById`, real-time -- every call re-reads whatever the tab currently
+contains, never a cached snapshot) and reuses the EXACT SAME header-detection/column-parsing
+engine and idempotent upsert the Gmail-attachment path already uses
+(`v6AuraGmailParseTable_`/`v6AuraGmailUpsertOpportunity_`, both pure data-in/data-out with no
+Gmail dependency of their own) -- a row read this way is indistinguishable from one that arrived
+by email. The spreadsheet id is resolved from a Script Property
+(`CAMPANA_A_SOURCE_SPREADSHEET_ID`) first -- since the filename itself carries a date, a future
+reporting cycle's replacement file only requires updating this property, never a redeploy --
+falling back to the real, Drive-confirmed id for the current file, mirroring the exact
+property+fallback pattern `AURA_GMAIL_SOURCE_MAILBOX` already uses. `v6AuraCampanaARegenerateDryRun_`
+now calls this as the primary source and keeps the Gmail-message reprocess only as a
+non-fatal, best-effort second path.
+
+Fails closed at every real failure point instead of a silent zero: `SPREADSHEET_NOT_ACCESSIBLE`,
+`TAB_NOT_FOUND` (lists the tabs that DO exist, for diagnosis), `TAB_EMPTY_OR_UNRECOGNIZED_LAYOUT`,
+`TAB_FOUND_BUT_ZERO_ACCEPTED_ROWS`. Per the explicit requirement that zero recipients must never
+read as a clean audit: `v6AuraCampanaAAudit_` now computes `sourceAccountCount` from the real
+account registry and reports `sourceStatus: 'SOURCE_EMPTY_OR_NOT_FOUND'` with `clean` forced to
+`false` whenever it is zero -- an empty/unreachable source is itself the finding, never a quiet
+"nothing to report." `v6AuraCampanaARegenerateDryRun_`'s top-level `status` mirrors the same
+signal, and the wrapper's log line now also prints `status`/`sourceStatus`/`spreadsheetId`/
+`ingestStatus` alongside the fields already logged in Pass 12.
+
+Tests: `tests/v6-aura-campana-a.test.js` +6 cases: the spreadsheet id resolves from the Script
+Property or falls back to the real default; an inaccessible spreadsheet and a missing tab both
+fail closed with a specific status; reading a real, mock spreadsheet ingests real rows the rest
+of the pipeline picks up exactly like an emailed report would; a genuinely empty source reports
+`SOURCE_EMPTY_OR_NOT_FOUND` end to end with `clean:false`; and a full end-to-end regenerate
+against a real readable source produces real accounts/recipients/jobs with zero real sends.
+
+Full suite: 37 files, 37 pass, 0 fail.
+
+## Pass 12 — Explicit result logging on RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN
+
+A manual run from the Apps Script editor completed successfully but its Cloud Logging entry
+was not available afterward (retention/availability of a given execution's log is not
+guaranteed), leaving no way to read the real result once the run had already finished.
+`v6AuraCampanaARegenerateDryRun_` itself is unchanged -- no logic, no behavior, no return shape
+touched. The public wrapper now logs (`console.log(JSON.stringify(...))`) the full result object
+plus a flat summary carrying exactly the fields needed at a glance
+(`sendMode, recipients, built, blockedNoReplyTo, dispatchSuppressed, dispatchFailed,
+invalidEmailCount, duplicateJobKeys, byLanguage, realSendsDetected, findings`), wrapped in its
+own try/catch so a logging failure can never mask or replace the real returned result.
+
+Tests: `tests/v6-aura-campana-a.test.js` +1 case confirming the wrapper logs both the full
+result and the flat summary (every required field present) while still returning the exact same
+result the underlying function produces.
+
+Full suite: 37 files, 37 pass, 0 fail.
+
+## Pass 11 — "Campana A - HA prioritaria" dedicated Phase-1 pipeline
+
+First real activation scope: work with EXACTLY ONE tab (65 accounts / 227 contacts) from the
+House-Account priority Retention report (`Marketing_DGL_14-09-2026`), ignoring every other tab in
+that workbook (Campana B included), with real per-contact ES/EN/PT language selection and
+generic-name detection -- while changing nothing about the shared, multi-source Retention
+pipeline every other campaign already depends on. New dedicated file
+`MarketingV6AuraCampanaA.gs` rather than bolting single-purpose behavior onto shared code.
+
+- `MarketingV6AuraGmailIngest.gs`: added `'Campana A - HA prioritaria': 'Retention'` to the tab
+  -> family map (every other tab, Campana B included, stays unmapped, so
+  `v6AuraGmailParseTable_` returns `null` for it -- "ignore everything else" is enforced
+  structurally, not by a manual skip check). Added `sourceSheet` (additive) to
+  `MKT_AURA_GMAIL_OPPORTUNITIES` so a dedicated pipeline can select exactly its own tab's
+  accounts instead of the shared multi-tab 'Retention' bucket. Added
+  `v6AuraGmailReprocessRecent_(days)`: since this report may have already arrived and been
+  ingested BEFORE this tab was recognized (in which case it is already marked "seen" by
+  messageId and a normal tick would never look at it again), this reprocesses recent messages
+  ignoring that skip -- safe, since ingestion only ever upserts, never clears.
+- `MarketingV6AuraAutomation.gs`: `v6AuraAutoBuildScopesForFamily_` now excludes any account
+  registered in `v6AuraDedicatedAccountIds_()` (typeof-guarded) before grouping -- so these 65
+  accounts are never ALSO auto-grouped and auto-queued by the shared, multi-source mechanism,
+  and (with no dedicated pipeline deployed) behavior is byte-identical to before.
+- `MarketingV6AuraCampanaA.gs` (new): a self-contained pipeline reusing every existing governed
+  engine (`v6ResolveRecipients_` for suppression/frequency/DNC/exclusion-vetted eligibility --
+  naturally supports many eligible contacts per account, never collapsing to one;
+  `v6AuraPolicyApproved_`, `v6AuraEmailCanonicalReplyTo_`, `v6AuraEmailValid_`,
+  `v6AuraEmailAccountStopped_`, `v6AuraEmailJobId_`, `v6AuraGenerateCopy_`, `v6AuraEmailHtml_`).
+  Adds: a country -> language map matching DGL's exact specification (Brazil -> PT; the named
+  Spanish-speaking LATAM markets -> ES; USA/Canada -> EN; unmapped/missing -> EN, never a
+  guess), checked only after an existing reliable per-contact language signal (several plausible
+  real column names, since this schema does not declare a fixed one today); a generic-name
+  denylist (Pricing Team, Sales Team, Correo Corporativo, Imports, Operations, and similar
+  role/mailbox labels) that yields an empty `firstName` rather than ever fabricating "Team"; and
+  a no-name-aware subject merge that drops the leading "{{firstName}}, " clause and capitalizes
+  what follows -- reproducing DGL's own example exactly ("Team, seguimos cerca de la operación
+  de Progeral Corp" -> "Seguimos cerca de la operación de Progeral Corp"). `country`/
+  `preferredLanguage` added (additive) to `MKT_EMAIL_QUEUE`. `v6AuraCampanaADispatchAll_` loops
+  the shared 50-per-call dispatcher until the queue is drained (safe: still DRY_RUN, still zero
+  real sends). `v6AuraCampanaAAudit_` reuses `v6AuraEmailQueueAudit_` (now accepting an optional
+  filter predicate, default behavior unchanged) scoped to this one campaignId, plus language
+  distribution, a "Team" fallback count (must be zero), a canonical-reply-to mismatch count, and
+  `v6AuraCampanaAVerifyOtherTabsIgnored_` (checks specifically for the tab(s) DGL asked to
+  ignore from this workbook -- never flags a different, already-mapped, unrelated tab's own
+  legitimate historical data as a leak). `v6AuraCampanaARegenerateDryRun_` (+
+  `RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN()` editor wrapper) forces/confirms DRY_RUN first
+  (`auraDisableLiveSending`, never `auraEnableLiveSending`), reprocesses recent Gmail messages,
+  refreshes opportunities, rebuilds the queue, dispatches everything pending, and returns the
+  full audit.
+
+Tests: new `tests/v6-aura-campana-a.test.js` (12 cases): tab recognition (Campana A accepted,
+Campana B and any other tab return `null`); the dedicated-account registry; multiple contacts of
+one account never collapsed to one job; an explicit language signal beating country; the full
+Brazil/LATAM-Spanish/USA/unknown country->language chain; generic names never used (exact subject
+match to DGL's own example) alongside a real name personalizing normally; reply-to always
+canonical with status staying `DRY_RUN` end to end; suppression and stopOnResponse still holding
+through this pipeline; the full QA audit's accuracy (including correctly NOT flagging an
+unrelated legitimate tab, and correctly flagging Campana B if it were ever found processed);
+regenerate forcing DRY_RUN even if LIVE was left on; and the shared engine's dedicated-account
+exclusion filter.
+
+Full suite: 37 files, 37 pass, 0 fail.
+
+## Pass 10 — Canonical reply-to + functional CTA (real problems from the pre-LIVE audit)
+
+Running the Pass 9 audit against real `MKT_EMAIL_QUEUE` content surfaced exactly two real
+problems: `replyTo` empty on every job, and the HTML CTA button rendering `href="#"`. Root cause
+of the first: `MKT_CAMPAIGNS` has no `replyTo` field anywhere in the V6 schema and
+`v6AuraEnsureCampaign_` never set one, so `campaign.replyTo` was always `undefined` and
+`v6AuraBuildEmailQueueForCampaign_` fell through to `''`. Root cause of the second:
+`v6AuraEmailHtml_`'s CTA button (`MarketingV6AuraCopyEngine.gs`) hardcoded `href="#"` -- V6
+Retention campaigns never had a real landing/quote URL to link to (that field only exists on the
+legacy V5.5 `MKT_CAMPAIGNS` shape).
+
+Fixed both canonically, reusing an already-configured real identity rather than inventing one:
+added `v6AuraEmailCanonicalReplyTo_()` (`MarketingV6AuraEmailDispatcher.gs`), which reads the
+SAME Script Property key (`AURA_GMAIL_SOURCE_MAILBOX`) `MarketingV6AuraGmailIngest.gs` already
+uses for the real AM-report inbox, with the identical hardcoded fallback literal that file
+already has -- one real DGL mailbox, reused, never a second invented one. Returns `''`
+(never a guessed/malformed address) if the configured value fails email validation.
+`v6AuraBuildEmailQueueForCampaign_` now sets `replyTo` from this resolver, and -- per the explicit
+requirement that a job must never be sendable without a real reply-to -- builds the job as
+`SUPPRESSED` / `MISSING_REPLY_TO_CONFIGURATION` instead of `PENDING` whenever it resolves empty;
+`auraProcessEmailQueue` re-checks the same condition at dispatch time as defense in depth, so an
+older job built before this fix existed can never slip through either. The CTA button
+(`v6AuraEmailHtml_`) now renders a real `mailto:<replyTo>?subject=<the real personalized
+subject>` link instead of `href="#"` -- functional today (no landing page to build or invent),
+using the exact reply-to address the message's own Reply-To header carries.
+
+Because `v6AuraBuildEmailQueueForCampaign_` only ever creates a job once per key and never
+revisits it, the code fix alone does not correct rows already sitting in `MKT_EMAIL_QUEUE` from
+before this pass -- added `v6AuraRepairEmailQueueContent_()`, which re-derives `replyTo`/
+`subject`/`htmlBody`/`status` for every Retention job not already `SENT` using the exact same
+real account/contact/campaign data and the exact same decision logic the builder uses (never a
+second, divergent path), and never touches a job already `SENT` (send history stays immutable).
+`v6AuraRegenerateRetentionDryRun_()` (+ `RUN_AURA_REGENERATE_RETENTION_DRY_RUN()` editor wrapper)
+chains repair -> build -> dispatch -> `v6AuraEmailQueueAudit_` in one call, and never touches
+`AURA_SEND_MODE` -- it dispatches under whatever mode is already set, which stayed `DRY_RUN`
+throughout this pass.
+
+`v6AuraEmailQueueAudit_`'s CTA check split into two: `BROKEN_CTA_HREF` (an explicit `href="#"` or
+`href=""`) and a new `CTA_NOT_FUNCTIONAL` (no `href="mailto:...`" present at all) so a future
+regression can never hide behind "technically not `#`". Its `MISSING_REPLY_TO` check now also
+runs the reply-to through the same email-format validation, not just a truthiness check.
+
+The DGL AM-report inbox address's PII allowlist exception (`tests/v6-no-pii-in-repo.test.js`)
+widened from one approved file to two (`MarketingV6AuraGmailIngest.gs` and, now, `MarketingV6AuraEmailDispatcher.gs`)
+-- same real company mailbox, same non-customer-PII justification, still restricted to exactly
+those two files and asserted absent everywhere else.
+
+Tests: `tests/v6-aura-email-dispatcher.test.js` extended (+4 cases: a fresh build with no Script
+Property configured still resolves the canonical fallback and renders a real mailto CTA; an
+invalid configured reply-to blocks the job at both build time and dispatch time, even under
+LIVE; the repair function fixes an existing broken job in place while never touching a SENT job;
+the regenerate convenience function chains repair/build/dispatch/audit without ever calling
+`auraEnableLiveSending`). Pre-existing dispatcher test fixtures updated to include a `replyTo`
+where the test was validating something else, so each test still isolates the behavior it
+targets.
+
+Full suite: 36 files, 36 pass, 0 fail.
+
+## Pass 9 — Pre-LIVE content/safety audit for MKT_EMAIL_QUEUE
+
+Requested validation before ever allowing LIVE: real/personalized recipient content, correct
+company/contact/service match, no unmerged `{{token}}`, no broken `href="#"` CTA, a sender
+signature and reply-to present, suppression/frequency/approval/duplicate protection all holding,
+and -- the one non-negotiable check -- confirmation that DRY_RUN never produced a real send.
+
+Attempted independent, this-session verification against the live Data Hub
+(`1FXpoBO658ldbr4V8wCKo0luHU3_kqHwYzAnWijA6lBM`) first, exhausting every read path available:
+Sheets REST API (already known disabled, 403 SERVICE_DISABLED), Drive API's native-file export
+endpoint (`files/{id}/export`, blocked 403 `appNotAuthorizedToFile` -- Drive's `export` still
+requires per-file app authorization, not just the `drive.metadata.readonly` scope this OAuth
+client has), Drive content read (`alt=media`) on both an Apps-Script-created JSON status file
+and an Apps-Script-created CSV (both blocked 403 for the same reason -- content access is
+restricted to files created through an authorized interactive session of this exact app, not
+just any file this account owns), the Apps Script Execution API (`clasp run`, still returning
+the same previously-diagnosed `storage NOT_FOUND`/permission error), and the project's own public
+Web App endpoint (`doGet`/`doPost` in `DGL_Core.gs`, real and reachable over plain HTTPS, but
+correctly gated by `assertApiKey_` against a random UUID stored only in Script Properties --
+intentionally not bypassed; weakening that gate to solve an observability gap would be a real
+security regression, not a fix). Net result: this session has metadata-only Drive visibility
+(file names/timestamps/sizes -- confirmed real, e.g. the `aura-execution-*.csv` archive trail
+showing `v6AuraAutomationTick_` firing on a genuine ~60-minute cadence) and zero ability to read
+actual spreadsheet or file content. This is an intentional, correctly-configured security
+boundary, not a bug to route around.
+
+Given that, added `v6AuraEmailQueueAudit_()` (`MarketingV6AuraEmailDispatcher.gs`) -- a
+no-argument function callable directly from the Apps Script editor (or, API-key-authenticated,
+via the router as `v6AuraEmailQueueAudit`) that performs exactly the checklist above against the
+real `MKT_EMAIL_QUEUE`/`MKT_ACCOUNTS`/`MKT_CONTACTS_SECURE` data, in place, with zero external API
+dependency: per-job checks for invalid email, a mismatch against the real account/contact record
+(company, firstName, email), any generic fallback value reaching a real job
+(`your company`/`Team`/`freight`), any unmerged `{{token}}` in subject or HTML, a broken
+`href="#"` CTA, a missing sender signature or reply-to, a duplicate `(campaignId, accountId,
+contactId, sequenceStep)` key, and an approval gate that was bypassed or recorded but not
+enforced -- plus the one critical, top-level signal: `realSendsDetected` (any job already at
+status `SENT`) and its own `CRITICAL` warning string. Every email in the output is masked
+(`m***@domain.com`) -- this is a safety report, not a place to reproduce contact PII.
+
+Tests: `tests/v6-aura-email-dispatcher.test.js` extended (+2 cases: a genuinely well-formed job
+audits clean with zero findings; a deliberately broken/mismatched/duplicated/already-sent set of
+jobs is caught on every single category, including the real-SENT critical case).
+
+Full suite: 36 files, 36 pass, 0 fail.
+
+## Pass 8 — Real Gmail send provider for Retention (AURA Email Dispatcher)
+
+DGL's own real run (`RUN-4C091A1B`: 131 accountsEvaluated, 14 detected/eligible/campaignReady,
+117 suppressed, 54 reviewRequired) proved detection/scoping worked end to end, but
+`MKT_AURA_EXECUTION_REPORT` stalled every Retention campaign at `READY TO SEND · SEND PROVIDER
+REQUIRED` and `MKT_EMAIL_QUEUE` stayed header-only: the automatic campaign/execution engine
+(`v6AuraAutomationTick_`, `MarketingV6AuraAutomation.gs` -- live-authored, not yet in this repo
+before this pass, now added verbatim) already built scopes/campaigns/executions and generated
+real copy every hour, but nothing ever turned an already-vetted eligible audience
+(`v6ResolveRecipients_`'s own `MKT_AUDIENCES` output) into `MKT_EMAIL_QUEUE` jobs, and
+`v6QueueExecution_`'s gate hard-blocks on the global `MKT_V6_PROVIDER_READY` flag that also
+gates QNB/Reactivation/Cross-Sell and Campaign Studio.
+
+Added `MarketingV6AuraEmailDispatcher.gs` as an independent send path for Retention only
+(`AURA_EMAIL_QUEUE_FAMILIES_ = ['Retention']`) that never reads or writes
+`MKT_V6_PROVIDER_READY`, so QNB/Reactivation/Cross-Sell keep reporting
+`READY TO SEND · SEND PROVIDER REQUIRED` exactly as before (zero regression, proven by
+`v6AuraQueueCountsForCampaign_` falling through to the unchanged gate-based status whenever a
+campaign has no queue rows). It re-uses every existing gate verbatim instead of re-implementing
+any of them:
+- `v6AuraBuildEmailQueueForCampaign_` reads ONLY the already-`ELIGIBLE` rows
+  `v6ResolveRecipients_` persisted in `MKT_AUDIENCES` (DNC/invalid-email/active-exclusion/
+  frequency-blocked contacts never even reach this file), builds one deterministic,
+  idempotent job per `(campaignId, contactId, sequenceStep)`, and never rebuilds a job that
+  already exists -- a job's status, once the dispatcher moves it past `PENDING`, is never reset
+  by a later automatic tick.
+- Copy/brand template reuse: `v6AuraGenerateCopy_`/`v6AuraEmailHtml_`
+  (`MarketingV6AuraCopyEngine.gs`, also newly added to this repo) generate the real subject/
+  HTML; `v6AuraEmailHtml_`/`v6AuraSample_` gained an optional `vars`/`firstName` argument
+  (backward-compatible default = old hardcoded 'Team' sample) so the SAME approved template
+  now personalizes per real contact instead of only ever rendering the generic archive sample.
+- Approval: `v6AuraPolicyApproved_` (unchanged) -- a policy-review campaign queues
+  `REVIEW_REQUIRED`, never `PENDING`.
+- Account stop / `stopOnResponse`: `MKT_ACCOUNT_PIPELINE` + `v6PipelineAdvanced_`
+  (unchanged) -- a `RESPONDED`/`RFQ RECEIVED`/`QUOTED`/`LOAD / REACTIVATED`/`RETAINED /
+  EXPANDED`/`COOLDOWN / NURTURE`/`CLOSED / SUPPRESSED` account is marked `STOPPED`, never sent.
+- Post-send frequency ledger: `v6RecordMarketingTouch_` (unchanged).
+
+`AURA_SEND_MODE` (Script Property) defaults to `DRY_RUN` whenever unset. `auraProcessEmailQueue`
+re-validates every gate at send time (email format, active exclusion, approval, duplicate-sent,
+frequency) before either simulating (`DRY_RUN` -- every check runs, `GmailApp.sendEmail` is
+never called) or actually sending (`LIVE`, via `GmailApp.sendEmail` with
+`DGL_CONFIG.DEFAULT_SENDER_NAME` as the display name -- the same identity `DGL_Core.gs`'s own
+`processEmailQueue()` already uses, no invented alias). Only `auraEnableLiveSending()`/
+`auraDisableLiveSending()` change the mode; neither this file, `v6AuraAutomationTick_`, nor
+`auraInstallTriggers()` ever calls them. `auraInstallTriggers()` installs a dedicated, idempotent
+hourly trigger for the dispatcher, strictly separate from the canonical Acquisition/AURA hourly
+tick and the Retention 6-hour bootstrap trigger.
+
+`MKT_EMAIL_QUEUE` extended additively (existing 17 legacy columns untouched) with `requestId,
+amOwner, playbookId, sequenceStep, scheduledAt, approvalId, approvedAt, approvedBy,
+stopOnResponse` via the same generic `v6EnsureContactRecipientSchema_` engine every other table
+in this project already uses (`MKT_V6_CONTACT_RECIPIENT_SCHEMA`, `MarketingV6SchemaMigration.gs`)
+-- `MKT_TOUCHES` added to the same map purely for header validation before the dispatcher logs a
+real send touch into it, no column changed. `MKT_AURA_EXECUTION_REPORT` extended with `queued`/
+`failed` (additive); `v6AuraReportRow_` now reports real `sent`/`queued`/`failed` counts and a
+real `QUEUED` / `READY TO SEND · DRY RUN VALIDATED` / `SENDING` / `ACTIVE` status once a queue
+exists for a campaign, so `READY ≠ QUEUED ≠ SENT` is finally distinguishable. `v6AuraRetentionDashboard_`
+exposes one safe (no PII), read-only data contract (Run ID, Last Run, Detected/Eligible/Review
+Required/Campaign Ready/Handoffs from the real pilot run, Queued/Sent/Failed/Responses/RFQs/
+Quotes/Loads from the real execution reports, per-campaign table) for `dgl-marketing-execution-os`
+to consume later.
+
+Tests: new `tests/v6-aura-email-dispatcher.test.js` (11 cases: personalized job build, non-
+eligible rows never queued, idempotent build never resets a terminal job, policy-review queues
+`REVIEW_REQUIRED`, `DRY_RUN` validates everything but never calls `GmailApp.sendEmail`, `LIVE`
+sends + records the frequency-ledger touch + `MKT_TOUCHES` row + can be disabled again, an
+active exclusion suppresses at dispatch time, a `RESPONDED` account is `STOPPED` not sent, a
+frequency cap `SKIPS` the send, a duplicate-sent guard prevents a real double-send even under
+`LIVE`, `auraInstallTriggers` is idempotent). `tests/v6-aura-bootstrap.test.js` and
+`tests/v6-schema-migration.test.js` fixtures extended with the new `MKT_EMAIL_QUEUE`/
+`MKT_TOUCHES` tables (both must already exist in production, like every other real commercial
+table in the schema map -- neither is auto-created by the bootstrap).
+
+Full suite: 36 files, 36 pass, 0 fail.
+
+## Pass 7 — Self-observability (MKT_AURA_RUN_LOG), one-shot recovery trigger
+
+Correction from the user: an external session (this one) being unable to read Google Sheets
+content via a REST API (Sheets API disabled for the `clasp` OAuth client's project) is an
+observability gap in this session, NOT a production runtime failure -- Apps Script itself
+runs `SpreadsheetApp`/`DriveApp`/`PropertiesService`/`ScriptApp` natively, with no dependency
+on any external API being reachable. Nothing in the actual runtime was ever coupled to that;
+this pass adds a durable, native self-log so the outcome of every run is inspectable without
+needing external Sheets access at all, and a short-delay recovery mechanism so a
+blocked/failed run does not have to wait up to six hours for the next canonical firing.
+
+Added:
+- `MKT_AURA_RUN_LOG` schema (`MarketingV6SchemaMigration.gs`) + `v6AuraEnsureRunLogSheet_()`
+  -- the second table this pack auto-creates end to end (same justification as
+  `MKT_RETENTION_RUN_SUMMARY`: brand-new, AURA-owned, no historical data at risk).
+- New `MarketingV6AuraRunLog.gs`: `v6AuraLogStage_(runId,stage,status,extra)` -- upserts one
+  row per `(runId, stage)`, idempotent, always best-effort (a logging failure is swallowed
+  internally and never breaks the real business logic calling it). `v6AuraWriteLastRunStatusFile_`
+  -- a single, overwritten-in-place `_AURA_LAST_RUN_STATUS.json` in the same AM-reports Drive
+  folder (native `DriveApp`, not a third historical CSV -- one fixed name, always the latest
+  state, safe-aggregate fields only). `v6AuraScheduleOneShotBootstrapRecovery_`/
+  `v6AuraCleanupOneShotBootstrapRecovery_` -- a short-delay (default 5 min), idempotent,
+  self-cleaning one-time trigger, tracked by trigger unique ID in a Script Property, that
+  never duplicates and never touches the canonical six-hour trigger.
+- `MarketingV6AuraBootstrap.gs` rewritten around this: generates `runId` once at the very
+  top, wraps the entire body in try/catch (a real thrown exception is now caught, logged as
+  `RUN_FAILED` with the real `errorCode`/`errorMessage`, schedules a one-shot recovery, and
+  returns -- it no longer propagates an unhandled exception out of the function), logs
+  `BOOTSTRAP_STARTED`/`SOURCE_SELECTED`/`SCHEDULER_CONFIRMED` inline, schedules one-shot
+  recovery on `STALE_SOURCE`, and cleans up any pending one-shot trigger on
+  `BOOTSTRAP_COMPLETE`.
+- `v6AuraRetentionDryRun_`/`v6AuraRunRetentionCycle_` (`MarketingV6RetentionReport.gs`) now
+  accept an optional `runId` so the bootstrap's id is threaded through every stage instead of
+  each function minting its own (fully backward compatible: a standalone caller with no
+  `runId` still gets one generated exactly as before). Logs
+  `SOURCE_SELECTED`/`FRESHNESS_PASSED`/`RETENTION_STARTED`/`RETENTION_COMPLETED`/
+  `CSV_CREATED`/`HANDOFF_CSV_CREATED`/`RUN_SUMMARY_WRITTEN`/`RUN_COMPLETED` at each real stage
+  (`typeof`-guarded, so these two functions remain fully usable standalone/in tests without
+  `MarketingV6AuraRunLog.gs` loaded).
+
+Tests: new `tests/v6-aura-run-log.test.js` (5 cases: log-stage idempotency, logging failure
+never throws, status file created-then-updated-in-place never duplicated, one-shot trigger
+scheduled/never-duplicated/cleaned-up, cleanup never touches the canonical trigger).
+`tests/v6-aura-bootstrap.test.js` extended (+2 cases: a real thrown exception is caught,
+logged with the real error, and schedules recovery; a STALE run schedules a one-shot
+recovery trigger alongside the always-installed canonical one, never duplicated on a second
+STALE run, and a subsequent successful run cleans the one-shot trigger up).
+`tests/v6-schema-migration.test.js` updated to seed the new `MKT_AURA_RUN_LOG` tab.
+
+Full suite: 35 files, 35 pass, 0 fail.
+
+## Pass 6 — Source arbitration (NOVA -> AM Intelligence Gmail fallback), extended response events
+
+Root cause of the real production incident this pass fixes: the canonical NOVA report
+source (`v6AuraCheckReportFreshness_`) was genuinely stale (confirmed live: 16+ days), but
+a separate, already-deployed AM Intelligence pipeline (`MarketingV6AuraGmailIngest.gs`,
+brought into this repo for the first time this pass -- it previously existed live-only)
+had already validated a current AM report (`GMAIL_AM_REPORT`, 948 rows accepted, 0
+rejected, received 2026-09-10) into `MKT_AURA_GMAIL_OPPORTUNITIES`. Nothing arbitrated
+between the two sources, and `v6BuildGmailOpportunities_` (already written, live-only,
+never wired in) was never actually called by `v6RefreshOpportunitiesFromReports_` despite
+its own header comment claiming it was -- so a valid, current AM signal sat unused while
+the cycle correctly (but unnecessarily) refused to run.
+
+Fixed:
+- `MarketingV6DataFreshness.gs`: new `v6AuraResolveFreshnessSource_()` -- NOVA canonical
+  first; falls back to the Gmail AM Intelligence source only when it is present
+  (`typeof`-guarded), `status:'OK'`, `freshness:'CURRENT'` (the ingestion engine's own
+  <=8-day threshold, reused verbatim, not redefined) and `rowsAccepted>0`. No numeric cap
+  on `rowsRejected` -- no such policy is documented anywhere, and none is invented.
+  Returns `STALE_SOURCE` (renamed from the old bare `'STALE'`) only when neither source
+  qualifies. All three freshness call sites (`MarketingV6AuraBridge.gs`,
+  `MarketingV6RetentionReport.gs`, `MarketingV6AuraBootstrap.gs`) updated to this
+  function and the new status literal.
+- `MarketingV6ReportIngestion.gs`: `v6RefreshOpportunitiesFromReports_` now folds in
+  `v6BuildGmailOpportunities_(nowIso)` (typeof-guarded) alongside the existing five
+  `v6Build*Opportunities_` sources. Gmail rows use the same `accountId` hash scheme as
+  every other source, so the existing `v6ApplyPrioritySuppression_` reconciles a
+  Gmail-sourced and a NOVA-sourced signal for the same account with zero new mechanism
+  (verified: a QNB/NOVA row still outranks a Gmail/Retention row for the same account).
+- `MarketingV6ResponseEvents.gs`: extended vocabulary -- `HARD_BOUNCE` aliases onto the
+  existing `BOUNCE` handling; `SPAM_COMPLAINT` registers its own exclusion reason (new
+  `v6RegisterSpamComplaintExclusion_`, distinct `SPAM:` key so existing `UNSUB:` exclusion
+  rows are untouched); `SENT`/`DELIVERED`/`OPEN`/`SOFT_BOUNCE` are recognized, documented
+  no-ops (`MKT_V6_RESPONSE_EVENT_NO_OP_`) -- `SOFT_BOUNCE` specifically must NOT invalidate
+  the contact the way `HARD_BOUNCE` does, since the address may still be reachable.
+- `MarketingV6AuraGmailIngest.gs` brought into this repo for the first time (previously
+  live-only): read fully before doing so, confirmed no customer/contact PII -- only
+  the DGL AM-report inbox address (a company mailbox, not an individual
+  contact's PII), which `tests/v6-no-pii-in-repo.test.js` now allowlists strictly for that
+  one file only.
+
+Tests: new `tests/v6-source-arbitration.test.js` (9 cases: NOVA-fresh short-circuit,
+NOVA-stale+Gmail-current fallback, rowsRejected not gating, NOVA-stale+Gmail-AGING fail
+closed, NOVA-stale+zero-accepted-rows fail closed, no-report-received fail closed,
+Gmail-not-deployed fail closed with no crash, opportunity fold-in, cross-source priority
+suppression). `tests/v6-response-events.test.js` extended (+3 cases: extended no-op set,
+HARD_BOUNCE, SPAM_COMPLAINT). `tests/v6-aura-bridge.test.js` and
+`tests/v6-aura-bootstrap.test.js` updated for the `STALE_SOURCE` rename.
+`tests/v6-no-pii-in-repo.test.js` updated for the DGL AM-report-inbox operational allowlist
+entry, restricted to `MarketingV6AuraGmailIngest.gs` only.
+
+Full suite: 34 files, 34 pass, 0 fail.
+
+Deployed live (same fixes pushed to `C:\Users\DGL\Desktop\AURA_DEPLOY` and the real Apps
+Script project) -- see final status report in the conversation for verified evidence
+(Drive/Data Hub modification timestamps) of what actually ran.
+
+## Pass 5 — Single-shot bootstrap, no-hardcoded-Drive-folder, Handoffs CSV
+
+Goal: remove every remaining manual one-time setup step (tab creation, Drive folder creation, folder-ID paste) and replace it with one idempotent function, `v6AuraBootstrapAndRun_()`, so the only human action left is: copy files, save, run it once, accept the Google permissions prompt. Also adds a second, AM-actionable CSV (Handoffs) alongside the existing full AM CSV, reusing the same join instead of rebuilding it. Real `clasp`/deployment access remains unavailable from this environment (confirmed by the user beforehand, not re-verified here) — no `clasp login`/`clasp push`/deployment action of any kind was attempted in this pass.
+
+### Task 1 — `v6AuraBootstrapAndRun_()` (new file, new function)
+
+New `backend/apps-script-v6/MarketingV6AuraBootstrap.gs`. Runs, in order, idempotently: (1) verify `MKT_V6_DATA_HUB_ID`/`MKT_V6_REPORT_SOURCE_ID` are readable via `SpreadsheetApp.openById`, fail closed to `{status:'BLOCKED_DATA_HUB_ACCESS', error}` immediately if not, before touching anything else; (2) `v6AuraEnsureRunSummarySheet_()` (Task 2); (3-4) `v6AuditContactRecipientSchema_()`/`v6EnsureContactRecipientSchema_()` (unchanged); (5) record `MKT_ACCOUNTS`/`MKT_CONTACTS_SECURE` row counts as informational, never fatal (confirmed by direct read that these tables already have real data in this deployment, per the user's instruction — not assumed empty); (6) `v6AuraAuditCanonicalIds_()`; (7) `v6AuraCheckReportFreshness_()`; (8) trivial confirmation that `v6BuildRetentionOpportunities_` (the `AM CONTEXT REQUIRED` gate's home function) is present, without touching or re-verifying the gate's internal logic; (9) `v6AuraResolveReportsFolder_()` (Task 2); (10) `v6InstallOpportunityRefreshTrigger_()` (already dedupes by handler name, untouched); (11) conditional contact ingestion (Task 4); (12) `STALE` -> stop, return `BOOTSTRAP_BLOCKED_STALE_DATA` with everything accumulated, `retentionCycle:null`; (13) `FRESH` -> `v6AuraRunRetentionCycle_()`; (14) one consolidated result object. Registered as `v6AuraBootstrapAndRun` in the router.
+
+### Task 2 — No hardcoded Drive folder ID; one auto-creatable sheet
+
+`backend/apps-script-v6/MarketingV6RetentionReport.gs`: removed the placeholder constant `MKT_V6_AM_REPORTS_FOLDER_ID='REPLACE_WITH_REAL_AM_REPORTS_DRIVE_FOLDER_ID'`. New `v6AuraResolveReportsFolder_()`: reuses the folder ID already stored in `PropertiesService.getScriptProperties()` under `AURA_AM_REPORT_FOLDER_ID` if `DriveApp.getFolderById` still opens it; otherwise looks up by the fixed name `DGL_AURA_AM_REPORTS` and re-saves its ID; otherwise creates it once and saves the new ID. The folder ID is never hardcoded in source and never written to a file this repo tracks — only to Script Properties (private per Apps Script project). `v6AuraGenerateAmCsvReport_`/`v6AuraGenerateHandoffsCsvReport_` both call it instead of the removed constant.
+
+`backend/apps-script-v6/MarketingV6SchemaMigration.gs`: new `v6AuraEnsureRunSummarySheet_()` — creates the `MKT_RETENTION_RUN_SUMMARY` tab (with the schema's exact header row) if `v6Sheet_('MKT_RETENTION_RUN_SUMMARY')` is null, using `SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).insertSheet(...)` (same data hub ID `v6Sheet_` already uses, not a second lookup mechanism); leaves it untouched if it already exists (no data loss, no header rewrite — the pre-existing additive `v6EnsureContactRecipientSchema_()` still handles appending any further missing columns to it afterward, unchanged). This is deliberately the **only** table in `MKT_V6_CONTACT_RECIPIENT_SCHEMA` that auto-creates its own tab; every other table must keep failing loudly (`SCHEMA MIGRATION REQUIRED: <name> NOT FOUND`) if its tab is missing — not generalized to any other table, per the explicit instruction.
+
+`docs/AURA_DEPLOYMENT.md` rewritten: the old manual steps ("create a new, empty tab named exactly...", "create one new, private Drive folder... paste its real folder ID into `MKT_V6_AM_REPORTS_FOLDER_ID`...") are gone, replaced by the single "copy files -> run `v6AuraBootstrapAndRun_()` once -> accept permissions" flow.
+
+### Task 3 — AM CONTEXT REQUIRED / priority / suppression / scope / recipients / governance — confirmed intact, not touched
+
+`v6RetentionAmActivityReason_`, `v6ApplyPrioritySuppression_`, `v6AuraAutoBuildRetentionScopes_`, `v6ResolveRecipients_`, `v6FrequencyStatus_` were not edited in this pass. `tests/v6-retention-am-activity.test.js` (7/7) and `tests/v6-aura-bridge.test.js` (all cases) re-run unmodified and still pass.
+
+### Task 4 — Conditional contact ingestion, no invented source
+
+Confirmed by grep before writing this pass: `v6FetchAuthoritativeContactsFromSource_` does not exist anywhere in `backend/apps-script-v6/`. The bootstrap checks `typeof v6FetchAuthoritativeContactsFromSource_ === 'function'`; if absent (today, always), records `contactIngestion:'SOURCE_NOT_CONFIGURED'` and proceeds — no Salesforce/NOVA contact-pull integration was fabricated. If such a hook is ever added elsewhere under this exact name, the bootstrap calls it and feeds its result straight into the existing, unchanged `v6IngestAuthoritativeContacts_`.
+
+### Task 5 — Handoffs CSV (new, additive to the existing AM CSV)
+
+`v6AuraGenerateAmCsvReport_` refactored (same public signature, same return contract, plus one new additive field) into a pure row-builder, `v6AuraBuildAmCsvRows_(runId, asOfDate)`, and a thin Drive-writing wrapper — so both the full AM CSV and the new `v6AuraGenerateHandoffsCsvReport_(runId, asOfDate, csvRows)` reuse the exact same join/rows without reading `MKT_OPPORTUNITIES`/`MKT_ACCOUNT_PIPELINE`/`MKT_SCOPE_ACCOUNTS` twice per cycle. Handoffs CSV filters to `auraDecision` in `['RESPONDED','HANDED_TO_AM','RFQ','QUOTED','RETAINED']`, exactly 13 columns (`runId, accountId, accountName, amOwner, campaignId, responseType, responseDate, handoffStatus, nextAction, rfqStatus, quoteStatus, loadStatus, attributedRevenue`), `responseType` = the row's `auraDecision`, `responseDate` = the most recent of `responseAt/rfqAt/quoteAt/loadAt` (new `v6AuraMostRecentDate_` helper), filename `AURA_RETENTION_HANDOFFS_<asOfDate>_<runId>.csv`, same resolved folder. `v6AuraRunRetentionCycle_` now generates both CSVs every cycle and records both `csvDriveFileId` and `handoffsCsvDriveFileId` on the persisted run summary (`handoffsCsvDriveFileId` added to the `MKT_RETENTION_RUN_SUMMARY` schema, additive).
+
+### Task 6 — Scheduler — confirmed, not reconstructed
+
+`v6ScheduledOpportunityRefresh_` (`MarketingV6ReportIngestion.gs`) still calls `v6AuraRunRetentionCycle_()` directly, unchanged from Pass 4 — **not** `v6AuraBootstrapAndRun_()`. The bootstrap's folder/sheet/trigger-creation is explicitly a one-time install concern; the recurring six-hour cycle stays the existing lightweight cycle. Documented explicitly in `docs/AURA_DEPLOYMENT.md` section 3 and `docs/RETENTION_V1_ARCHITECTURE.md` section 15.
+
+### Task 7 — Response events / attribution — confirmed, not touched
+
+`MarketingV6ResponseEvents.gs`/`MarketingV6CommercialOutcomes.gs` untouched. `tests/v6-response-events.test.js` and `tests/v6-commercial-outcomes.test.js` re-run unmodified, still pass.
+
+### Task 8 — Production/email — confirmed
+
+`MKT_V6_PROVIDER_READY` remains `false`, untouched by every file in this pass. No new code path simulates or performs a real send.
+
+### Task 9 — Tests
+
+New `tests/v6-aura-bootstrap.test.js` (10 cases: Data Hub inaccessible -> `BLOCKED_DATA_HUB_ACCESS` immediately with nothing else attempted; running bootstrap twice never duplicates the Drive folder; stored-but-deleted folder id falls back to name lookup then create, updating the property either way; `MKT_RETENTION_RUN_SUMMARY` auto-creates with exact schema headers when missing; already-existing `MKT_RETENTION_RUN_SUMMARY` data is left untouched; `STALE` -> `BOOTSTRAP_BLOCKED_STALE_DATA`, no cycle/CSV; `FRESH` -> full cycle runs, `retentionCycle` populated with both CSV ids; `contactIngestion` reports `SOURCE_NOT_CONFIGURED`; trigger install/reinstall is idempotent across two bootstrap runs; router exposes `v6AuraBootstrapAndRun`). Exercises the real (not re-mocked) `v6Sheet_`/`v6Rows_`/`v6UpsertByKey_`/`v6WriteOpportunities_` engines against a generic in-memory sheet mock, rather than re-stubbing their contracts.
+
+`tests/v6-retention-report.test.js` extended: folder-resolution-aware `fakeDriveApp`/`fakePropertiesService`, a new Handoffs CSV test (exact 13 columns, correct inclusion/exclusion set across all 10 `auraDecision` values, most-recent `responseDate`, no PII), and updated assertions on `v6AuraGenerateAmCsvReport_`'s additive `csvRows` field and `v6AuraRunRetentionCycle_`'s new `handoffsCsvDriveFileId` / two-CSV-files-per-cycle contract.
+
+New `tests/v6-no-pii-in-repo.test.js` — scans (via `fs`, not `git`) every `.gs`/`.md`/`.json` file directly inside `backend/apps-script-v6/`, `docs/`, and the repo root for email-address patterns; fails on anything outside a minimal allowlist (the single pre-existing synthetic QA fixture `qa-synthetic@dglus.com`, already covered by `tests/acquisition-wordpress-automation.test.js`'s own no-PII check) and separately asserts the user's own commit-authorship email address never appears in tracked file content (it only lives in git commit authorship metadata, which this scan does not read).
+
+Full suite: `node --test tests/*.test.js` -> **33 files, 33 pass, 0 fail** (31 pre-existing + 2 new this pass: `v6-aura-bootstrap.test.js`, `v6-no-pii-in-repo.test.js`).
+
+### Files changed / added this pass
+
+- Added: `backend/apps-script-v6/MarketingV6AuraBootstrap.gs`
+- Modified: `backend/apps-script-v6/MarketingV6RetentionReport.gs` (folder resolution, `v6AuraBuildAmCsvRows_` extraction, `v6AuraGenerateHandoffsCsvReport_`, `v6AuraMostRecentDate_`, `v6AuraRunRetentionCycle_` produces both CSVs), `backend/apps-script-v6/MarketingV6SchemaMigration.gs` (`v6AuraEnsureRunSummarySheet_`, `handoffsCsvDriveFileId` schema field), `backend/apps-script-v6/MarketingV6RouterExtension.gs` (`v6AuraBootstrapAndRun` route)
+- Added tests: `tests/v6-aura-bootstrap.test.js`, `tests/v6-no-pii-in-repo.test.js`
+- Modified tests: `tests/v6-retention-report.test.js`
+- Docs updated: `docs/AURA_DEPLOYMENT.md`, `docs/RETENTION_V1_ARCHITECTURE.md` (new sections 14-15), `docs/RETENTION_V1_RUNBOOK.md`, this file, `tests.json`
+
+### What this pass deliberately does NOT do
+
+- Does not attempt any `clasp`/deployment action (`clasp login`, `clasp push`, or any real Apps Script deployment) — confirmed by the user beforehand to be broken/unreachable from this environment; not re-verified, not retried.
+- Does not touch `v6RetentionAmActivityReason_`, `v6ApplyPrioritySuppression_`, `v6AuraAutoBuildRetentionScopes_`, `v6ResolveRecipients_`, `v6FrequencyStatus_`, `MarketingV6ResponseEvents.gs`, `MarketingV6CommercialOutcomes.gs`, or `MKT_V6_PROVIDER_READY`.
+- Does not invent a Salesforce/NOVA contact-pull integration (`v6FetchAuthoritativeContactsFromSource_` stays undefined, conditionally called only if it is ever added elsewhere).
+- Does not change what the six-hour recurring trigger calls (`v6ScheduledOpportunityRefresh_` still calls `v6AuraRunRetentionCycle_()`, not the bootstrap).
+
+### Final status after this pass
+
+Every remaining one-time manual setup step (tab creation, Drive folder creation, pasting a real folder ID into source) is now automated by `v6AuraBootstrapAndRun_()`. The only manual action left for a first real deployment is: copy the 19 files, save, run `v6AuraBootstrapAndRun_()` once, accept the Google permissions prompt. Real deployment/`clasp` access remains the only blocker, and remains outside this codebase's or this environment's control.
+
+## Pass 4 — Canonical ID Bridge fix, data-freshness gate, first Retention pilot + AM CSV report
+
+Goal: fix a confirmed real bug in Salesforce ID population, add a fail-closed data-freshness gate, and produce the first real AM-facing Retention pilot (dry-run metrics + CSV report + persisted run summary), wired into the existing 6-hour scheduler.
+
+### Task 1 — Canonical ID Bridge (diagnosis CONFIRMED, not refuted)
+
+Direct inspection of `MarketingV6ContactIngestion.gs` (before any change on this pass) confirmed the user's diagnosis exactly: `v6IngestAuthoritativeContacts_` only populated `salesforceAccountId`/`salesforceContactId` when `sourceSystem` was the exact literal `'SALESFORCE'`. Real authoritative extracts arrive with `externalSystem='SALESFORCE_EXPORT'`, which failed that exact-match gate, while `externalAccountId`/`externalContactId` (no such gate) were always populated. Fixed with `v6ContactIsSalesforceSource_(source)` — `/SALESFORCE/.test(String(source||'').toUpperCase())` — a substring test, not a second hardcoded literal. Added an additive `canonicalSalesforceIdStatus` field (`'RESOLVED'`/`'UNRESOLVED'`) to every `MKT_ACCOUNTS`/`MKT_CONTACTS_SECURE` record. Schema updated (`MKT_V6_CONTACT_RECIPIENT_SCHEMA`). New read-only audit `v6AuraAuditCanonicalIds_()` (`MarketingV6CanonicalIdentity.gs`, new file), registered as `v6AuraAuditCanonicalIds`.
+
+**Verified, not assumed:** `v6UpsertByKey_` and `v6WriteOpportunities_` behave identically on a field with no matching sheet header — both silently drop it. The real risk from adding a schema field is `v6IngestAuthoritativeContacts_`'s own pre-flight `v6RequireContactRecipientHeaders_` guard, which throws `SCHEMA MIGRATION REQUIRED` until `v6EnsureContactRecipientSchema_()` is re-run against the real sheets — documented as a required one-time deployment step.
+
+Tests: `tests/v6-canonical-identity.test.js` (new, 6 cases) — reproduces the exact bug (`SALESFORCE_EXPORT` + populated `externalAccountId` -> `RESOLVED`), the missing-id case (`UNRESOLVED`), the same two cases for contacts, a non-Salesforce-source regression (must stay `UNRESOLVED`, not a false-positive match), and the audit function's safe aggregates (including the `MISSING` vs `UNRESOLVED` distinction).
+
+### Task 2 — Data freshness (no invented threshold)
+
+Confirmed (not assumed): no automated cadence anywhere in this codebase/docs refreshes `MKT_V6_REPORT_SOURCE_ID` itself from Salesforce/NOVA; the only existing cadence is the six-hour opportunity-refresh trigger, which only rebuilds `MKT_OPPORTUNITIES` from whatever snapshot already exists. New `MarketingV6DataFreshness.gs`: `v6AuraCheckReportFreshness_()` uses `DriveApp.getFileById(MKT_V6_REPORT_SOURCE_ID).getLastUpdated()` (same `DriveApp` API already used in `MarketingV6DriveArchive.gs`) and reuses the exact same six-hour constant as the existing trigger (not a new number) as the staleness threshold. Wired into `v6AuraEvaluateRetention_` (`MarketingV6AuraBridge.gs`): `STALE` now returns `{status:'BLOCKED_STALE_DATA', freshness}` immediately, before any refresh or scope-build write. Documented the remaining external gap (an automated Salesforce/NOVA -> report-source refresh) without naming a specific unverified mechanism as if it already existed.
+
+Tests: `tests/v6-data-freshness.test.js` (new, 4 cases: FRESH, STALE, near-boundary FRESH, uses the real source ID). `tests/v6-aura-bridge.test.js` extended with test 7/7b (STALE blocks evaluate before any write; FRESH proceeds normally) and updated `makeContext` to load the freshness source and a fake `DriveApp`.
+
+### Task 3 — AM CONTEXT REQUIRED gate — confirmed intact
+
+`tests/v6-retention-am-activity.test.js` re-run unmodified after all Pass 4 changes: all 7 cases still pass. `v6RetentionAmActivityReason_` was not touched.
+
+### Task 4 — Full cycle — confirmed and documented
+
+`docs/RETENTION_V1_ARCHITECTURE.md` now has an explicit "Full automatic cycle (confirmed end to end)" section tracing every stage of the canonical pipeline to a concrete, already-documented function, including the new freshness gate as the first step.
+
+### Task 5 — Scheduler uniqueness/idempotency — confirmed by new test
+
+`tests/v6-aura-bridge.test.js` test 8: running `v6AuraEvaluateRetention_()` twice with the same synthetic input does not grow `MKT_OPPORTUNITIES` (full rewrite each time), `MKT_CAMPAIGN_SCOPES`, or `MKT_SCOPE_ACCOUNTS` (both upserted by key). No second trigger was added anywhere in this pass.
+
+### Task 6 — Response events: receiver vs. real source — documented, no code change needed
+
+`docs/AURA_DEPLOYMENT.md` section 4 now states plainly: the receiver (`v6ClassifyResponseEvent_`) is ready and tested; no real emitter is wired anywhere; response automation must never be called "LIVE". Added an explicit example JSON payload contract for a future real emitter.
+
+### Task 7 — First Retention pilot dry run (new)
+
+New `backend/apps-script-v6/MarketingV6RetentionReport.gs`: `v6AuraRetentionDryRun_()` — freshness-gated (reuses `v6AuraCheckReportFreshness_`), then reuses `v6AuraEvaluateRetention_()` for detect/suppress/scope-build, then classifies every Retention opportunity row into the exact categories specified (accountsEvaluated, detected, suppressedByAmActivity, suppressedByMissingAmContext, suppressedByDataQuality, reviewRequired, frequencyBlocked via the already-existing `v6FrequencyStatus_`, eligible, campaignScopesGenerated, recipientResolutionSuccess/Blocked with an explicit unattempted-resolution reason). Registered as `v6AuraRetentionDryRun`.
+
+### Task 8 — AM CSV report + persisted run summary (new)
+
+Same file. `v6AuraDecisionFor_` (pure, 10-branch precedence mapper — pipeline stage always outranks opportunity-level suppression once a real commercial response exists), `v6AuraGenerateAmCsvReport_` (30-column CSV per the exact spec, joined strictly by `accountId` against `MKT_ACCOUNT_PIPELINE`/`MKT_SCOPE_ACCOUNTS`, reuses `v6Csv_`/`v6CsvEscape_` from `MarketingV6DriveArchive.gs`, writes to a new placeholder-ID Drive folder `MKT_V6_AM_REPORTS_FOLDER_ID`, no PII, unique filename every run by construction), `v6AuraWriteRunSummary_`/`v6AuraRetentionRunSummary_` (new `MKT_RETENTION_RUN_SUMMARY` table, schema added to the existing additive-schema engine, upserted by `runId`), and `v6AuraRunRetentionCycle_` (single orchestrator: dry run -> CSV -> summary, or `BLOCKED_STALE_DATA` with no CSV/summary side effects). `v6ScheduledOpportunityRefresh_` now calls `v6AuraRunRetentionCycle_` instead of `v6AuraEvaluateRetention_` directly, so the existing 6-hour trigger now produces the AM CSV and run summary automatically. Also added an additive `tierDestino` field to `v6BuildRetentionOpportunities_` (`MarketingV6ReportIngestion.gs`), sourced directly from `MIGRACION_CAIDAS['Tier destino']`.
+
+Tests: `tests/v6-retention-report.test.js` (new, 7 test blocks: STALE dry run, full category classification with synthetic data, all 10 `v6AuraDecisionFor_` branches plus 2 precedence checks, AM CSV report content/columns/no-PII, run summary write+read-back, STALE cycle produces nothing, FRESH cycle produces exactly one CSV file + one summary row).
+
+### Files changed / added this pass
+
+- Modified: `backend/apps-script-v6/MarketingV6ContactIngestion.gs`, `backend/apps-script-v6/MarketingV6SchemaMigration.gs`, `backend/apps-script-v6/MarketingV6AuraBridge.gs`, `backend/apps-script-v6/MarketingV6ReportIngestion.gs`, `backend/apps-script-v6/MarketingV6RouterExtension.gs`
+- Added: `backend/apps-script-v6/MarketingV6CanonicalIdentity.gs`, `backend/apps-script-v6/MarketingV6DataFreshness.gs`, `backend/apps-script-v6/MarketingV6RetentionReport.gs`
+- Added tests: `tests/v6-canonical-identity.test.js`, `tests/v6-data-freshness.test.js`, `tests/v6-retention-report.test.js`
+- Modified tests: `tests/v6-aura-bridge.test.js` (freshness gate + idempotency tests), `tests/v6-schema-migration.test.js` (mock sheet map extended with the new `MKT_RETENTION_RUN_SUMMARY` table)
+- Docs updated: `docs/RETENTION_V1_ARCHITECTURE.md`, `docs/RETENTION_V1_DATA_CONTRACT.md`, `docs/RETENTION_V1_RUNBOOK.md`, `docs/AURA_DEPLOYMENT.md`, this file, `tests.json`
+
+### What this pass deliberately does NOT do
+
+- Does not auto-refresh `MKT_V6_REPORT_SOURCE_ID` itself — that remains a named, undecided DGL integration choice (scheduled Salesforce Data Export, Flow, or ETL connector), documented, not invented.
+- Does not wire a real response-event emitter (unchanged gap from Pass 3).
+- Does not automatically re-point `MKT_RETENTION_RUN_SUMMARY.csvDriveFileId` to a newer CSV on a second manual invocation of `v6AuraGenerateAmCsvReport_` for an already-summarized `runId` — the underlying "never overwrite, always create a new file" behavior is already correct and tested; only the automatic *decision* of when to regenerate is left pending, documented in `docs/RETENTION_V1_ARCHITECTURE.md` section 13.
+- Does not touch `v6ApplyPrioritySuppression_`, `v6RetentionAmActivityReason_`, QNB/Reactivation/Cross-Sell/Nurture build functions, or the execution engine.
+
+### Final status after this pass
+
+All eight numbered tasks are code-complete except the two explicitly-named external integration gaps in Task 6 (real response-event source) and the upstream report-source auto-refresh named in Task 2/4 — both documented, neither invented. Full test suite: see `tests.json` for the exact, current pass/fail breakdown (unchanged 7 pre-existing failures, all new files passing).
 
 ## Pass 3 — AURA Retention Bridge (unblock real campaign execution)
 

@@ -17,7 +17,11 @@
 // safe no-op (fail closed), never "trust anyone who emails info@dglus.com."
 
 var MKT_V6_AURA_GMAIL_SCHEMA = {
-  MKT_AURA_GMAIL_OPPORTUNITIES: ['opportunityId', 'accountId', 'accountName', 'amOwner', 'opportunityType', 'service', 'signalDate', 'qnbWindow', 'lane', 'sourceReport', 'sourceRecordId', 'priorityRank', 'eligibilityStatus', 'suppressionReason', 'campaignId', 'detectedAt', 'updatedAt', 'sourceType', 'sourceMessageId', 'sourceFile', 'sourceRow', 'sourceReceivedAt'],
+  // sourceSheet added (additive, appended at the end): the exact tab name a row came from,
+  // e.g. 'Campana A - HA prioritaria'. Needed so a dedicated per-tab pipeline
+  // (MarketingV6AuraCampanaA.gs) can select exactly its own accounts instead of the whole
+  // 'Retention' family bucket every recognized tab already shares.
+  MKT_AURA_GMAIL_OPPORTUNITIES: ['opportunityId', 'accountId', 'accountName', 'amOwner', 'opportunityType', 'service', 'signalDate', 'qnbWindow', 'lane', 'sourceReport', 'sourceRecordId', 'priorityRank', 'eligibilityStatus', 'suppressionReason', 'campaignId', 'detectedAt', 'updatedAt', 'sourceType', 'sourceMessageId', 'sourceFile', 'sourceRow', 'sourceReceivedAt', 'sourceSheet'],
   MKT_AURA_INGEST_LOG: ['ingestId', 'gmailMessageId', 'gmailThreadId', 'senderHash', 'subject', 'receivedAt', 'attachmentCount', 'sourceFiles', 'rowsParsed', 'rowsAccepted', 'rowsRejected', 'opportunitiesCreated', 'opportunitiesUpdated', 'status', 'errorCode', 'processedAt'],
   MKT_AURA_INGEST_REJECTIONS: ['rejectionId', 'gmailMessageId', 'sourceFile', 'sheetName', 'row', 'reason', 'processedAt']
 };
@@ -28,13 +32,22 @@ var MKT_V6_AURA_GMAIL_SCHEMA = {
 // not a campaign signal, so it is counted and logged but never turned into
 // an opportunity row -- inventing a campaign from a data-quality list would
 // violate the "never invent structured rows" rule.
+//
+// 'Campana A - HA prioritaria' (Marketing_DGL_14-09-2026, confirmed 2026-09-14): the first
+// House-Account priority Retention initiative processed through a dedicated pipeline
+// (MarketingV6AuraCampanaA.gs) rather than the shared multi-source Retention bucket. Every
+// OTHER tab in that same workbook (Campana B included) is deliberately left unmapped here, so
+// v6AuraGmailParseTable_ returns null for it and it is never turned into an opportunity --
+// exactly the "ignore every other tab" requirement, enforced structurally, not by a manual
+// skip check.
 var MKT_V6_AURA_GMAIL_SHEET_FAMILY = {
   'Retencion prioritaria': 'Retention',
   'Fidelizacion general': 'Retention',
   'Nurture-Reactivacion': 'Reactivation',
   'Recuperacion FTL': 'Reactivation',
   'Promocion dirigida': 'Cross-Sell',
-  'Expansion de servicio': 'Cross-Sell'
+  'Expansion de servicio': 'Cross-Sell',
+  'Campana A - HA prioritaria': 'Retention'
 };
 var MKT_V6_AURA_GMAIL_DATA_QUALITY_SHEETS = ['Confirmar datos contacto'];
 
@@ -107,7 +120,7 @@ function v6AuraGmailParseTable_(sheetName, values, ctx) {
     var owner = v6AuraGmailText_(r['Account Owner']) || v6AuraGmailText_(r['Agente responsable (Sales Rep Actual)']);
     if (!owner) { rejected.push({ row: headerRowIdx + 2 + i, reason: 'MISSING AM OWNER' }); return; }
     accepted.push({
-      accountName: accountName, amOwner: owner, family: family,
+      accountName: accountName, amOwner: owner, family: family, sheetName: sheetName,
       reasonCategory: v6AuraGmailText_(r['Motivo campana']), priority: v6AuraGmailText_(r['Prioridad']),
       sourceRow: headerRowIdx + 2 + i
     });
@@ -122,9 +135,13 @@ function v6AuraGmailParseTable_(sheetName, values, ctx) {
 function v6AuraGmailOpportunityId_(family, accountName) {
   return 'OPP-GMAIL-' + String(family || 'GEN').replace(/[^A-Z0-9]/gi, '').toUpperCase() + '-' + v6HashKey_(v6NormAccount_(accountName));
 }
-function v6AuraGmailUpsertOpportunity_(candidate, ctx) {
+// Pure row-shape builder, no I/O -- extracted so a caller processing many candidates at once
+// (e.g. MarketingV6AuraCampanaA.gs's direct-spreadsheet ingest) can compute every row in memory
+// and write them all in ONE batch call (v6BatchUpsertByKey_) instead of one upsert per candidate.
+// v6AuraGmailUpsertOpportunity_ itself is unchanged behavior -- it just calls this now.
+function v6AuraGmailBuildOpportunityRow_(candidate, ctx) {
   var nowIso = v6AuraGmailNow_();
-  var row = {
+  return {
     opportunityId: v6AuraGmailOpportunityId_(candidate.family, candidate.accountName),
     accountId: 'ACC-' + v6HashKey_(v6NormAccount_(candidate.accountName)),
     accountName: candidate.accountName, amOwner: candidate.amOwner, opportunityType: candidate.family,
@@ -133,8 +150,11 @@ function v6AuraGmailUpsertOpportunity_(candidate, ctx) {
     priorityRank: candidate.family === 'Retention' ? 2 : candidate.family === 'Reactivation' ? 3 : 4,
     eligibilityStatus: 'DETECTED', suppressionReason: '', campaignId: '', detectedAt: nowIso, updatedAt: nowIso,
     sourceType: 'GMAIL_AM_REPORT', sourceMessageId: ctx.messageId, sourceFile: ctx.sourceFile,
-    sourceRow: candidate.sourceRow, sourceReceivedAt: ctx.receivedAt
+    sourceRow: candidate.sourceRow, sourceReceivedAt: ctx.receivedAt, sourceSheet: candidate.sheetName || ''
   };
+}
+function v6AuraGmailUpsertOpportunity_(candidate, ctx) {
+  var row = v6AuraGmailBuildOpportunityRow_(candidate, ctx);
   var existing = v6AuraGmailRows_('MKT_AURA_GMAIL_OPPORTUNITIES').filter(function (r) { return v6AuraGmailText_(r.opportunityId) === row.opportunityId; })[0];
   v6UpsertByKey_('MKT_AURA_GMAIL_OPPORTUNITIES', ['opportunityId'], row);
   return existing ? 'updated' : 'created';
@@ -192,25 +212,43 @@ function v6AuraGmailProcessMessage_(msg, thread) {
     }
     ctx.sourceFile = sourceFile;
     if (tables) {
-      var created = 0, updated = 0, rowsParsed = 0, rowsAccepted = 0, rowsRejected = 0;
+      // Performance fix (2026-09-16 production incident, MarketingV6AuraCampanaA.gs): every
+      // accepted row across every table in this message was previously upserted individually
+      // (v6AuraGmailUpsertOpportunity_ -- two full-table reads + one write PER ROW, against
+      // MKT_AURA_GMAIL_OPPORTUNITIES, a table shared and grown by every ingest source). A single
+      // report email can carry hundreds of rows across the whole account base (not just one
+      // dedicated campaign's tab), so this loop is now: compute every accepted row's shape in
+      // memory (v6AuraGmailBuildOpportunityRow_, pure, no I/O) across ALL tables in the message,
+      // then write them ALL in one v6BatchUpsertByKey_ call -- same "last row wins" semantic,
+      // same created/updated counting, but O(1) Sheets round trips per message instead of O(n).
+      // MKT_AURA_INGEST_REJECTIONS is batched the same way.
+      var rowsParsed = 0, rowsAccepted = 0, rowsRejected = 0;
+      var existingOppIds = {};
+      v6AuraGmailRows_('MKT_AURA_GMAIL_OPPORTUNITIES').forEach(function (r) { existingOppIds[v6AuraGmailText_(r.opportunityId)] = true; });
+      var opportunityRows = [], rejectionRows = [];
       tables.forEach(function (table) {
         var parsed = v6AuraGmailParseTable_(table.name, table.values, ctx);
         if (!parsed || parsed.dataQuality || parsed.unrecognizedLayout) return;
         rowsParsed += parsed.rowCount;
         rowsAccepted += parsed.accepted.length;
         rowsRejected += parsed.rejected.length;
-        parsed.accepted.forEach(function (candidate) {
-          var result = v6AuraGmailUpsertOpportunity_(candidate, ctx);
-          if (result === 'created') created++; else updated++;
-        });
+        parsed.accepted.forEach(function (candidate) { opportunityRows.push(v6AuraGmailBuildOpportunityRow_(candidate, ctx)); });
         parsed.rejected.forEach(function (rej) {
-          v6UpsertByKey_('MKT_AURA_INGEST_REJECTIONS', ['rejectionId'], {
+          rejectionRows.push({
             rejectionId: 'REJ-' + v6HashKey_(messageId + '|' + table.name + '|' + rej.row),
             gmailMessageId: messageId, sourceFile: sourceFile, sheetName: table.name, row: rej.row,
             reason: rej.reason, processedAt: v6AuraGmailNow_()
           });
         });
       });
+      var created = 0, updated = 0, uniqueOppIdsInBatch = {};
+      opportunityRows.forEach(function (row) {
+        var isNewOverall = !existingOppIds[row.opportunityId] && !uniqueOppIdsInBatch[row.opportunityId];
+        uniqueOppIdsInBatch[row.opportunityId] = true;
+        if (isNewOverall) created++; else updated++;
+      });
+      if (opportunityRows.length) v6BatchUpsertByKey_('MKT_AURA_GMAIL_OPPORTUNITIES', ['opportunityId'], opportunityRows);
+      if (rejectionRows.length) v6BatchUpsertByKey_('MKT_AURA_INGEST_REJECTIONS', ['rejectionId'], rejectionRows);
       logRow.rowsParsed = rowsParsed; logRow.rowsAccepted = rowsAccepted; logRow.rowsRejected = rowsRejected;
       logRow.opportunitiesCreated = created; logRow.opportunitiesUpdated = updated;
       if (logRow.status === 'PROCESSING') logRow.status = rowsAccepted > 0 ? 'OK' : 'PARTIAL';
@@ -262,6 +300,36 @@ function v6AuraGmailIngestTick_() {
   if (!initializedAt) props.setProperty('AURA_GMAIL_INITIALIZED_AT', v6AuraGmailNow_());
   return {
     status: 'OK', mailbox: mailbox, messagesFound: messagesFound, messagesProcessed: processed.length,
+    ok: processed.filter(function (r) { return r.status === 'OK'; }).length,
+    partial: processed.filter(function (r) { return r.status === 'PARTIAL'; }).length,
+    failed: processed.filter(function (r) { return r.status === 'FAILED' || r.status === 'UNSUPPORTED_SOURCE_FORMAT'; }).length
+  };
+}
+
+// Manual reprocessing, ignoring the "already seen by messageId" skip that
+// v6AuraGmailIngestTick_ applies. Needed the one time a tab-name family mapping is added
+// (like 'Campana A - HA prioritaria' above) AFTER a matching report already arrived and was
+// ingested under the OLD mapping (that tab would have been silently unrecognized then, and the
+// message would already be logged, so a normal tick would never look at it again). Safe to
+// call any number of times: v6AuraGmailProcessMessage_ only ever upserts by messageId/
+// opportunityId, it never clears or duplicates prior data.
+function v6AuraGmailReprocessRecent_(days) {
+  var allowed = v6AuraGmailAllowedSenders_();
+  if (!allowed.length) return { status: 'NO_ALLOWED_SENDERS', messagesFound: 0, messagesProcessed: 0 };
+  var mailbox = v6AuraGmailSourceMailbox_();
+  var senderClause = '(' + allowed.map(function (a) { return 'from:' + a; }).join(' OR ') + ')';
+  var query = 'to:' + mailbox + ' ' + senderClause + ' newer_than:' + Math.max(1, Number(days) || 45) + 'd';
+  var threads = GmailApp.search(query, 0, 50);
+  var processed = [], messagesFound = 0;
+  threads.forEach(function (t) {
+    t.getMessages().forEach(function (m) {
+      if (!v6AuraGmailSenderAllowed_(m.getFrom(), allowed)) return;
+      messagesFound++;
+      processed.push(v6AuraGmailProcessMessage_(m, t));
+    });
+  });
+  return {
+    status: 'REPROCESS_COMPLETE', mailbox: mailbox, messagesFound: messagesFound, messagesProcessed: processed.length,
     ok: processed.filter(function (r) { return r.status === 'OK'; }).length,
     partial: processed.filter(function (r) { return r.status === 'PARTIAL'; }).length,
     failed: processed.filter(function (r) { return r.status === 'FAILED' || r.status === 'UNSUPPORTED_SOURCE_FORMAT'; }).length

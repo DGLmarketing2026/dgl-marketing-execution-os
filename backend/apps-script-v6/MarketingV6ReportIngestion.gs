@@ -103,7 +103,8 @@ function v6BuildRetentionOpportunities_(nowIso,ficha,cuentas){
       sourceReport:'MIGRACION_CAIDAS',sourceRecordId:v6Text_(r['Tier origen'])+'>'+v6Text_(r['Tier destino']),priorityRank:2,
       eligibilityStatus:reason?'SUPPRESSED':'DETECTED',suppressionReason:reason,campaignId:'',detectedAt:nowIso,updatedAt:nowIso,
       amActivityBucket:match?v6Text_(match.Bucket):'',amActivityTipoGestion:match?v6Text_(match['Tipo gestion']):'',
-      amActivityUltimoChatter:match?v6IsoDate_(match['Ultimo Chatter']):'',amActivityAutorChatter:match?v6Text_(match['Autor Chatter']):''
+      amActivityUltimoChatter:match?v6IsoDate_(match['Ultimo Chatter']):'',amActivityAutorChatter:match?v6Text_(match['Autor Chatter']):'',
+      tierDestino:v6Text_(r['Tier destino'])
     };
   });
 }
@@ -202,10 +203,17 @@ function v6RefreshOpportunitiesFromReports_(){
   rows=rows.concat(v6BuildReactivationOpportunities_(nowIso,ficha));
   rows=rows.concat(v6BuildCrossSellOpportunities_(nowIso));
   rows=rows.concat(v6BuildNurtureOpportunities_(nowIso,ficha));
-  // Gmail-sourced AM signals (MarketingV6AuraGmailIngest.gs) join the SAME
-  // pipeline as the NOVA/AM-Intelligence report source above, so a Gmail and
-  // a NOVA signal for the same account are reconciled by the one existing
-  // v6ApplyPrioritySuppression_ rule instead of two competing sources.
+  // Fold in the AM Intelligence Gmail source (MarketingV6AuraGmailIngest.gs), when deployed:
+  // v6BuildGmailOpportunities_ already exists there and already emits rows in this exact
+  // MKT_OPPORTUNITIES shape (same pattern as every v6Build*Opportunities_ above) -- it was
+  // simply never wired into this refresh, which is the root cause of a real production
+  // incident (a validated, current AM report sat in MKT_AURA_GMAIL_OPPORTUNITIES and was
+  // never folded into detection/suppression/scope-build). typeof-guarded because this file
+  // must not assume the Gmail ingestion file is present in every deployment; when it is
+  // absent, this is a no-op and behavior is unchanged. Gmail rows use the same
+  // accountId/accountName hash scheme as every other source, so v6ApplyPrioritySuppression_
+  // below reconciles a Gmail-sourced and a NOVA-sourced signal for the same account exactly
+  // like it already reconciles any other two families -- no new suppression mechanism.
   if(typeof v6BuildGmailOpportunities_==='function')rows=rows.concat(v6BuildGmailOpportunities_(nowIso));
   rows=v6ApplyPrioritySuppression_(rows);
   v6WriteOpportunities_(rows);
@@ -217,12 +225,26 @@ function v6InstallOpportunityRefreshTrigger_(){
   ScriptApp.newTrigger('v6ScheduledOpportunityRefresh_').timeBased().everyHours(6).create();
   return {ok:true,handler:'v6ScheduledOpportunityRefresh_',frequency:'EVERY_6_HOURS'};
 }
-// Delegates to v6AuraEvaluateRetention_ (MarketingV6AuraBridge.gs) instead of calling
-// v6RefreshOpportunitiesFromReports_ directly: v6AuraEvaluateRetention_ runs the exact
-// same unified refresh (QNB/Retention/Reactivation/Cross-Sell/Nurture detection is
-// unchanged) and then automatically builds/reuses campaign scope for DETECTED Retention
-// accounts only -- so the single already-installed 6-hour trigger now performs
-// detect -> suppress -> build scope for Retention with no manual account list, without
-// adding a second competing trigger. Requires MarketingV6AuraBridge.gs to be present in
-// the same Apps Script project (see docs/AURA_DEPLOYMENT.md).
-function v6ScheduledOpportunityRefresh_(){return v6AuraEvaluateRetention_();}
+// Delegates to v6AuraRunRetentionCycle_ (MarketingV6RetentionReport.gs) instead of calling
+// v6RefreshOpportunitiesFromReports_ directly. v6AuraRunRetentionCycle_ internally calls
+// v6AuraEvaluateRetention_ (which itself runs the exact same unified refresh --
+// QNB/Retention/Reactivation/Cross-Sell/Nurture detection is unchanged -- gated by
+// v6AuraCheckReportFreshness_, then automatically builds/reuses campaign scope for
+// DETECTED Retention accounts only) and, on a FRESH source, additionally generates the
+// AM-facing CSV report and persists a run summary row. So the single already-installed
+// 6-hour trigger now performs detect -> suppress -> build scope -> AM CSV -> run summary
+// for Retention with no manual account list and no manual export, without adding a second
+// competing trigger. Requires MarketingV6AuraBridge.gs, MarketingV6DataFreshness.gs and
+// MarketingV6RetentionReport.gs to be present in the same Apps Script project (see
+// docs/AURA_DEPLOYMENT.md).
+//
+// Root-cause fix (production incident): v6AuraRunRetentionCycle_ assumes
+// MKT_RETENTION_RUN_SUMMARY, the AM-reports Drive folder and full schema already exist --
+// true only after v6AuraBootstrapAndRun_ (MarketingV6AuraBootstrap.gs) has run at least
+// once. No human step is guaranteed to run the bootstrap manually before this trigger next
+// fires, so this now calls the bootstrap instead: it is idempotent (safe every 6 hours
+// forever -- sheet/folder/trigger reuse, never duplicated), self-heals anything missing,
+// and still ends by running the exact same v6AuraRunRetentionCycle_ once the freshness gate
+// allows it. This makes the scheduled trigger self-sufficient with zero manual bootstrap
+// step ever required.
+function v6ScheduledOpportunityRefresh_(){return v6AuraBootstrapAndRun_();}

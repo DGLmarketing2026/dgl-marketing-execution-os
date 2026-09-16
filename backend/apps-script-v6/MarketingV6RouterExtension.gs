@@ -66,6 +66,16 @@ function routeMarketingV6_(action, payload) {
       return typeof v6AuraCreateAccountStop_ === 'function' ? v6AuraCreateAccountStop_(p) : v6RouteMissing_(a, 'v6AuraCreateAccountStop_');
     case 'v6AuraCreateAmHandoff':
       return typeof v6AuraCreateAmHandoff_ === 'function' ? v6AuraCreateAmHandoff_(p) : v6RouteMissing_(a, 'v6AuraCreateAmHandoff_');
+    case 'v6AuraAuditCanonicalIds':
+      return typeof v6AuraAuditCanonicalIds_ === 'function' ? v6AuraAuditCanonicalIds_(p) : v6RouteMissing_(a, 'v6AuraAuditCanonicalIds_');
+    case 'v6AuraRetentionDryRun':
+      return typeof v6AuraRetentionDryRun_ === 'function' ? v6AuraRetentionDryRun_(p) : v6RouteMissing_(a, 'v6AuraRetentionDryRun_');
+    case 'v6AuraRunRetentionCycle':
+      return typeof v6AuraRunRetentionCycle_ === 'function' ? v6AuraRunRetentionCycle_(p) : v6RouteMissing_(a, 'v6AuraRunRetentionCycle_');
+    case 'v6AuraRetentionRunSummary':
+      return typeof v6AuraRetentionRunSummary_ === 'function' ? v6AuraRetentionRunSummary_(p) : v6RouteMissing_(a, 'v6AuraRetentionRunSummary_');
+    case 'v6AuraBootstrapAndRun':
+      return typeof v6AuraBootstrapAndRun_ === 'function' ? v6AuraBootstrapAndRun_(p) : v6RouteMissing_(a, 'v6AuraBootstrapAndRun_');
     case 'v6DeploymentAudit':
       return typeof v6DeploymentAudit_ === 'function' ? v6DeploymentAudit_(p) : { status: 'NOT AVAILABLE' };
     case 'v6AcqSetup':
@@ -110,6 +120,31 @@ function routeMarketingV6_(action, payload) {
       return typeof v6AuraIngestHistory_ === 'function' ? v6AuraIngestHistory_(p) : v6RouteMissing_(a, 'v6AuraIngestHistory_');
     case 'v6AuraSourceBreakdown':
       return typeof v6AuraGmailSourceBreakdown_ === 'function' ? v6AuraGmailSourceBreakdown_(p) : v6RouteMissing_(a, 'v6AuraGmailSourceBreakdown_');
+    // --- AURA Email Dispatcher (MarketingV6AuraEmailDispatcher.gs) ---------------------------
+    case 'v6AuraBuildRetentionEmailQueue':
+      return typeof v6AuraBuildRetentionEmailQueue_ === 'function' ? v6AuraBuildRetentionEmailQueue_(p) : v6RouteMissing_(a, 'v6AuraBuildRetentionEmailQueue_');
+    case 'auraProcessEmailQueue':
+      return typeof auraProcessEmailQueue === 'function' ? auraProcessEmailQueue((p || {}).limit) : v6RouteMissing_(a, 'auraProcessEmailQueue');
+    case 'v6AuraSendMode':
+      return typeof v6AuraSendMode_ === 'function' ? { sendMode: v6AuraSendMode_() } : v6RouteMissing_(a, 'v6AuraSendMode_');
+    case 'v6AuraRetentionDashboard':
+      return typeof v6AuraRetentionDashboard_ === 'function' ? v6AuraRetentionDashboard_(p) : v6RouteMissing_(a, 'v6AuraRetentionDashboard_');
+    case 'v6AuraEmailQueueAudit':
+      return typeof v6AuraEmailQueueAudit_ === 'function' ? v6AuraEmailQueueAudit_(p) : v6RouteMissing_(a, 'v6AuraEmailQueueAudit_');
+    case 'v6AuraRepairEmailQueueContent':
+      return typeof v6AuraRepairEmailQueueContent_ === 'function' ? v6AuraRepairEmailQueueContent_(p) : v6RouteMissing_(a, 'v6AuraRepairEmailQueueContent_');
+    case 'v6AuraRegenerateRetentionDryRun':
+      return typeof v6AuraRegenerateRetentionDryRun_ === 'function' ? v6AuraRegenerateRetentionDryRun_(p) : v6RouteMissing_(a, 'v6AuraRegenerateRetentionDryRun_');
+    case 'v6AuraCampanaARegenerateDryRun':
+      return typeof v6AuraCampanaARegenerateDryRun_ === 'function' ? v6AuraCampanaARegenerateDryRun_(p) : v6RouteMissing_(a, 'v6AuraCampanaARegenerateDryRun_');
+    case 'v6AuraCampanaAAudit':
+      return typeof v6AuraCampanaAAudit_ === 'function' ? v6AuraCampanaAAudit_(p) : v6RouteMissing_(a, 'v6AuraCampanaAAudit_');
+    case 'v6AuraCampanaAIngestFromSpreadsheet':
+      return typeof v6AuraCampanaAIngestFromSpreadsheet_ === 'function' ? v6AuraCampanaAIngestFromSpreadsheet_(p) : v6RouteMissing_(a, 'v6AuraCampanaAIngestFromSpreadsheet_');
+    case 'v6AuraCampanaAMatchReport':
+      return typeof v6AuraCampanaAMatchReport_ === 'function' ? v6AuraCampanaAMatchReport_(p) : v6RouteMissing_(a, 'v6AuraCampanaAMatchReport_');
+    case 'v6AuraCampanaAStoppedBreakdown':
+      return typeof v6AuraCampanaAStoppedBreakdown_ === 'function' ? v6AuraCampanaAStoppedBreakdown_(p) : v6RouteMissing_(a, 'v6AuraCampanaAStoppedBreakdown_');
     default:
       return null;
   }
