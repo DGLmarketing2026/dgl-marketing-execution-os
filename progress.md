@@ -1,6 +1,86 @@
 # Retention V1 — Progress
 
-Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
+Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`, and, as of Pass 19, merged
+into `main` -- see below).
+
+## Pass 19 — Merge to `main` (DGL's explicit authorization) + durable per-run audit trail
+
+**Merge to `main`, explicitly authorized by DGL** ("AUTORIZO explícitamente el merge a main del
+Marketing Execution OS"). Before merging, discovered `main` had 11 commits this branch never
+saw -- an earlier, independent AURA lineage (`retention/v1-am-activity-join`, merged into `main`
+twice previously) had built its own Gmail ingestion, automation tick, copy engine, and a real
+frontend connection-authority/localStorage-token-persistence improvement this branch never had.
+A blind merge would have produced 7 real conflicts, 3 of them "add/add" (both sides created the
+same file independently). Investigated each conflict by diff before resolving:
+- `MarketingV6AuraAutomation.gs`, `MarketingV6AuraCopyEngine.gs`, `MarketingV6AuraGmailIngest.gs`,
+  `MarketingV6ReportIngestion.gs`, `MarketingV6RouterExtension.gs`: confirmed this branch's
+  version is a strict superset of `main`'s (every line `main` had is present, unchanged in
+  meaning, plus 18 passes of further work) -- took this branch's version.
+- `assets/js/marketing-backend-adapter-v55.js`: kept `main`'s connection-authority/token-
+  persistence layer (this branch never touched it) and unioned in this branch's 5 AURA dashboard
+  adapter methods alongside `main`'s own `v6AuraGmailFreshness`/`Panel`/`IngestHistory`/
+  `SourceBreakdown` methods -- neither side's methods were dropped.
+- `index.html`: kept `main`'s version-bumped script tags, added this branch's
+  `aura-dashboard-v1.css`/`.js` includes.
+- Two of `main`'s own pre-existing tests (`aura-gmail-ingest.test.js`, `aura-execution-report.test.js`)
+  needed small updates for this branch's additive changes they predated (a `v6BatchUpsertByKey_`
+  stub; `queued`/`failed` added to a safe-fields allowlist) -- caught these by running `main`'s
+  own full suite post-merge, not just this branch's.
+- Verified the live deploy byte-for-byte against the pushed commit (`curl` + `diff`) rather than
+  assuming a successful `git push` meant the public site was correct.
+
+**Durable per-run audit trail — DGL asked to never depend on the Apps Script execution log to
+operate AURA.** Real incident: a completed, non-erroring run's execution log ended up showing
+only its final `matchReport` section in the editor's log panel, not the earlier full-result
+JSON, and DGL correctly refused to re-run the campaign just to recover a log. New
+`MKT_AURA_CAMPANA_A_RUN_SUMMARY` table (self-contained auto-create via `v6AcqEnsureSheet_`,
+deliberately kept OUT of the shared `MKT_V6_CONTACT_RECIPIENT_SCHEMA` map so it never breaks the
+AURA bootstrap flow or this file's own build queue on a fresh deployment) now receives ONE row
+per run -- every field DGL asked to see in a preflight/result summary (`sourceAccounts`,
+`sourceContacts`, `recipients`, the `recipientSource` breakdown including `CONTACT_SOURCE_ONLY`,
+ES/EN/PT, built/skipped/excluded counts and reasons, preflight result, dispatch counts, STOPPED
+breakdown, `invalidEmailCount`, `duplicateJobKeys`, `nonCanonicalReplyToCount`,
+`teamFirstNameCount`, `realSendsDetected`, `clean`, and an explicit note that the match report is
+diagnostic-only) -- written the moment `v6AuraCampanaARegenerateDryRun_` finishes, BEFORE the
+final log line, so a persistence failure is itself logged rather than silently masking the real
+result. New `v6AuraCampanaALatestRunSummary_` reads the most recent row without the log or
+another run; wired through the router, the V55 backend allowlist, the frontend adapter, and a new
+"Última corrida" card on the AURA Overview dashboard.
+
+**Deployed and verified, not just committed:** `clasp push` to the live Apps Script project plus
+a fresh `clasp deploy -i <pinned deployment id>` (the dashboard's web app was pinned to an older
+version -- pushing HEAD alone would not have updated what the dashboard actually calls), verified
+by `clasp pull` into a scratch folder and byte-for-byte diff. The dashboard-facing changes were
+then merged to `main` a second time (one further conflict: a duplicate `v6AuraExecutionReport`
+entry from the first merge, resolved by keeping `main`'s copy and adding only the genuinely new
+method) and verified live via `curl` against the GitHub Pages URL.
+
+### Files changed
+
+- Modified: `backend/apps-script-v6/MarketingV6AuraCampanaA.gs` (new
+  `v6AuraCampanaABuildRunSummaryRecord_`/`v6AuraCampanaAPersistRunSummary_`/
+  `v6AuraCampanaALatestRunSummary_`/`v6AuraCampanaAEnsureRunSummarySheet_`;
+  `v6AuraCampanaARegenerateDryRun_` now persists before its final log line),
+  `backend/apps-script-v6/MarketingV6RouterExtension.gs`,
+  `backend/apps-script-legacy-v55/MarketingV55Backend.gs`,
+  `assets/js/marketing-backend-adapter-v55.js`, `assets/js/aura-dashboard-v1.js` (new
+  "Última corrida" card).
+- Modified tests: `tests/v6-aura-campana-a.test.js` (new test proving the row persists with the
+  exact right fields, is never overwritten by a later run, and is correctly readable via the
+  latest-run reader; added `Utilities.getUuid`/`v6AuraCampanaAEnsureRunSummarySheet_` stubs).
+- Full suite: 45/45 passing on `main` after both merges.
+
+### What this pass deliberately does NOT do
+
+- Does not recover or reconstruct the 11:32 a.m. 2026-09-16 run's actual numbers -- that run
+  happened before this persistence existed, and no tool available in this session can read
+  Sheets content directly (Sheets REST API disabled for this project, Apps Script Execution API
+  categorically blocked, Drive API metadata-only). DGL was told to check `MKT_EMAIL_QUEUE`'s
+  `recipientSource` column directly, or to decide independently whether to run Campana A again
+  now that it would be durably audited.
+- Does not touch Landing Pages (blocked on DGL configuring `ACQ_WP_BASE_URL`/`ACQ_WP_USERNAME`/
+  `ACQ_WP_APP_PASSWORD`) or attempt LIVE sending (`auraEnableLiveSending()` remains a manual,
+  separate, human action).
 
 ## Pass 18 — The real recipient-matching gap: the Campana A tab becomes the primary source
 
