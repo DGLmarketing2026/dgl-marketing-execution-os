@@ -14,6 +14,17 @@ function v6RecipientCampaignContext_(campaignId){
 }
 function v6RecipientSafeStatus_(status,eligible,excluded,reason,frequency,exclusions){return {audienceResolved:status==='RECIPIENTS RESOLVED',audienceStatus:status,eligibleContactCount:Number(eligible||0),excludedContactCount:Number(excluded||0),reasonCode:v6RecipientUpper_(reason||status).replace(/[^A-Z0-9_ -]/g,'').substring(0,80),frequencyStatus:frequency||'PENDING BACKEND EVALUATION',exclusionStatus:exclusions||'PENDING BACKEND EVALUATION',exclusionsCleared:exclusions==='CLEAR'};}
 function v6RecipientPersistStatus_(campaignId,scopeId,status){var now=new Date().toISOString(),record={audienceRecipientId:'STATUS:'+campaignId,recordType:'AUDIENCE_STATUS',campaignId:campaignId,scopeId:scopeId,audienceResolved:status.audienceResolved,audienceStatus:status.audienceStatus,eligibleContactCount:status.eligibleContactCount,excludedContactCount:status.excludedContactCount,reasonCode:status.reasonCode,frequencyStatus:status.frequencyStatus,exclusionStatus:status.exclusionStatus,exclusionsCleared:status.exclusionsCleared,resolvedAt:now,updatedAt:now};v6UpsertByKey_('MKT_AUDIENCES',['audienceRecipientId'],record);return status;}
+// ONE full-table read + in-memory merge + ONE full-table write for every RECIPIENT row this
+// resolution pass produces, instead of one v6UpsertByKey_ (its own full read+scan+write) PER
+// contact -- only used when the caller opts in via payload.batchWrite (see v6ResolveRecipients_
+// below). Falls back to v6BatchUpsertByKey_ when available (MarketingV6FrequencyControl.gs,
+// always true in the real Apps Script project); a caller/test that never sets batchWrite:true
+// never reaches this function at all, so its absence in an isolated test harness is harmless.
+function v6RecipientBatchUpsertAudiences_(records){
+  if(typeof v6BatchUpsertByKey_==='function')return v6BatchUpsertByKey_('MKT_AUDIENCES',['audienceRecipientId'],records);
+  records.forEach(function(r){v6UpsertByKey_('MKT_AUDIENCES',['audienceRecipientId'],r);});
+  return {created:records.length,updated:0};
+}
 function v6ResolveRecipients_(payload){
   var p=payload||{},campaignId=v6RecipientText_(p.campaignId),now=new Date(),stamp=now.toISOString();if(!campaignId)throw new Error('campaignId REQUIRED');
   ['MKT_CAMPAIGN_SCOPES','MKT_SCOPE_ACCOUNTS','MKT_CONTACTS_SECURE','MKT_EXCLUSIONS','MKT_AUDIENCES'].forEach(function(name){v6RequireContactRecipientHeaders_(name);});
@@ -22,16 +33,27 @@ function v6ResolveRecipients_(payload){
   var accountIds={};scopeAccounts.forEach(function(row){var id=v6RecipientText_(row.accountId);if(id)accountIds[id]=true;});if(!Object.keys(accountIds).length)return v6RecipientPersistStatus_(campaignId,ctx.scopeId,v6RecipientSafeStatus_('ACCOUNT SCOPE UNRESOLVED',0,0,'ACCOUNT_ID_REQUIRED','NOT EVALUATED','NOT EVALUATED'));
   var contacts=v6RecipientRows_('MKT_CONTACTS_SECURE').filter(function(row){return accountIds[v6RecipientText_(row.accountId)]&&v6RecipientUpper_(row.status||'ACTIVE')!=='INACTIVE';});
   if(!contacts.length)return v6RecipientPersistStatus_(campaignId,ctx.scopeId,v6RecipientSafeStatus_('NO CONTACTS AVAILABLE',0,0,'NO_CONTACTS','NOT EVALUATED','CLEAR'));
-  var exclusions=v6RecipientRows_('MKT_EXCLUSIONS'),eligible=0,excluded=0,frequencyBlocked=0,exclusionBlocked=0;
+  // Preloaded ONCE regardless of batchWrite -- v6FrequencyStatus_'s optional second argument
+  // (MarketingV6FrequencyControl.gs) means this always replaces N per-contact
+  // v6Rows_('MKT_FREQUENCY_LEDGER') full-table reads with exactly one, for every caller.
+  var exclusions=v6RecipientRows_('MKT_EXCLUSIONS'),ledgerRows=v6RecipientRows_('MKT_FREQUENCY_LEDGER'),eligible=0,excluded=0,frequencyBlocked=0,exclusionBlocked=0;
+  // batchWrite:true (opt-in; default false keeps every existing caller's exact behavior) defers
+  // every MKT_AUDIENCES write to one final batch instead of one v6UpsertByKey_ call per contact --
+  // the other O(n) write this function otherwise performs. See MarketingV6AuraCampanaA.gs, the
+  // pipeline this was added for.
+  var batchWrite=!!p.batchWrite,pendingAudienceRecords=[];
   contacts.forEach(function(contact){
     var accountId=v6RecipientText_(contact.accountId),contactId=v6RecipientText_(contact.contactId),email=v6RecipientText_(contact.email).toLowerCase(),reason='CLEAR',exclusion=null,frequency={status:'CLEAR',eligible:true};
     if(v6RecipientBool_(contact.doNotContact||contact.dnc)){reason='DO_NOT_CONTACT';exclusionBlocked++;}
     else if(!email){reason='EMAIL_MISSING';exclusionBlocked++;}
     else if(!v6RecipientEmailValid_(email)||v6RecipientUpper_(contact.emailStatus)==='INVALID'){reason='EMAIL_INVALID';exclusionBlocked++;}
     else if((exclusion=v6RecipientActiveExclusion_(exclusions,accountId,contactId,now))){reason='EXCLUSION_'+v6RecipientExclusionReason_(exclusion).replace(/[^A-Z0-9]+/g,'_');exclusionBlocked++;}
-    else{frequency=v6FrequencyStatus_({accountId:accountId,contactId:contactId,campaignId:campaignId,campaignType:ctx.campaignType});if(!frequency.eligible){reason='FREQUENCY_'+v6RecipientUpper_(frequency.status).replace(/[^A-Z0-9]+/g,'_');frequencyBlocked++;}}
-    var ok=reason==='CLEAR';if(ok)eligible++;else excluded++;v6UpsertByKey_('MKT_AUDIENCES',['audienceRecipientId'],{audienceRecipientId:'AUD:'+campaignId+':'+contactId,recordType:'RECIPIENT',campaignId:campaignId,scopeId:ctx.scopeId,accountId:accountId,contactId:contactId,email:email,eligibilityStatus:ok?'ELIGIBLE':'EXCLUDED',exclusionReason:reason,frequencyStatus:v6RecipientUpper_(frequency.status||'NOT EVALUATED'),resolvedAt:stamp,updatedAt:stamp});
+    else{frequency=v6FrequencyStatus_({accountId:accountId,contactId:contactId,campaignId:campaignId,campaignType:ctx.campaignType},ledgerRows);if(!frequency.eligible){reason='FREQUENCY_'+v6RecipientUpper_(frequency.status).replace(/[^A-Z0-9]+/g,'_');frequencyBlocked++;}}
+    var ok=reason==='CLEAR';if(ok)eligible++;else excluded++;
+    var record={audienceRecipientId:'AUD:'+campaignId+':'+contactId,recordType:'RECIPIENT',campaignId:campaignId,scopeId:ctx.scopeId,accountId:accountId,contactId:contactId,email:email,eligibilityStatus:ok?'ELIGIBLE':'EXCLUDED',exclusionReason:reason,frequencyStatus:v6RecipientUpper_(frequency.status||'NOT EVALUATED'),resolvedAt:stamp,updatedAt:stamp};
+    if(batchWrite)pendingAudienceRecords.push(record);else v6UpsertByKey_('MKT_AUDIENCES',['audienceRecipientId'],record);
   });
+  if(batchWrite&&pendingAudienceRecords.length)v6RecipientBatchUpsertAudiences_(pendingAudienceRecords);
   var status=eligible>0?'RECIPIENTS RESOLVED':'NO ELIGIBLE CONTACTS';return v6RecipientPersistStatus_(campaignId,ctx.scopeId,v6RecipientSafeStatus_(status,eligible,excluded,status==='RECIPIENTS RESOLVED'?'ELIGIBLE_CONTACTS_FOUND':'ALL_CONTACTS_EXCLUDED','CLEAR','CLEAR'));
 }
 function v6AudienceStatus_(payload){

@@ -8,7 +8,7 @@ const campanaASource = src('MarketingV6AuraCampanaA.gs');
 
 function fakePropertiesService(store) {
   store = store || {};
-  return { getScriptProperties: function () { return { getProperty: function (k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; }, setProperty: function (k, v) { store[k] = v; return this; } }; } };
+  return { getScriptProperties: function () { return { getProperty: function (k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; }, setProperty: function (k, v) { store[k] = v; return this; }, deleteProperty: function (k) { delete store[k]; return this; } }; } };
 }
 // spec: {throws: true} to simulate an inaccessible spreadsheet, or {sheets: {sheetName: values2D}}
 // to simulate a real, readable workbook. Defaults to an accessible spreadsheet with NO tabs at
@@ -70,13 +70,35 @@ function makeContext(opts) {
   vm.runInContext(dispatcherSource, ctx, { filename: 'MarketingV6AuraEmailDispatcher.gs' });
   vm.runInContext(campanaASource, ctx, { filename: 'MarketingV6AuraCampanaA.gs' });
 
+  var callCounts = { v6Rows_: {}, v6UpsertByKey_: {}, v6BatchUpsertByKey_: {} };
+  function bump(bucket, name) { bucket[name] = (bucket[name] || 0) + 1; }
   ctx.v6AuraText_ = function (v) { return String(v == null ? '' : v).trim(); };
-  ctx.v6Rows_ = function (name) { return (tables[name] || []).map(function (r) { return Object.assign({}, r); }); };
+  ctx.v6Rows_ = function (name) { bump(callCounts.v6Rows_, name); return (tables[name] || []).map(function (r) { return Object.assign({}, r); }); };
   ctx.v6UpsertByKey_ = function (name, keys, record) {
+    bump(callCounts.v6UpsertByKey_, name);
     var rows = tables[name] || (tables[name] = []);
     var at = rows.findIndex(function (row) { return keys.every(function (k) { return String(row[k] || '') === String(record[k] || ''); }); });
     if (at < 0) rows.push(Object.assign({}, record)); else rows[at] = Object.assign({}, record);
     return record;
+  };
+  // Mirrors v6BatchUpsertByKey_'s real semantics (MarketingV6FrequencyControl.gs): ONE
+  // read+merge+write against the SAME `tables` array regardless of how many records are passed
+  // -- so a caller switching from N v6UpsertByKey_ calls to one v6BatchUpsertByKey_ call produces
+  // identical final table contents, and __callCounts below can prove the call-count reduction
+  // DGL asked this pass to report.
+  ctx.v6BatchUpsertByKey_ = function (name, keys, records) {
+    bump(callCounts.v6BatchUpsertByKey_, name);
+    var rows = tables[name] || (tables[name] = []);
+    var indexByKey = {};
+    rows.forEach(function (row, i) { indexByKey[keys.map(function (k) { return String(row[k] || ''); }).join('')] = i; });
+    var created = 0, updated = 0;
+    (records || []).forEach(function (record) {
+      var key = keys.map(function (k) { return String(record[k] || ''); }).join('');
+      var copy = Object.assign({}, record);
+      if (Object.prototype.hasOwnProperty.call(indexByKey, key)) { rows[indexByKey[key]] = copy; updated++; }
+      else { rows.push(copy); indexByKey[key] = rows.length - 1; created++; }
+    });
+    return { created: created, updated: updated };
   };
   ctx.v6EnsureContactRecipientSchema_ = function () { return { status: 'SCHEMA READY' }; };
   ctx.v6AuraEnsureCampaignScope_ = function (p) {
@@ -119,7 +141,7 @@ function makeContext(opts) {
   ctx.v6PipelineAdvanced_ = function (stage) { return ['CAMPAIGN ACTIVE', 'RESPONDED', 'RFQ RECEIVED', 'QUOTED', 'LOAD / REACTIVATED', 'RETAINED / EXPANDED', 'COOLDOWN / NURTURE'].indexOf(String(stage || '').toUpperCase()) >= 0; };
   ctx.v6RecordMarketingTouch_ = function () { return {}; };
   ctx.v6RefreshOpportunitiesFromReports_ = function () { return { status: 'REFRESHED' }; };
-  ctx.__tables = tables; ctx.__sentEmails = sentEmails; ctx.__loggedLines = loggedLines;
+  ctx.__tables = tables; ctx.__sentEmails = sentEmails; ctx.__loggedLines = loggedLines; ctx.__callCounts = callCounts;
   return ctx;
 }
 
@@ -793,6 +815,115 @@ function campanaASheetValuesWithContacts(dataRows) {
   assert.equal(second.triggerStatus.status, 'TRIGGER_EXISTS');
   assert.equal(scriptState.triggers.length, 1, 'a second regenerate call must never install a duplicate dispatcher trigger');
   console.log('campana-a test 30 (regenerate installs the dispatcher trigger idempotently, never duplicated): PASS');
+})();
+
+// 31. Performance regression guard for the 2026-09-16 production timeout (227 contacts took 30
+// minutes): with a realistically large number of accounts/contacts, MKT_EMAIL_QUEUE must be
+// written via exactly ONE v6BatchUpsertByKey_ call, NEVER via a per-contact v6UpsertByKey_ call
+// -- proving the O(n^2) growing-table upsert loop that caused the real incident is gone, not just
+// individually fast in a small test.
+(function batchedWriteCallCountScalesTest() {
+  var N = 150;
+  var tables = { MKT_AURA_GMAIL_OPPORTUNITIES: [], MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
+  for (var i = 0; i < N; i++) {
+    var accountId = 'ACC-' + i;
+    tables.MKT_AURA_GMAIL_OPPORTUNITIES.push(gmailOpp(accountId, 'Account ' + i, 'Owner'));
+    tables.MKT_ACCOUNTS.push({ accountId: accountId, accountName: 'Account ' + i });
+    tables.MKT_CONTACTS_SECURE.push({ contactId: 'CON-' + i, accountId: accountId, firstName: 'Person' + i, email: 'person' + i + '@account' + i + '.com', country: 'Colombia' });
+  }
+  var ctx = makeContext({ tables: tables });
+  var build = ctx.v6AuraCampanaABuildQueue_();
+  assert.equal(build.built, N, 'every synthetic contact must be built');
+  assert.equal(ctx.__callCounts.v6BatchUpsertByKey_.MKT_EMAIL_QUEUE, 1, 'MKT_EMAIL_QUEUE must be written via exactly one batch call, regardless of contact count');
+  assert(!ctx.__callCounts.v6UpsertByKey_.MKT_EMAIL_QUEUE, 'MKT_EMAIL_QUEUE must never be written via a per-contact v6UpsertByKey_ call');
+  assert.equal(ctx.__callCounts.v6Rows_.MKT_ACCOUNTS, 1, 'MKT_ACCOUNTS must be read exactly once regardless of account count, never once per account');
+  assert.equal(ctx.__callCounts.v6BatchUpsertByKey_.MKT_AURA_GMAIL_OPPORTUNITIES, undefined, 'this test seeds opportunities directly, so ingest batching is exercised separately (test 32)');
+  console.log('campana-a test 31 (performance regression guard: MKT_EMAIL_QUEUE written via one batch call and MKT_ACCOUNTS read once, regardless of contact count -- the O(n^2) upsert loop that caused the real production timeout is gone): PASS');
+})();
+
+// 32. The direct-spreadsheet ingest path (the OTHER real hotspot: previously one
+// v6AuraGmailUpsertOpportunity_ call per source row, each its own two full-table reads) now
+// writes MKT_AURA_GMAIL_OPPORTUNITIES via exactly one batch call for many source rows.
+(function ingestBatchesOpportunityWritesTest() {
+  var N = 80;
+  var rows = [];
+  for (var i = 0; i < N; i++) rows.push(['Account ' + i, 'Owner ' + i, 'HA priority', 'High']);
+  var tables = {};
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': campanaASheetValues(rows) } } });
+  var ingest = ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  assert.equal(ingest.status, 'OK');
+  assert.equal(ingest.created, N);
+  assert.equal(tables.MKT_AURA_GMAIL_OPPORTUNITIES.length, N);
+  assert.equal(ctx.__callCounts.v6BatchUpsertByKey_.MKT_AURA_GMAIL_OPPORTUNITIES, 1, 'every accepted source row must be written via exactly one batch call, never one upsert per row');
+  assert(!ctx.__callCounts.v6UpsertByKey_ || !ctx.__callCounts.v6UpsertByKey_.MKT_AURA_GMAIL_OPPORTUNITIES, 'MKT_AURA_GMAIL_OPPORTUNITIES must never be written via a per-row v6UpsertByKey_ call from this ingest path');
+  assert.equal(ctx.__callCounts.v6BatchUpsertByKey_.MKT_AURA_CAMPANA_A_SOURCE_ROWS, 1, 'source-row diagnostics must also be persisted via one batch call, never one per row');
+  console.log('campana-a test 32 (direct-spreadsheet ingest writes both MKT_AURA_GMAIL_OPPORTUNITIES and MKT_AURA_CAMPANA_A_SOURCE_ROWS via one batch call each, regardless of source row count): PASS');
+})();
+
+// 33. Every phase of a full regenerate reports a real, present timing field (SOURCE_READ_MS,
+// PARSE_MS, MATCH_MS, LANGUAGE_MS, ELIGIBILITY_MS, COPY_MS, QUEUE_WRITE_MS, AUDIT_MS, TOTAL_MS) --
+// the exact profiling breakdown DGL asked for so a future slowdown can be diagnosed by phase
+// instead of guessed at.
+(function profilingFieldsPresentTest() {
+  var tables = {
+    MKT_AURA_GMAIL_OPPORTUNITIES: [gmailOpp('ACC-1', 'Progeral Corp', 'Owner')],
+    MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Progeral Corp' }],
+    MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', accountId: 'ACC-1', firstName: 'Maria', email: 'maria@progeral.com', country: 'Colombia' }]
+  };
+  var ctx = makeContext({ tables: tables });
+  var out = ctx.v6AuraCampanaARegenerateDryRun_();
+  ['SOURCE_READ_MS', 'PARSE_MS', 'MATCH_MS', 'LANGUAGE_MS', 'ELIGIBILITY_MS', 'COPY_MS', 'QUEUE_WRITE_MS', 'AUDIT_MS', 'TOTAL_MS'].forEach(function (key) {
+    assert(typeof out.profile[key] === 'number' && out.profile[key] >= 0, 'profile.' + key + ' must be a real, present, non-negative timing in milliseconds');
+  });
+  console.log('campana-a test 33 (every required profiling field -- SOURCE_READ_MS through TOTAL_MS -- is present on the regenerate result): PASS');
+})();
+
+// 34. Checkpoint save: when the time budget is exceeded (here, forced via an explicit
+// non-positive CAMPANA_A_BUILD_TIME_BUDGET_MS override), the build stops cleanly before
+// processing any further contact, persists a resumable checkpoint, and reports
+// CHECKPOINTED_TIME_BUDGET_EXCEEDED instead of silently truncating or losing track of progress.
+(function checkpointSavesOnBudgetExceededTest() {
+  var tables = {
+    MKT_AURA_GMAIL_OPPORTUNITIES: [gmailOpp('ACC-1', 'Account One', 'Owner'), gmailOpp('ACC-2', 'Account Two', 'Owner')],
+    MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Account One' }, { accountId: 'ACC-2', accountName: 'Account Two' }],
+    MKT_CONTACTS_SECURE: [
+      { contactId: 'CON-1', accountId: 'ACC-1', firstName: 'A', email: 'a@one.com', country: 'Colombia' },
+      { contactId: 'CON-2', accountId: 'ACC-2', firstName: 'B', email: 'b@two.com', country: 'Colombia' }
+    ]
+  };
+  var ctx = makeContext({ tables: tables, props: { CAMPANA_A_BUILD_TIME_BUDGET_MS: '-1' } });
+  var build = ctx.v6AuraCampanaABuildQueue_();
+  assert.equal(build.status, 'CHECKPOINTED_TIME_BUDGET_EXCEEDED', 'a negative/zero budget must force an immediate, deterministic checkpoint before any contact is processed');
+  assert.equal(build.built, 0);
+  assert(build.checkpoint, 'a checkpointed result must report resume information');
+  assert.equal(build.checkpoint.resumeFromIndex, 0);
+  assert.equal(build.checkpoint.totalRecipients, 2);
+  assert.equal((tables.MKT_EMAIL_QUEUE || []).length, 0, 'nothing may be written while checkpointed with zero contacts processed');
+  console.log('campana-a test 34 (an exceeded time budget checkpoints cleanly before processing further contacts, reporting resume information, never silently losing progress): PASS');
+})();
+
+// 35. Checkpoint resume: a pre-existing checkpoint taken against the SAME campaign and the SAME
+// total recipient count resumes from the saved index -- contacts before it are never
+// reprocessed -- and completes normally, clearing the checkpoint so the NEXT call starts fresh.
+(function checkpointResumesFromSavedIndexTest() {
+  var tables = {
+    MKT_AURA_GMAIL_OPPORTUNITIES: [gmailOpp('ACC-1', 'Account One', 'Owner'), gmailOpp('ACC-2', 'Account Two', 'Owner'), gmailOpp('ACC-3', 'Account Three', 'Owner')],
+    MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Account One' }, { accountId: 'ACC-2', accountName: 'Account Two' }, { accountId: 'ACC-3', accountName: 'Account Three' }],
+    MKT_CONTACTS_SECURE: [
+      { contactId: 'CON-1', accountId: 'ACC-1', firstName: 'A', email: 'a@one.com', country: 'Colombia' },
+      { contactId: 'CON-2', accountId: 'ACC-2', firstName: 'B', email: 'b@two.com', country: 'Colombia' },
+      { contactId: 'CON-3', accountId: 'ACC-3', firstName: 'C', email: 'c@three.com', country: 'Colombia' }
+    ]
+  };
+  var props = { CAMPANA_A_BUILD_CHECKPOINT: JSON.stringify({ campaignId: 'CMP-CAMPANA-A-HA-PRIORITARIA', totalRecipients: 3, lastProcessedIndex: 2, checkpointedAt: new Date().toISOString() }) };
+  var ctx = makeContext({ tables: tables, props: props });
+  var build = ctx.v6AuraCampanaABuildQueue_();
+  assert.equal(build.status, 'QUEUE_BUILD_COMPLETE', 'a resumed build that finishes within budget must report normal completion, not CHECKPOINTED');
+  assert.equal(build.built, 1, 'only the recipient at/after the saved checkpoint index must be processed -- the first two must never be reprocessed');
+  assert.equal(tables.MKT_EMAIL_QUEUE.length, 1);
+  assert.equal(tables.MKT_EMAIL_QUEUE[0].contactId, 'CON-3', 'resume must continue from the saved index, not restart from zero');
+  assert.equal(props.CAMPANA_A_BUILD_CHECKPOINT, undefined, 'a successfully completed build must clear the checkpoint so the next call starts fresh');
+  console.log('campana-a test 35 (a saved checkpoint resumes from the exact saved index without reprocessing earlier recipients, and clears itself on successful completion): PASS');
 })();
 
 console.log('V6 AURA Campana A (dedicated tab, per-contact language, name reliability): ALL PASS');

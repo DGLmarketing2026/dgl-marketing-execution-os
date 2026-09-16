@@ -5,8 +5,34 @@ function v6DaysSince_(value,now){var d=v6DateValue_(value);return d?Math.floor((
 function v6Priority_(type){return MKT_V6_PRIORITY[String(type||'').trim().toUpperCase()]||99;}
 function v6TableHeaders_(name){var s=v6Sheet_(name);if(!s)throw new Error(name+' NOT FOUND');return {sheet:s,headers:s.getRange(1,1,1,s.getLastColumn()).getValues()[0]};}
 function v6UpsertByKey_(name,keyFields,record){var t=v6TableHeaders_(name),rows=t.sheet.getLastRow()>1?t.sheet.getRange(2,1,t.sheet.getLastRow()-1,t.headers.length).getValues():[],index=-1;for(var i=0;i<rows.length;i++){var match=true;for(var k=0;k<keyFields.length;k++){var col=t.headers.indexOf(keyFields[k]);if(String(rows[i][col]||'')!==String(record[keyFields[k]]||'')){match=false;break;}}if(match){index=i+2;break;}}var values=t.headers.map(function(h){return record[h]==null?'':record[h];});if(index>0)t.sheet.getRange(index,1,1,values.length).setValues([values]);else t.sheet.appendRow(values);return record;}
-function v6FrequencyStatus_(payload){var p=payload||{},accountId=String(p.accountId||'').trim(),contactId=String(p.contactId||'').trim();if(!accountId)return {status:'ACCOUNT SCOPE UNRESOLVED',eligible:false,accountTouches30d:0,contactTouches30d:0,lastMarketingTouchAt:null,cooldownUntil:null,activeCampaignId:null,reason:'ACCOUNT ID REQUIRED',nextEligibleAt:null};if(p.exclusionBlocked===true||p.dnc===true)return {status:'DNC',eligible:false,accountTouches30d:0,contactTouches30d:0,lastMarketingTouchAt:null,cooldownUntil:null,activeCampaignId:null,reason:'EXCLUSION BLOCK',nextEligibleAt:null};
-  var now=v6Now_(),rows=v6Rows_('MKT_FREQUENCY_LEDGER').filter(function(r){return String(r.accountId||'')===accountId;}),contactRows=contactId?rows.filter(function(r){return String(r.contactId||'')===contactId;}):[],last=null,cooldown=null,active='',accountTouches=0,contactTouches=0,activeType='';
+// Batch counterpart to v6UpsertByKey_: ONE full-table read + in-memory merge + ONE full-table
+// write for an arbitrary number of records, instead of one read+scan+write PER record. Every
+// per-record v6UpsertByKey_ call re-reads the entire (growing) table before writing, which is
+// O(n) per call and O(n^2) total across a loop of n records against the same table -- this is
+// the root cause of Apps Script execution-time-limit failures once a pipeline processes more
+// than a couple dozen rows against a shared, already-large table (MKT_EMAIL_QUEUE, MKT_AUDIENCES,
+// MKT_AURA_GMAIL_OPPORTUNITIES, etc.). Same upsert semantics as v6UpsertByKey_ (match by
+// keyFields, update in place or append), same missing-value normalization, and later records in
+// the same batch correctly win over earlier ones sharing the same key (mirrors "last row wins").
+// Never removes or reorders an existing row that no incoming record's key matches.
+function v6BatchUpsertByKey_(name,keyFields,records){
+  if(!records||!records.length)return {created:0,updated:0};
+  var t=v6TableHeaders_(name),lastRow=t.sheet.getLastRow(),existing=lastRow>1?t.sheet.getRange(2,1,lastRow-1,t.headers.length).getValues():[];
+  var keyOf=function(getField){return keyFields.map(function(k){return String(getField(k)||'');}).join('');};
+  var indexByKey={};
+  existing.forEach(function(row,i){var col;indexByKey[keyOf(function(k){col=t.headers.indexOf(k);return row[col];})]=i;});
+  var created=0,updated=0;
+  records.forEach(function(record){
+    var key=keyOf(function(k){return record[k];});
+    var values=t.headers.map(function(h){return record[h]==null?'':record[h];});
+    if(Object.prototype.hasOwnProperty.call(indexByKey,key)){existing[indexByKey[key]]=values;updated++;}
+    else{existing.push(values);indexByKey[key]=existing.length-1;created++;}
+  });
+  if(existing.length)t.sheet.getRange(2,1,existing.length,t.headers.length).setValues(existing);
+  return {created:created,updated:updated};
+}
+function v6FrequencyStatus_(payload,preloadedLedgerRows){var p=payload||{},accountId=String(p.accountId||'').trim(),contactId=String(p.contactId||'').trim();if(!accountId)return {status:'ACCOUNT SCOPE UNRESOLVED',eligible:false,accountTouches30d:0,contactTouches30d:0,lastMarketingTouchAt:null,cooldownUntil:null,activeCampaignId:null,reason:'ACCOUNT ID REQUIRED',nextEligibleAt:null};if(p.exclusionBlocked===true||p.dnc===true)return {status:'DNC',eligible:false,accountTouches30d:0,contactTouches30d:0,lastMarketingTouchAt:null,cooldownUntil:null,activeCampaignId:null,reason:'EXCLUSION BLOCK',nextEligibleAt:null};
+  var now=v6Now_(),allLedgerRows=Array.isArray(preloadedLedgerRows)?preloadedLedgerRows:v6Rows_('MKT_FREQUENCY_LEDGER'),rows=allLedgerRows.filter(function(r){return String(r.accountId||'')===accountId;}),contactRows=contactId?rows.filter(function(r){return String(r.contactId||'')===contactId;}):[],last=null,cooldown=null,active='',accountTouches=0,contactTouches=0,activeType='';
   rows.forEach(function(r){var touch=v6DateValue_(r.lastMarketingTouchAt),stored=Math.max(0,Number(r.touches30d||0)),derived=touch&&v6DaysSince_(touch,now)<=30?1:0;accountTouches+=Math.max(stored,derived);if(touch&&(!last||touch>last))last=touch;var cd=v6DateValue_(r.cooldownUntil);if(cd&&(!cooldown||cd>cooldown))cooldown=cd;if(r.activeCampaignId){active=String(r.activeCampaignId);activeType=String(r.lastCampaignType||'');}});contactRows.forEach(function(r){var touch=v6DateValue_(r.lastMarketingTouchAt),stored=Math.max(0,Number(r.touches30d||0)),derived=touch&&v6DaysSince_(touch,now)<=30?1:0;contactTouches+=Math.max(stored,derived);});
   var base={accountTouches30d:accountTouches,contactTouches30d:contactTouches,lastMarketingTouchAt:last?last.toISOString():null,cooldownUntil:cooldown?cooldown.toISOString():null,activeCampaignId:active||null,nextEligibleAt:null};if(active&&String(p.campaignId||'')!==active){var higher=v6Priority_(activeType)<=v6Priority_(p.campaignType);return Object.assign(base,{status:higher?'HIGHER PRIORITY':'ACTIVE CAMPAIGN',eligible:false,reason:higher?'HIGHER PRIORITY SIGNAL':'COMPETING ACTIVE CAMPAIGN'});}if(accountTouches>=2||contactId&&contactTouches>=2)return Object.assign(base,{status:'FREQUENCY CAP',eligible:false,reason:accountTouches>=2?'ACCOUNT 30-DAY CAP':'CONTACT 30-DAY CAP',nextEligibleAt:last?new Date(last.getTime()+30*86400000).toISOString():null});
   var signal=v6DateValue_(rows.reduce(function(v,r){var d=v6DateValue_(r.lastCommercialSignalAt);return d&&(!v||d>v)?d:v;},null)),override=!!(p.newCommercialSignalEligible&&signal&&last&&signal>last);if(cooldown&&cooldown>now&&!override)return Object.assign(base,{status:'COOLDOWN',eligible:false,reason:'NO-RESPONSE COOLDOWN',nextEligibleAt:cooldown.toISOString()});var requested=Number(p.followUpDays||0),tooSoon=last&&v6DaysSince_(last,now)<10;if((requested>=3&&requested<=8)||requested===38||tooSoon)return Object.assign(base,{status:'FOLLOW-UP TOO SOON',eligible:false,reason:requested===38?'38-DAY DEFAULT NOT PERMITTED':'MINIMUM 10-DAY SPACING',nextEligibleAt:last?new Date(last.getTime()+10*86400000).toISOString():null});return Object.assign(base,{status:'CLEAR',eligible:true,reason:override?'NEW COMMERCIAL SIGNAL OVERRIDE':'PRESSURE CLEAR'});}

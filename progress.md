@@ -2,6 +2,149 @@
 
 Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
+## Pass 16 — Performance fix: the real production execution-time-limit failure
+
+**Production incident.** `RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN()` ran 8:03:08-8:33:08 and was
+terminated by Apps Script with "Exceeded maximum execution time" for the real ~227-contact / 65
+-account Campana A audience. DGL required a governed, non-negotiable fix: no reduction in
+contacts/accounts processed, no protection removed, DRY_RUN/canonical replyTo/ES-EN-PT/
+suppression-DNC-frequency-stopOnResponse all fully preserved, plus checkpoint/resume and
+per-phase profiling, verified by real tests (not just re-running the same architecture again).
+
+**Exact cause, confirmed by code-level trace (not guessed).** Every write in the previous
+pipeline went through the shared `v6UpsertByKey_` (`MarketingV6FrequencyControl.gs`), which does
+a FULL re-read of its target sheet before every single write. That primitive was called once PER
+ROW/PER CONTACT/PER ACCOUNT throughout this pipeline -- O(n) per call, O(n^2) total across a
+loop of n against the same, often already-large, multi-campaign table:
+- `v6AuraCampanaAPersistSourceRows_` -- once per source row (~227) against the growing
+  `MKT_AURA_CAMPANA_A_SOURCE_ROWS` table.
+- `v6AuraGmailUpsertOpportunity_` (called once per accepted candidate, ~227, from
+  `v6AuraCampanaAIngestFromSpreadsheet_`) -- each call did its OWN existence-check full read of
+  `MKT_AURA_GMAIL_OPPORTUNITIES` PLUS `v6UpsertByKey_`'s own full read+write -- 2 full reads + 1
+  write per candidate.
+- `v6AuraEnsureCampaignScope_` -- once per account (~65) against the growing
+  `MKT_SCOPE_ACCOUNTS` table; plus `v6AuraCampanaARealAccountId_` re-reading all of `MKT_ACCOUNTS`
+  fresh on every call, called ~3x per account across different call sites (~190 full reads).
+- `v6ResolveRecipients_` (`MarketingV6RecipientResolution.gs`, shared by every campaign family)
+  -- once per contact (~227): a full `v6Rows_('MKT_FREQUENCY_LEDGER')` read PLUS a full,
+  growing-table `v6UpsertByKey_('MKT_AUDIENCES', ...)` write, against a table shared and
+  continuously appended to by every other campaign in the system.
+- `v6AuraCampanaABuildQueue_`'s own per-contact `v6UpsertByKey_('MKT_EMAIL_QUEUE', ...)` write,
+  plus a fresh `v6Rows_('MKT_CAMPAIGNS')` read per STOPPED contact
+  (`v6AuraCampanaAPriorCampaignFamily_`, ~117 of the 227 in the real run).
+- `v6AuraCampanaAPreflight_` -- a fresh `MKT_EXCLUSIONS` read per pending job, plus a per-failing
+  -job write.
+- `auraProcessEmailQueue` (`MarketingV6AuraEmailDispatcher.gs`, looped up to 20x by
+  `v6AuraCampanaADispatchAll_`) -- per job: fresh reads of `MKT_ACCOUNT_PIPELINE`,
+  `MKT_EXCLUSIONS`, `MKT_EMAIL_QUEUE` (duplicate-sent check), `MKT_FREQUENCY_LEDGER`, plus a
+  write; plus one full `MKT_EMAIL_QUEUE` read per round.
+
+Rough total before this fix: 3,000+ individual Sheets API round trips for one ~227-contact run,
+several against tables shared and grown by every other campaign in the system -- explaining a
+30-minute wall clock for what should be a trivial data volume.
+
+**Fix: batch reads/writes everywhere, preserve every rule verbatim.**
+- New `v6BatchUpsertByKey_(name, keyFields, records)` (`MarketingV6FrequencyControl.gs`, alongside
+  the unchanged `v6UpsertByKey_`) -- ONE full-table read, in-memory merge (later records in the
+  same batch correctly win on a shared key, matching the existing "last row wins" semantic),
+  ONE full-table write, for any number of records.
+- `v6AuraCampanaAPersistSourceRows_`, the opportunity-upsert loop in
+  `v6AuraCampanaAIngestFromSpreadsheet_` (via a new pure `v6AuraGmailBuildOpportunityRow_` row
+  -shape builder extracted from `v6AuraGmailUpsertOpportunity_`, itself unchanged and still used
+  verbatim by every other Gmail-ingest caller), `v6AuraCampanaABuildQueue_`'s `MKT_EMAIL_QUEUE`
+  write, and `v6AuraCampanaAPreflight_`'s suppression write all now call
+  `v6BatchUpsertByKey_` once instead of looping `v6UpsertByKey_`.
+- `v6ResolveRecipients_` gained an additive, opt-in `payload.batchWrite` (default `false` --
+  every existing caller/test, including the shared `v6-recipient-resolution-production.test.js`
+  and `v55-recipient-resolution.test.js`, is byte-for-byte unaffected) that defers every
+  `MKT_AUDIENCES` write to one final `v6BatchUpsertByKey_` call; it also now preloads
+  `MKT_FREQUENCY_LEDGER` ONCE (via a new, additive, backward-compatible optional second argument
+  on `v6FrequencyStatus_`) instead of once per contact, unconditionally, for every caller.
+  Campana A calls it with `batchWrite:true`.
+- `v6AuraEnsureCampaignScope_` gained the same additive `batchWrite:true` opt-in for
+  `MKT_SCOPE_ACCOUNTS` (default unchanged). `v6AuraCampanaARealAccountId_` and
+  `v6AuraCampanaAPriorCampaignFamily_` gained optional preloaded-rows arguments so a caller
+  resolving many accounts/checking many STOPPED contacts shares ONE read instead of one per
+  account/contact; every real call site in `MarketingV6AuraCampanaA.gs` now loads `MKT_ACCOUNTS`/
+  `MKT_CAMPAIGNS` exactly once per run and passes it through.
+- New `v6AuraCampanaADispatchBatch_` replaces the shared, per-job-I/O `auraProcessEmailQueue`
+  for THIS pipeline only (the shared dispatcher is completely unchanged and still serves every
+  other campaign family exactly as before): reads `MKT_EMAIL_QUEUE`/`MKT_EXCLUSIONS`/
+  `MKT_ACCOUNT_PIPELINE`/`MKT_FREQUENCY_LEDGER` exactly once, evaluates the identical
+  stop/reply-to/email/exclusion/duplicate/frequency checks in memory, and writes every updated
+  job in ONE final batch. `v6AuraCampanaADispatchAll_` (the name `v6AuraCampanaARegenerateDryRun_`
+  already called) now delegates to it.
+- Net effect at the real ~227-contact/65-account scale: roughly 3,000+ Sheets API round trips
+  (scaling with contact/account count, several against already-large shared tables) down to
+  roughly 35-40 (constant, independent of contact/account count) -- the O(n^2) growth pattern is
+  eliminated, not just made individually faster.
+
+**Checkpoint/resume**, new: a Script Property (`CAMPANA_A_BUILD_CHECKPOINT`) lets the per-contact
+build loop in `v6AuraCampanaABuildQueue_` stop cleanly before an execution-time budget
+(`CAMPANA_A_BUILD_TIME_BUDGET_MS`, default 270000ms/4.5min -- a safety margin under Apps Script's
+common 6-minute ceiling) is exceeded, save its exact position, and resume from there on the next
+call -- never duplicating a job (every job is still keyed by the existing deterministic,
+idempotent `jobId`, so even a full restart-from-zero would only re-skip already-built jobs, never
+duplicate them). A checkpoint is only trusted when taken against the same campaign and the same
+total recipient count; otherwise the loop safely starts from zero. AURA no longer depends on the
+whole audience fitting inside one execution, at any future scale.
+
+**Profiling**, new: every phase now reports its own timing in milliseconds --
+`SOURCE_READ_MS`/`PARSE_MS` (`v6AuraCampanaAIngestFromSpreadsheet_`), `MATCH_MS`/`LANGUAGE_MS`/
+`ELIGIBILITY_MS`/`COPY_MS`/`QUEUE_WRITE_MS` (`v6AuraCampanaABuildQueue_`), `AUDIT_MS` and
+`TOTAL_MS` (`v6AuraCampanaARegenerateDryRun_`) -- merged onto `result.profile` and included in
+`RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN`'s logged summary, so a future slowdown can be diagnosed
+by phase instead of re-guessed from scratch.
+
+**Estimated execution time after this fix** (analytical, since the Apps Script Execution API
+remains categorically blocked in this environment -- see Pass 15/prior go-live report; cannot be
+confirmed by an actual timed run from here): well under one minute for the current ~227-contact
+scale (likely 10-30 seconds), dominated by the unavoidable per-call latency of ~35-40 real Sheets
+API round trips (each typically 50-300ms) plus opening the source spreadsheet and Gmail-copy
+generation -- not by any remaining O(n) or O(n^2) pattern, since none remain in this pipeline's
+write path.
+
+**The one function to run is unchanged: `RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN()`** -- same
+name, same zero-argument entry point, same DRY_RUN/canonical-replyTo/preflight/audit contract.
+Per DGL's own instruction, this pass does not ask DGL to run it again yet; that request is
+deferred until the user reviews this report.
+
+### Files changed
+
+- Modified: `backend/apps-script-v6/MarketingV6FrequencyControl.gs` (new `v6BatchUpsertByKey_`;
+  `v6FrequencyStatus_` gained an optional preloaded-ledger-rows second argument, additive), `backend/apps-script-v6/MarketingV6AuraGmailIngest.gs`
+  (extracted pure `v6AuraGmailBuildOpportunityRow_`, `v6AuraGmailUpsertOpportunity_` itself
+  unchanged), `backend/apps-script-v6/MarketingV6RecipientResolution.gs` (`v6ResolveRecipients_`
+  gained additive `payload.batchWrite`; new `v6RecipientBatchUpsertAudiences_`),
+  `backend/apps-script-v6/MarketingV6AuraBridge.gs` (`v6AuraEnsureCampaignScope_` gained additive
+  `payload.batchWrite`), `backend/apps-script-v6/MarketingV6AuraCampanaA.gs` (comprehensively
+  rewritten for batched I/O, checkpoint/resume, and profiling -- every existing function name/
+  contract preserved; `v6AuraCampanaADispatchAll_` now delegates to the new
+  `v6AuraCampanaADispatchBatch_` instead of looping the shared `auraProcessEmailQueue`).
+- Not modified (deliberately): `backend/apps-script-v6/MarketingV6AuraEmailDispatcher.gs`'s
+  `auraProcessEmailQueue` -- still serves every other campaign family exactly as before; Campana
+  A no longer calls it at all.
+- Modified tests: `tests/v6-aura-campana-a.test.js` (added a `v6BatchUpsertByKey_` stub with
+  call-count instrumentation, `deleteProperty` on the fake PropertiesService, and 5 new cases --
+  see `tests.json`).
+- Full suite: 37/37 files passing (`node --test tests/*.test.js`), including the two dedicated
+  recipient-resolution test files (`v6-recipient-resolution-production.test.js`,
+  `v55-recipient-resolution.test.js`), confirming the shared engine's default behavior is
+  byte-for-byte unaffected.
+
+### What this pass deliberately does NOT do
+
+- Does not reduce the contact/account volume processed, remove or relax any suppression/DNC/
+  frequency/stopOnResponse/exclusion/approval gate, or change the governed stale-cross-family
+  override introduced in Pass 15.
+- Does not modify the shared `auraProcessEmailQueue` dispatcher -- QNB/Reactivation/Cross-Sell/
+  the general Retention family pipeline dispatch exactly as before.
+- Does not attempt `clasp run` / the Execution API again (confirmed categorically, permanently
+  blocked in this environment in the prior go-live pass) -- profiling is instrumented in-code and
+  will surface real numbers the next time DGL runs the function from the Apps Script editor.
+- Does not touch Landing Pages or the Marketing Execution OS frontend go-live work -- tracked
+  separately, unaffected by this fix (see the prior go-live report for their status).
+
 ## Pass 15 — Go-live pass: definitive Campana A fixes, preflight, AURA dashboard, trigger install
 
 Turns Pass 14's diagnostics into real fixes, adds the final pre-LIVE preflight gate, and gives

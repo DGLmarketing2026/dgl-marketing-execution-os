@@ -135,9 +135,13 @@ function v6AuraGmailParseTable_(sheetName, values, ctx) {
 function v6AuraGmailOpportunityId_(family, accountName) {
   return 'OPP-GMAIL-' + String(family || 'GEN').replace(/[^A-Z0-9]/gi, '').toUpperCase() + '-' + v6HashKey_(v6NormAccount_(accountName));
 }
-function v6AuraGmailUpsertOpportunity_(candidate, ctx) {
+// Pure row-shape builder, no I/O -- extracted so a caller processing many candidates at once
+// (e.g. MarketingV6AuraCampanaA.gs's direct-spreadsheet ingest) can compute every row in memory
+// and write them all in ONE batch call (v6BatchUpsertByKey_) instead of one upsert per candidate.
+// v6AuraGmailUpsertOpportunity_ itself is unchanged behavior -- it just calls this now.
+function v6AuraGmailBuildOpportunityRow_(candidate, ctx) {
   var nowIso = v6AuraGmailNow_();
-  var row = {
+  return {
     opportunityId: v6AuraGmailOpportunityId_(candidate.family, candidate.accountName),
     accountId: 'ACC-' + v6HashKey_(v6NormAccount_(candidate.accountName)),
     accountName: candidate.accountName, amOwner: candidate.amOwner, opportunityType: candidate.family,
@@ -148,6 +152,9 @@ function v6AuraGmailUpsertOpportunity_(candidate, ctx) {
     sourceType: 'GMAIL_AM_REPORT', sourceMessageId: ctx.messageId, sourceFile: ctx.sourceFile,
     sourceRow: candidate.sourceRow, sourceReceivedAt: ctx.receivedAt, sourceSheet: candidate.sheetName || ''
   };
+}
+function v6AuraGmailUpsertOpportunity_(candidate, ctx) {
+  var row = v6AuraGmailBuildOpportunityRow_(candidate, ctx);
   var existing = v6AuraGmailRows_('MKT_AURA_GMAIL_OPPORTUNITIES').filter(function (r) { return v6AuraGmailText_(r.opportunityId) === row.opportunityId; })[0];
   v6UpsertByKey_('MKT_AURA_GMAIL_OPPORTUNITIES', ['opportunityId'], row);
   return existing ? 'updated' : 'created';

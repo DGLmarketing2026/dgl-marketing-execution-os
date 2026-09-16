@@ -535,10 +535,39 @@
           "guarantee": "the one manual execution DGL runs also confirms automation is wired, without requiring a second manual step or ever risking a duplicate trigger"
         }
       ]
+    },
+    {
+      "file": "tests/v6-aura-campana-a.test.js (Pass 16 performance-fix additions)",
+      "cases": [
+        {
+          "name": "MKT_EMAIL_QUEUE is written via exactly one v6BatchUpsertByKey_ call for a large synthetic contact set, never one v6UpsertByKey_ call per contact",
+          "guarantee": "the O(n^2) growing-table upsert loop responsible for the real 2026-09-16 30-minute execution-time-limit failure is gone -- call count no longer scales with contact count"
+        },
+        {
+          "name": "MKT_ACCOUNTS is read exactly once per build regardless of account count",
+          "guarantee": "the repeated per-account v6Rows_(MKT_ACCOUNTS) re-reads (previously up to 3x per account across different call sites) are eliminated"
+        },
+        {
+          "name": "the direct-spreadsheet ingest path writes MKT_AURA_GMAIL_OPPORTUNITIES and MKT_AURA_CAMPANA_A_SOURCE_ROWS via exactly one batch call each, for many source rows",
+          "guarantee": "the other real hotspot (one v6AuraGmailUpsertOpportunity_/v6UpsertByKey_ call per source row) is gone"
+        },
+        {
+          "name": "every phase of a full regenerate reports a present, non-negative profiling field (SOURCE_READ_MS, PARSE_MS, MATCH_MS, LANGUAGE_MS, ELIGIBILITY_MS, COPY_MS, QUEUE_WRITE_MS, AUDIT_MS, TOTAL_MS)",
+          "guarantee": "a future slowdown can be diagnosed by phase instead of guessed at"
+        },
+        {
+          "name": "an exceeded time budget checkpoints cleanly before processing further contacts and reports CHECKPOINTED_TIME_BUDGET_EXCEEDED with resume information, writing nothing built so far under zero-progress conditions",
+          "guarantee": "AURA never again depends on one execution finishing the whole audience in one pass"
+        },
+        {
+          "name": "a saved checkpoint resumes from the exact saved index (never reprocessing earlier recipients) and clears itself on successful completion",
+          "guarantee": "resume is real and idempotent, not just accepted and ignored"
+        }
+      ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full suite re-run after every change in this branch, most recently after the go-live pass: definitive fixes for all three Pass 14 anomalies (real-account resolution for the recipient gap, a governed stale-cross-family STOPPED override), a final pre-LIVE preflight gate, idempotent trigger install folded into the same manual step, and a real, read-only AURA dashboard added to the existing dgl-marketing-execution-os frontend (Pass 15). All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green.",
+    "description": "Full suite re-run after every change in this branch, most recently after the Pass 16 performance-fix pass: the real 2026-09-16 production timeout (RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN exceeded Apps Script max execution time for ~227 contacts) was root-caused to the O(n^2) growing-table upsert pattern in v6UpsertByKey_ being called once per contact/row across ingest, scope-build, recipient resolution, queue build, preflight and dispatch, and fixed via a new v6BatchUpsertByKey_ primitive (MarketingV6FrequencyControl.gs, one full read + in-memory merge + one full write) adopted everywhere this pipeline writes, an additive batchWrite:true opt-in on the shared v6ResolveRecipients_/v6AuraEnsureCampaignScope_ (default behavior unchanged, every existing caller/test unaffected), a preloaded-ledger optional argument on v6FrequencyStatus_, a dedicated in-memory Campana A batch dispatcher (v6AuraCampanaADispatchBatch_) replacing the shared per-job-I/O auraProcessEmailQueue for this pipeline only, per-phase timing instrumentation, and Script-Property-based checkpoint/resume for the per-contact build loop. All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green (37/37).",
     "totalFiles": 37,
     "passed": 37,
     "failed": 0,
