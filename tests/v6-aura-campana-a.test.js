@@ -388,16 +388,65 @@ function gmailOpp(accountId, accountName, amOwner, sheetName) {
   var ctx = makeContext({ tables: tables });
   var result = ctx.RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN();
   assert.equal(result.sendMode, 'DRY_RUN', 'the wrapper must still return the exact same result unchanged');
-  assert.equal(ctx.__loggedLines.length, 2, 'the wrapper must log the full result plus the flat summary');
-  var full = JSON.parse(ctx.__loggedLines[0]);
+  // v6AuraCampanaARegenerateDryRun_ (and every function it calls) now ALSO logs real-time
+  // START/END stage markers as they happen (v6AuraCampanaALog_) -- these are plain strings, not
+  // JSON, and land BEFORE the wrapper's own two JSON.stringify calls (the full result, then the
+  // flat summary), which are always the LAST two lines logged.
+  assert(ctx.__loggedLines.length > 2, 'real-time per-stage log lines must be present in addition to the final full-result/summary logs');
+  var jsonLines = ctx.__loggedLines.slice(-2);
+  var full = JSON.parse(jsonLines[0]);
   assert.equal(full.build.recipients, 1);
-  var summary = JSON.parse(ctx.__loggedLines[1]);
+  var summary = JSON.parse(jsonLines[1]);
   ['sendMode', 'recipients', 'built', 'blockedNoReplyTo', 'dispatchSuppressed', 'dispatchFailed', 'invalidEmailCount', 'duplicateJobKeys', 'byLanguage', 'realSendsDetected', 'findings'].forEach(function (key) {
     assert(key in summary, 'summary log is missing required field: ' + key);
   });
   assert.equal(summary.realSendsDetected, 0);
   assert.equal(summary.built, 1);
   console.log('campana-a test 12 (RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN logs the full result and a flat summary with every required field): PASS');
+})();
+
+// 12b. Performance-diagnosis requirement (2026-09-16, second production timeout at the same
+// ~30-minute duration): every named stage logs a real-time START line the moment it begins and
+// an END line the moment it finishes, IN ORDER -- so a run that times out mid-execution is
+// diagnosable from the Apps Script execution transcript alone (the last START line with no
+// matching END line names exactly where it got stuck), not just from a profile object a timed-out
+// run never returns.
+(function realTimeStageMarkersLoggedInOrderTest() {
+  var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
+  var sheetValues = campanaASheetValues([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High']]);
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
+  // A successful direct-spreadsheet ingest (status OK below) is required to exercise
+  // PARSE_START/END and the GMAIL_REPROCESS_SKIPPED path -- seed the real account/contact under
+  // whatever real accountId the ingest actually derives, exactly like test 18 above.
+  var ingest = ctx.v6AuraCampanaAIngestFromSpreadsheet_();
+  assert.equal(ingest.status, 'OK', 'sanity check: this test requires a real, successful ingest to exercise every stage');
+  var realAccountId = ctx.__tables.MKT_AURA_GMAIL_OPPORTUNITIES[0].accountId;
+  tables.MKT_ACCOUNTS.push({ accountId: realAccountId, accountName: 'Progeral Corp' });
+  tables.MKT_CONTACTS_SECURE.push({ contactId: 'CON-1', accountId: realAccountId, firstName: 'Maria', email: 'maria@progeral.com', country: 'Colombia' });
+  ctx.__loggedLines.length = 0; // this test only cares about markers from the regenerate call below
+  ctx.v6AuraCampanaARegenerateDryRun_();
+  var lines = ctx.__loggedLines;
+  var expectedInOrder = [
+    'REGENERATE_START', 'TRIGGER_INSTALL_START', 'TRIGGER_INSTALL_END',
+    'SOURCE_READ_START', 'SOURCE_READ_END', 'PARSE_START', 'PARSE_END',
+    'MATCH_START', 'MATCH_END', 'ELIGIBILITY_START', 'ELIGIBILITY_END',
+    'MATCH_START (per-contact index preload)', 'MATCH_END (per-contact index preload',
+    'LANGUAGE_START', 'LANGUAGE_END', 'ELIGIBILITY_END (per-contact', 'COPY_END',
+    'QUEUE_WRITE_START', 'QUEUE_WRITE_END',
+    'PREFLIGHT_START', 'PREFLIGHT_END', 'DISPATCH_START', 'DISPATCH_END',
+    'AUDIT_START', 'AUDIT_END', 'REGENERATE_END'
+  ];
+  var lastIndex = -1;
+  expectedInOrder.forEach(function (marker) {
+    var idx = lines.findIndex(function (line, i) { return i > lastIndex && line.indexOf(marker) >= 0; });
+    assert(idx >= 0, 'expected stage marker not found (or out of order) after index ' + lastIndex + ': ' + marker);
+    lastIndex = idx;
+  });
+  // The Gmail reprocess fallback must be explicitly logged as SKIPPED (not silently omitted)
+  // when the direct spreadsheet read already succeeded -- proves the redundant-work elimination
+  // is visible, not just assumed.
+  assert(lines.some(function (l) { return l.indexOf('GMAIL_REPROCESS_SKIPPED') >= 0; }), 'a successful direct ingest must log that the Gmail reprocess fallback was skipped as redundant');
+  console.log('campana-a test 12b (every named stage logs a real-time START/END marker in order, and the redundant Gmail-reprocess fallback is explicitly logged as skipped): PASS');
 })();
 
 function campanaASheetValues(dataRows) {

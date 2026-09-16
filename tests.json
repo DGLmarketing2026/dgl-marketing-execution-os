@@ -564,10 +564,40 @@
           "guarantee": "resume is real and idempotent, not just accepted and ignored"
         }
       ]
+    },
+    {
+      "file": "tests/v6-aura-gmail-process-message.test.js (Pass 17, new file)",
+      "cases": [
+        {
+          "name": "a message with many accepted rows across a recognized tab writes MKT_AURA_GMAIL_OPPORTUNITIES via exactly one batch call, never one v6UpsertByKey_ call per row",
+          "guarantee": "v6AuraGmailProcessMessage_ (called by the always-scheduled hourly Gmail tick AND by the Campana A fallback reprocess path) had the SAME O(n^2) per-row upsert bug as the already-fixed Campana A direct-ingest path -- now fixed identically"
+        },
+        {
+          "name": "reprocessing the same account in a later message updates the existing opportunity row in place, never duplicates it",
+          "guarantee": "idempotency is preserved by the batch rewrite"
+        },
+        {
+          "name": "rejected rows are recorded via one batch call and never block the accepted rows in the same message",
+          "guarantee": "MKT_AURA_INGEST_REJECTIONS is batched the same way, with the same behavior-preserving guarantee"
+        }
+      ]
+    },
+    {
+      "file": "tests/v6-aura-campana-a.test.js (Pass 17 additions)",
+      "cases": [
+        {
+          "name": "every named pipeline stage (SOURCE_READ, PARSE, MATCH, ELIGIBILITY, LANGUAGE, COPY, QUEUE_WRITE, PREFLIGHT, DISPATCH, AUDIT, plus REGENERATE/TRIGGER_INSTALL) logs a real-time START marker the moment it begins and an END marker the moment it finishes, in the correct order",
+          "guarantee": "a run that times out mid-execution is diagnosable from the Apps Script execution transcript alone -- the last START line with no matching END line names exactly where it got stuck -- instead of only from a profile object a timed-out run never returns"
+        },
+        {
+          "name": "when the direct-spreadsheet ingest already succeeds, the Gmail-reprocess fallback is explicitly logged as SKIPPED and never actually runs",
+          "guarantee": "a second, independently-discovered performance issue (v6AuraGmailReprocessRecent_ can trigger slow, network-bound Gmail search + XLSX-to-Sheet Drive conversion per recent message) is eliminated for the redundant case without ever skipping it when it is genuinely needed (a failed direct read)"
+        }
+      ]
     }
   ],
   "regressionCoverage": {
-    "description": "Full suite re-run after every change in this branch, most recently after the Pass 16 performance-fix pass: the real 2026-09-16 production timeout (RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN exceeded Apps Script max execution time for ~227 contacts) was root-caused to the O(n^2) growing-table upsert pattern in v6UpsertByKey_ being called once per contact/row across ingest, scope-build, recipient resolution, queue build, preflight and dispatch, and fixed via a new v6BatchUpsertByKey_ primitive (MarketingV6FrequencyControl.gs, one full read + in-memory merge + one full write) adopted everywhere this pipeline writes, an additive batchWrite:true opt-in on the shared v6ResolveRecipients_/v6AuraEnsureCampaignScope_ (default behavior unchanged, every existing caller/test unaffected), a preloaded-ledger optional argument on v6FrequencyStatus_, a dedicated in-memory Campana A batch dispatcher (v6AuraCampanaADispatchBatch_) replacing the shared per-job-I/O auraProcessEmailQueue for this pipeline only, per-phase timing instrumentation, and Script-Property-based checkpoint/resume for the per-contact build loop. All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green (37/37).",
+    "description": "Full suite re-run after every change in this branch, most recently after Pass 17: a SECOND real production timeout (RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN, same ~30-minute duration) was reported AFTER the Pass 16 Sheets-I/O batching fix, proving that fix alone was insufficient. Root-caused two additional, previously-unexamined bottlenecks: (1) v6AuraGmailProcessMessage_ (MarketingV6AuraGmailIngest.gs), called by both the always-scheduled hourly Gmail tick and by Campana A's own Gmail-reprocess fallback, had the IDENTICAL per-row v6UpsertByKey_ O(n^2) bug already fixed elsewhere in Pass 16 -- now fixed the same way (batched via v6AuraGmailBuildOpportunityRow_ + v6BatchUpsertByKey_); (2) v6AuraGmailReprocessRecent_ itself performs a genuinely slow, network-bound GmailApp.search plus, per matching message, an XLSX-to-Google-Sheet Drive Advanced Service conversion -- entirely unrelated to Sheets I/O and therefore invisible to the Pass 16 fix -- and was called UNCONDITIONALLY on every Campana A regenerate even though it is documented as a fallback only needed when the primary direct-spreadsheet read fails; it is now skipped (logged explicitly) whenever the direct read already succeeded. Additionally added real-time START/END stage-marker logging (v6AuraCampanaALog_) across every named pipeline stage plus the two newly-discovered ones (GMAIL_REPROCESS, REFRESH_OPPORTUNITIES), visible live in the Apps Script execution transcript during a run, not only in a final profile object a timed-out run never returns. All previously-recorded pre-existing failures (7 files, unrelated V5.5/legacy frontend assertions, see history below) remain absent from the current tree -- the full suite is green (38/38).",
     "totalFiles": 37,
     "passed": 37,
     "failed": 0,

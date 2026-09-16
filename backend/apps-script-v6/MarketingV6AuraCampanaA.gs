@@ -38,6 +38,16 @@ var CAMPANA_A_SHEET_NAME_ = 'Campana A - HA prioritaria';
 var CAMPANA_A_CAMPAIGN_ID_ = 'CMP-CAMPANA-A-HA-PRIORITARIA';
 var CAMPANA_A_SCOPE_ID_ = 'SCOPE-CAMPANA-A-HA-PRIORITARIA';
 
+// Real-time stage markers (2026-09-16 second timeout, same ~30-minute duration as the first):
+// per-stage totals returned at the END of a run are useless if the run never reaches the end --
+// this logs a line the moment each stage starts and ends, so the Apps Script execution
+// transcript (visible live, in the editor's execution log, while a manual run is still in
+// progress) shows exactly which stage is CURRENTLY running, not just which stages already
+// finished. Never throws -- logging must never mask or block the real work.
+function v6AuraCampanaALog_(stage) {
+  try { console.log('[AURA CAMPANA A] ' + stage + ' @ ' + new Date().toISOString()); } catch (err) { /* logging must never block the pipeline */ }
+}
+
 // --- Direct source read ------------------------------------------------------------------------
 // Root cause of the 0-recipients run: this pipeline had NO direct reference to the real source
 // workbook at all -- it only ever read MKT_AURA_GMAIL_OPPORTUNITIES, itself populated
@@ -69,14 +79,16 @@ function v6AuraCampanaAResolveSourceSpreadsheetId_() {
 // file inaccessible, tab missing, tab recognized but empty) -- never silently returns zero rows
 // without saying why.
 function v6AuraCampanaAIngestFromSpreadsheet_() {
+  v6AuraCampanaALog_('SOURCE_READ_START');
   var t0 = Date.now();
   var spreadsheetId = v6AuraCampanaAResolveSourceSpreadsheetId_();
-  if (!spreadsheetId) return { status: 'SPREADSHEET_ID_NOT_CONFIGURED', spreadsheetId: '' };
+  if (!spreadsheetId) { v6AuraCampanaALog_('SOURCE_READ_END (SPREADSHEET_ID_NOT_CONFIGURED)'); return { status: 'SPREADSHEET_ID_NOT_CONFIGURED', spreadsheetId: '' }; }
   var ss;
   try { ss = SpreadsheetApp.openById(spreadsheetId); }
-  catch (err) { return { status: 'SPREADSHEET_NOT_ACCESSIBLE', spreadsheetId: spreadsheetId, error: String(err && err.message || err) }; }
+  catch (err) { v6AuraCampanaALog_('SOURCE_READ_END (SPREADSHEET_NOT_ACCESSIBLE)'); return { status: 'SPREADSHEET_NOT_ACCESSIBLE', spreadsheetId: spreadsheetId, error: String(err && err.message || err) }; }
   var sheet = ss.getSheetByName(CAMPANA_A_SHEET_NAME_);
   if (!sheet) {
+    v6AuraCampanaALog_('SOURCE_READ_END (TAB_NOT_FOUND)');
     return {
       status: 'TAB_NOT_FOUND', spreadsheetId: spreadsheetId, sheetName: CAMPANA_A_SHEET_NAME_,
       availableSheets: ss.getSheets().map(function (s) { return s.getName(); })
@@ -84,6 +96,8 @@ function v6AuraCampanaAIngestFromSpreadsheet_() {
   }
   var values = sheet.getDataRange().getValues();
   var sourceReadMs = Date.now() - t0;
+  v6AuraCampanaALog_('SOURCE_READ_END (' + values.length + ' rows, ' + sourceReadMs + 'ms)');
+  v6AuraCampanaALog_('PARSE_START');
   var t1 = Date.now();
   // Diagnostic ground truth FIRST, independent of whether v6AuraGmailParseTable_ recognizes the
   // layout below -- every real row, every real header name, persisted before any accept/reject
@@ -93,6 +107,7 @@ function v6AuraCampanaAIngestFromSpreadsheet_() {
   var ctx = { messageId: 'DIRECT_SPREADSHEET_READ:' + spreadsheetId, receivedAt: new Date().toISOString(), sourceFile: 'Marketing_DGL_14-09-2026' };
   var parsed = v6AuraGmailParseTable_(CAMPANA_A_SHEET_NAME_, values, ctx);
   if (!parsed || parsed.unrecognizedLayout) {
+    v6AuraCampanaALog_('PARSE_END (TAB_EMPTY_OR_UNRECOGNIZED_LAYOUT)');
     return { status: 'TAB_EMPTY_OR_UNRECOGNIZED_LAYOUT', spreadsheetId: spreadsheetId, sheetName: CAMPANA_A_SHEET_NAME_, rowsInSheet: values.length, headersFound: sourceRows.headers, profile: { SOURCE_READ_MS: sourceReadMs, PARSE_MS: Date.now() - t1 } };
   }
   // Every candidate's row shape is computed in memory (v6AuraGmailBuildOpportunityRow_, pure, no
@@ -114,6 +129,7 @@ function v6AuraCampanaAIngestFromSpreadsheet_() {
   if (opportunityRows.length) v6BatchUpsertByKey_('MKT_AURA_GMAIL_OPPORTUNITIES', ['opportunityId'], opportunityRows);
   var contactColumnsFound = sourceRows.rows.filter(function (r) { return r.contactName || r.email; }).length;
   var countryColumnFound = sourceRows.rows.filter(function (r) { return r.country; }).length;
+  v6AuraCampanaALog_('PARSE_END (' + parsed.accepted.length + ' accepted, ' + (Date.now() - t1) + 'ms)');
   return {
     status: parsed.accepted.length ? 'OK' : 'TAB_FOUND_BUT_ZERO_ACCEPTED_ROWS',
     spreadsheetId: spreadsheetId, sheetName: CAMPANA_A_SHEET_NAME_, rowsInSheet: values.length,
@@ -546,12 +562,13 @@ function v6AuraCampanaAClearBuildCheckpoint_() {
 // QUEUE_WRITE_MS) are returned on result.profile.
 function v6AuraCampanaABuildQueue_() {
   var profile = { MATCH_MS: 0, LANGUAGE_MS: 0, ELIGIBILITY_MS: 0, COPY_MS: 0, QUEUE_WRITE_MS: 0 };
+  v6AuraCampanaALog_('MATCH_START');
   var tMatch0 = Date.now();
   v6EnsureContactRecipientSchema_();
   var accounts = v6Rows_('MKT_ACCOUNTS');
   var setup = v6AuraCampanaAEnsureCampaignAndScope_(accounts);
   var result = { status: setup.count ? 'QUEUE_BUILD_COMPLETE' : 'SOURCE_EMPTY_OR_NOT_FOUND', campaignId: CAMPANA_A_CAMPAIGN_ID_, accounts: setup.count, recipients: 0, built: 0, skippedExisting: 0, skippedIneligible: 0, blockedNoReplyTo: 0, byLanguage: { ES: 0, EN: 0, PT: 0 } };
-  if (!setup.count) { result.profile = profile; return result; }
+  if (!setup.count) { profile.MATCH_MS = Date.now() - tMatch0; v6AuraCampanaALog_('MATCH_END (0 accounts, SOURCE_EMPTY_OR_NOT_FOUND)'); result.profile = profile; return result; }
 
   // recipients below are keyed by the REAL MKT_ACCOUNTS accountId (v6AuraCampanaAEnsureCampaignAndScope_
   // scopes by that id now, not always the hash id) -- this re-keys the same Gmail-opportunity data
@@ -564,12 +581,21 @@ function v6AuraCampanaABuildQueue_() {
   });
   var campaigns = v6Rows_('MKT_CAMPAIGNS');
   var campaign = campaigns.filter(function (c) { return v6AuraEmailText_(c.campaignId) === CAMPANA_A_CAMPAIGN_ID_; })[0] || {};
+  profile.MATCH_MS += Date.now() - tMatch0;
+  v6AuraCampanaALog_('MATCH_END (' + setup.count + ' accounts)');
+
+  v6AuraCampanaALog_('ELIGIBILITY_START (v6ResolveRecipients_, DNC/email/exclusion/frequency)');
+  var tElig0 = Date.now();
   v6ResolveRecipients_({ campaignId: CAMPANA_A_CAMPAIGN_ID_, batchWrite: true });
   var recipients = v6Rows_('MKT_AUDIENCES').filter(function (r) {
     return v6AuraEmailText_(r.recordType) === 'RECIPIENT' && v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && v6AuraEmailText_(r.eligibilityStatus).toUpperCase() === 'ELIGIBLE';
   });
   result.recipients = recipients.length;
+  profile.ELIGIBILITY_MS += Date.now() - tElig0;
+  v6AuraCampanaALog_('ELIGIBILITY_END (' + recipients.length + ' eligible, ' + profile.ELIGIBILITY_MS + 'ms)');
 
+  v6AuraCampanaALog_('MATCH_START (per-contact index preload)');
+  var tMatch1 = Date.now();
   var existingIds = {};
   v6Rows_('MKT_EMAIL_QUEUE').forEach(function (r) { existingIds[v6AuraEmailText_(r.jobId)] = true; });
   var accountsById = {}; accounts.forEach(function (a) { accountsById[v6AuraEmailText_(a.accountId)] = a; });
@@ -593,17 +619,20 @@ function v6AuraCampanaABuildQueue_() {
     if (!copyCache[lang]) copyCache[lang] = v6AuraGenerateCopy_({}, Object.assign({}, campaign, { language: v6AuraCampanaALanguageCampaignFlag_(lang) }));
     return copyCache[lang];
   }
-  profile.MATCH_MS += Date.now() - tMatch0;
+  profile.MATCH_MS += Date.now() - tMatch1;
+  v6AuraCampanaALog_('MATCH_END (per-contact index preload, ' + profile.MATCH_MS + 'ms total)');
 
   var checkpoint = v6AuraCampanaAReadBuildCheckpoint_();
   var startIndex = (checkpoint && checkpoint.campaignId === CAMPANA_A_CAMPAIGN_ID_ && checkpoint.totalRecipients === recipients.length) ? checkpoint.lastProcessedIndex : 0;
   var budgetMs = v6AuraCampanaABuildTimeBudgetMs_();
+  v6AuraCampanaALog_('LANGUAGE_START (per-contact loop: language + eligibility(stop/override) + copy, ' + (recipients.length - startIndex) + ' of ' + recipients.length + ' recipients, resuming at index ' + startIndex + ')');
   var loopStart = Date.now();
   var pendingJobs = [];
   var sequenceStep = 1;
   var i, checkpointed = false;
   for (i = startIndex; i < recipients.length; i++) {
     if (Date.now() - loopStart >= budgetMs) { checkpointed = true; break; }
+    if (i > startIndex && (i - startIndex) % 50 === 0) v6AuraCampanaALog_('LANGUAGE/ELIGIBILITY/COPY progress: ' + (i - startIndex) + '/' + (recipients.length - startIndex) + ' processed, ' + (Date.now() - loopStart) + 'ms elapsed');
     var r = recipients[i];
     var accountId = v6AuraEmailText_(r.accountId), contactId = v6AuraEmailText_(r.contactId);
     var jobId = v6AuraEmailJobId_(CAMPANA_A_CAMPAIGN_ID_, contactId, sequenceStep);
@@ -664,15 +693,21 @@ function v6AuraCampanaABuildQueue_() {
     result.built++;
     if (replyToBlocked) result.blockedNoReplyTo++;
   }
+  v6AuraCampanaALog_('LANGUAGE_END (' + profile.LANGUAGE_MS + 'ms total)');
+  v6AuraCampanaALog_('ELIGIBILITY_END (per-contact stop/override check, +' + profile.ELIGIBILITY_MS + 'ms total including the earlier v6ResolveRecipients_ call)');
+  v6AuraCampanaALog_('COPY_END (' + profile.COPY_MS + 'ms total, ' + result.built + ' jobs built)');
 
+  v6AuraCampanaALog_('QUEUE_WRITE_START (' + pendingJobs.length + ' new jobs)');
   var tWrite0 = Date.now();
   if (pendingJobs.length) v6BatchUpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], pendingJobs);
   profile.QUEUE_WRITE_MS += Date.now() - tWrite0;
+  v6AuraCampanaALog_('QUEUE_WRITE_END (' + profile.QUEUE_WRITE_MS + 'ms)');
 
   if (checkpointed) {
     v6AuraCampanaASaveBuildCheckpoint_({ campaignId: CAMPANA_A_CAMPAIGN_ID_, totalRecipients: recipients.length, lastProcessedIndex: i, checkpointedAt: new Date().toISOString() });
     result.status = 'CHECKPOINTED_TIME_BUDGET_EXCEEDED';
     result.checkpoint = { resumeFromIndex: i, totalRecipients: recipients.length, remaining: recipients.length - i };
+    v6AuraCampanaALog_('BUILD_CHECKPOINTED (resume from index ' + i + ' of ' + recipients.length + ')');
   } else {
     v6AuraCampanaAClearBuildCheckpoint_();
   }
@@ -720,6 +755,7 @@ function v6AuraCampanaAStoppedBreakdown_() {
 // readyForLive: true only when at least one job would actually go out and zero jobs remain in an
 // undetermined state.
 function v6AuraCampanaAPreflight_() {
+  v6AuraCampanaALog_('PREFLIGHT_START');
   var jobs = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) { return v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && r.status === 'PENDING'; });
   var exclusions = v6Rows_('MKT_EXCLUSIONS');
   var wouldSend = 0, suppressedNow = 0, byLanguage = { ES: 0, EN: 0, PT: 0 }, issues = [], toSuppress = [];
@@ -742,6 +778,7 @@ function v6AuraCampanaAPreflight_() {
     }
   });
   if (toSuppress.length) v6BatchUpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], toSuppress);
+  v6AuraCampanaALog_('PREFLIGHT_END (' + jobs.length + ' pending, ' + wouldSend + ' wouldSend, ' + suppressedNow + ' suppressed)');
   return {
     status: 'PREFLIGHT_COMPLETE', totalPending: jobs.length, wouldSend: wouldSend, suppressedByPreflight: suppressedNow,
     byLanguage: byLanguage, issues: issues, readyForLive: jobs.length > 0 && wouldSend > 0
@@ -762,12 +799,13 @@ function v6AuraCampanaAPreflight_() {
 // is an unavoidable, real per-recipient action, not a Sheets read/write, and is never part of
 // the performance problem this pass fixes.
 function v6AuraCampanaADispatchBatch_() {
+  v6AuraCampanaALog_('DISPATCH_START');
   var mode = v6AuraSendMode_();
   var senderName = v6AuraEmailSenderName_();
   var allQueueJobs = v6Rows_('MKT_EMAIL_QUEUE');
   var jobs = allQueueJobs.filter(function (r) { return v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && v6AuraEmailText_(r.status).toUpperCase() === 'PENDING'; });
   var counts = { sent: 0, failed: 0, suppressed: 0, skipped: 0, stopped: 0, reviewRequired: 0, dryRun: 0 };
-  if (!jobs.length) return { status: 'DISPATCH_COMPLETE', sendMode: mode, rounds: 0, processed: 0, sent: 0, failed: 0, suppressed: 0, skipped: 0, stopped: 0, reviewRequired: 0, dryRun: 0 };
+  if (!jobs.length) { v6AuraCampanaALog_('DISPATCH_END (0 pending jobs)'); return { status: 'DISPATCH_COMPLETE', sendMode: mode, rounds: 0, processed: 0, sent: 0, failed: 0, suppressed: 0, skipped: 0, stopped: 0, reviewRequired: 0, dryRun: 0 }; }
 
   var exclusions = v6Rows_('MKT_EXCLUSIONS');
   var pipelineByAccountId = {};
@@ -833,6 +871,7 @@ function v6AuraCampanaADispatchBatch_() {
 
   if (updated.length) v6BatchUpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], updated);
   try { v6AuraRefreshExecutionReportStatusOnly_(CAMPANA_A_CAMPAIGN_ID_); } catch (_) { }
+  v6AuraCampanaALog_('DISPATCH_END (' + jobs.length + ' processed: ' + counts.dryRun + ' dryRun, ' + counts.sent + ' sent, ' + counts.suppressed + ' suppressed, ' + counts.stopped + ' stopped, ' + counts.skipped + ' skipped, ' + counts.reviewRequired + ' reviewRequired, ' + counts.failed + ' failed)');
   return { status: 'DISPATCH_COMPLETE', sendMode: mode, rounds: 1, processed: jobs.length, sent: counts.sent, failed: counts.failed, suppressed: counts.suppressed, skipped: counts.skipped, stopped: counts.stopped, reviewRequired: counts.reviewRequired, dryRun: counts.dryRun };
 }
 // Kept as the public entry point v6AuraCampanaARegenerateDryRun_ already calls -- now a single
@@ -910,17 +949,61 @@ function v6AuraCampanaAAudit_() {
 // COPY_MS/QUEUE_WRITE_MS from build, AUDIT_MS here, TOTAL_MS for the whole call) is returned on
 // result.profile -- the exact fields DGL asked this pass to report.
 function v6AuraCampanaARegenerateDryRun_() {
+  v6AuraCampanaALog_('REGENERATE_START');
   var tTotal0 = Date.now();
   auraDisableLiveSending();
   // Idempotent (checks existing triggers by handler name before creating one -- never
   // duplicates). Installed here so the one manual execution DGL runs also confirms the
   // dispatcher's own hourly trigger exists, without requiring a second manual step.
+  v6AuraCampanaALog_('TRIGGER_INSTALL_START');
   var triggerStatus = (typeof auraInstallTriggers === 'function') ? auraInstallTriggers() : { status: 'NOT_AVAILABLE' };
+  v6AuraCampanaALog_('TRIGGER_INSTALL_END (' + triggerStatus.status + ')');
+
   var ingest = v6AuraCampanaAIngestFromSpreadsheet_();
-  if (typeof v6AuraGmailReprocessRecent_ === 'function') {
-    try { v6AuraGmailReprocessRecent_(45); } catch (err) { /* best-effort fallback source only, never fatal to the direct read */ }
+
+  // Performance fix (2026-09-16, second timeout at the same ~30-minute duration as the first):
+  // v6AuraGmailReprocessRecent_ searches Gmail and, for every matching message, may convert an
+  // XLSX attachment to a throwaway Google Sheet via the Drive Advanced Service (create, open,
+  // read every tab, delete) -- a genuinely slow, network-bound operation with no relationship to
+  // Sheets I/O, and therefore untouched by the MKT_EMAIL_QUEUE/MKT_AUDIENCES/
+  // MKT_AURA_GMAIL_OPPORTUNITIES batching fix. It is explicitly documented (see its own comment)
+  // as a best-effort FALLBACK path only needed when the primary, direct-spreadsheet read (above)
+  // did not itself produce a usable result -- when the direct read already succeeded, reprocessing
+  // Gmail is redundant work reprocessing the exact same accounts a second, much slower way, not a
+  // required protection. Skipping it in that case removes no eligibility/suppression/governance
+  // check and processes no fewer contacts or accounts -- v6AuraCampanaABuildQueue_ never reads
+  // from Gmail-sourced data directly for THIS campaign's own tab; it only reads
+  // MKT_AURA_GMAIL_OPPORTUNITIES rows sourced from THIS tab, which the direct read above already
+  // populated. v6AuraGmailProcessMessage_'s own per-row upsert loop was also fixed in this same
+  // pass (batched, MarketingV6AuraGmailIngest.gs) for the case where this fallback DOES need to
+  // run (ingest failure) or for the separately-scheduled hourly Gmail tick.
+  var gmailReprocess = null, gmailReprocessMs = 0;
+  if (ingest && ingest.status === 'OK') {
+    v6AuraCampanaALog_('GMAIL_REPROCESS_SKIPPED (direct spreadsheet read already succeeded; the Gmail fallback would only reprocess the same accounts redundantly)');
+  } else if (typeof v6AuraGmailReprocessRecent_ === 'function') {
+    v6AuraCampanaALog_('GMAIL_REPROCESS_START (direct read did not fully succeed: ' + (ingest && ingest.status) + ')');
+    var tGmail0 = Date.now();
+    try { gmailReprocess = v6AuraGmailReprocessRecent_(45); } catch (err) { gmailReprocess = { status: 'ERROR', error: String(err && err.message || err) }; /* best-effort fallback source only, never fatal to the direct read */ }
+    gmailReprocessMs = Date.now() - tGmail0;
+    v6AuraCampanaALog_('GMAIL_REPROCESS_END (' + gmailReprocessMs + 'ms, ' + JSON.stringify(gmailReprocess && gmailReprocess.status) + ')');
   }
-  if (typeof v6RefreshOpportunitiesFromReports_ === 'function') v6RefreshOpportunitiesFromReports_();
+
+  // v6RefreshOpportunitiesFromReports_ is the SHARED, cross-family (QNB/Retention/Reactivation/
+  // Cross-Sell/Nurture) detection refresh -- it reads the full real NOVA/AM report workbook
+  // (several tabs, the entire account base, not just this campaign's ~65 accounts) and was never
+  // part of Campana A's own O(n^2) bug (its own write path, v6WriteOpportunities_, already does a
+  // single clear + single batch write). It is timed and logged here for the first time so a real
+  // slowdown caused by report VOLUME (as opposed to a code-level O(n^2) pattern) is visible
+  // instead of silently absorbed into "the Campana A run is slow."
+  var refreshOpportunities = null, refreshOpportunitiesMs = 0;
+  if (typeof v6RefreshOpportunitiesFromReports_ === 'function') {
+    v6AuraCampanaALog_('REFRESH_OPPORTUNITIES_START (shared cross-family detection refresh, full account base)');
+    var tRefresh0 = Date.now();
+    refreshOpportunities = v6RefreshOpportunitiesFromReports_();
+    refreshOpportunitiesMs = Date.now() - tRefresh0;
+    v6AuraCampanaALog_('REFRESH_OPPORTUNITIES_END (' + refreshOpportunitiesMs + 'ms)');
+  }
+
   var build = v6AuraCampanaABuildQueue_();
   // Preflight runs BEFORE dispatch, every time, in both DRY_RUN and LIVE -- any job that cannot
   // be safely determined (invalid email, missing/invalid reply-to, an exclusion that appeared
@@ -928,28 +1011,33 @@ function v6AuraCampanaARegenerateDryRun_() {
   // every other job in the campaign proceeds unaffected.
   var preflight = v6AuraCampanaAPreflight_();
   var dispatch = v6AuraCampanaADispatchAll_();
+  v6AuraCampanaALog_('AUDIT_START');
   var tAudit0 = Date.now();
   var audit = v6AuraCampanaAAudit_();
   var auditMs = Date.now() - tAudit0;
+  v6AuraCampanaALog_('AUDIT_END (' + auditMs + 'ms)');
   var profile = Object.assign(
     { SOURCE_READ_MS: 0, PARSE_MS: 0 }, ingest && ingest.profile,
     { MATCH_MS: 0, LANGUAGE_MS: 0, ELIGIBILITY_MS: 0, COPY_MS: 0, QUEUE_WRITE_MS: 0 }, build && build.profile,
-    { AUDIT_MS: auditMs }
+    { AUDIT_MS: auditMs, GMAIL_REPROCESS_MS: gmailReprocessMs, REFRESH_OPPORTUNITIES_MS: refreshOpportunitiesMs }
   );
   profile.TOTAL_MS = Date.now() - tTotal0;
+  v6AuraCampanaALog_('REGENERATE_END (TOTAL_MS=' + profile.TOTAL_MS + ')');
   return {
     status: audit.sourceStatus === 'SOURCE_EMPTY_OR_NOT_FOUND' ? 'SOURCE_EMPTY_OR_NOT_FOUND' : (build.status === 'CHECKPOINTED_TIME_BUDGET_EXCEEDED' ? 'CHECKPOINTED_TIME_BUDGET_EXCEEDED' : 'REGENERATE_COMPLETE'),
-    sendMode: v6AuraSendMode_(), triggerStatus: triggerStatus, ingest: ingest, build: build, preflight: preflight, dispatch: dispatch, audit: audit,
+    sendMode: v6AuraSendMode_(), triggerStatus: triggerStatus, ingest: ingest, gmailReprocess: gmailReprocess, refreshOpportunities: refreshOpportunities, build: build, preflight: preflight, dispatch: dispatch, audit: audit,
     profile: profile
   };
 }
-// Logging lives ONLY in this public wrapper -- v6AuraCampanaARegenerateDryRun_ itself is
-// unchanged, so anything calling it directly (tests, the router) sees identical behavior. A
-// human running this from the Apps Script editor has no other way to see the result once the
-// execution ends (the Cloud Logging entry for a given run is not always available/retained), so
-// this prints the exact same object the function already returns, plus the specific fields DGL
-// asked to see at a glance without parsing the full JSON. Never throws on a logging failure --
-// the real result is still returned either way.
+// A human running this from the Apps Script editor has no other way to see the FINAL result once
+// the execution ends (the Cloud Logging entry for a given run is not always available/retained),
+// so this prints the exact same object the function already returns, plus the specific fields DGL
+// asked to see at a glance without parsing the full JSON. v6AuraCampanaARegenerateDryRun_ itself
+// (and every function it calls) now ALSO logs real-time START/END stage markers as they happen
+// (v6AuraCampanaALog_) -- visible live in the execution transcript even if the run never reaches
+// this wrapper's own final log line, so a future timeout is diagnosable by "which stage's START
+// line is the last one logged" instead of only after-the-fact. Never throws on a logging
+// failure -- the real result is still returned either way.
 function RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN() {
   var result = v6AuraCampanaARegenerateDryRun_();
   try {
@@ -976,6 +1064,9 @@ function RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN() {
       matchReport: result.audit && result.audit.matchReport,
       realSendsDetected: result.audit && result.audit.realSendsDetected,
       findings: result.audit && result.audit.findings,
+      gmailReprocessSkipped: result.gmailReprocess === null,
+      gmailReprocessStatus: result.gmailReprocess && result.gmailReprocess.status,
+      refreshOpportunitiesStatus: result.refreshOpportunities && result.refreshOpportunities.status,
       profile: result.profile
     }));
   } catch (err) { /* logging must never mask the real result */ }

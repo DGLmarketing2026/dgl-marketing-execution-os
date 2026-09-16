@@ -212,25 +212,43 @@ function v6AuraGmailProcessMessage_(msg, thread) {
     }
     ctx.sourceFile = sourceFile;
     if (tables) {
-      var created = 0, updated = 0, rowsParsed = 0, rowsAccepted = 0, rowsRejected = 0;
+      // Performance fix (2026-09-16 production incident, MarketingV6AuraCampanaA.gs): every
+      // accepted row across every table in this message was previously upserted individually
+      // (v6AuraGmailUpsertOpportunity_ -- two full-table reads + one write PER ROW, against
+      // MKT_AURA_GMAIL_OPPORTUNITIES, a table shared and grown by every ingest source). A single
+      // report email can carry hundreds of rows across the whole account base (not just one
+      // dedicated campaign's tab), so this loop is now: compute every accepted row's shape in
+      // memory (v6AuraGmailBuildOpportunityRow_, pure, no I/O) across ALL tables in the message,
+      // then write them ALL in one v6BatchUpsertByKey_ call -- same "last row wins" semantic,
+      // same created/updated counting, but O(1) Sheets round trips per message instead of O(n).
+      // MKT_AURA_INGEST_REJECTIONS is batched the same way.
+      var rowsParsed = 0, rowsAccepted = 0, rowsRejected = 0;
+      var existingOppIds = {};
+      v6AuraGmailRows_('MKT_AURA_GMAIL_OPPORTUNITIES').forEach(function (r) { existingOppIds[v6AuraGmailText_(r.opportunityId)] = true; });
+      var opportunityRows = [], rejectionRows = [];
       tables.forEach(function (table) {
         var parsed = v6AuraGmailParseTable_(table.name, table.values, ctx);
         if (!parsed || parsed.dataQuality || parsed.unrecognizedLayout) return;
         rowsParsed += parsed.rowCount;
         rowsAccepted += parsed.accepted.length;
         rowsRejected += parsed.rejected.length;
-        parsed.accepted.forEach(function (candidate) {
-          var result = v6AuraGmailUpsertOpportunity_(candidate, ctx);
-          if (result === 'created') created++; else updated++;
-        });
+        parsed.accepted.forEach(function (candidate) { opportunityRows.push(v6AuraGmailBuildOpportunityRow_(candidate, ctx)); });
         parsed.rejected.forEach(function (rej) {
-          v6UpsertByKey_('MKT_AURA_INGEST_REJECTIONS', ['rejectionId'], {
+          rejectionRows.push({
             rejectionId: 'REJ-' + v6HashKey_(messageId + '|' + table.name + '|' + rej.row),
             gmailMessageId: messageId, sourceFile: sourceFile, sheetName: table.name, row: rej.row,
             reason: rej.reason, processedAt: v6AuraGmailNow_()
           });
         });
       });
+      var created = 0, updated = 0, uniqueOppIdsInBatch = {};
+      opportunityRows.forEach(function (row) {
+        var isNewOverall = !existingOppIds[row.opportunityId] && !uniqueOppIdsInBatch[row.opportunityId];
+        uniqueOppIdsInBatch[row.opportunityId] = true;
+        if (isNewOverall) created++; else updated++;
+      });
+      if (opportunityRows.length) v6BatchUpsertByKey_('MKT_AURA_GMAIL_OPPORTUNITIES', ['opportunityId'], opportunityRows);
+      if (rejectionRows.length) v6BatchUpsertByKey_('MKT_AURA_INGEST_REJECTIONS', ['rejectionId'], rejectionRows);
       logRow.rowsParsed = rowsParsed; logRow.rowsAccepted = rowsAccepted; logRow.rowsRejected = rowsRejected;
       logRow.opportunitiesCreated = created; logRow.opportunitiesUpdated = updated;
       if (logRow.status === 'PROCESSING') logRow.status = rowsAccepted > 0 ? 'OK' : 'PARTIAL';

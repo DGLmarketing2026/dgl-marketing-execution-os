@@ -2,6 +2,93 @@
 
 Branch: `retention/v1-aura-integration-20260911` (pushed to `origin`).
 
+## Pass 17 — Second production timeout: the Pass 16 fix was necessary but not sufficient
+
+**DGL reported a SECOND real timeout, same ~30-minute duration**, running the exact function
+Pass 16 had just fixed: `RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN()` started 9:33:56, "Exceeded
+maximum execution time" at 10:03:58. This proved the Pass 16 Sheets-I/O batching fix, while
+correct and necessary, was not the whole story -- something else in the same call chain was
+still slow, and it was NOT covered by Pass 16's own synthetic tests (which only ever exercise
+`MarketingV6AuraCampanaA.gs`'s own I/O, stubbing out everything it calls).
+
+**Two additional, previously-unexamined bottlenecks found by re-tracing the FULL call chain
+`v6AuraCampanaARegenerateDryRun_` actually invokes** (not just the file Pass 16 already fixed):
+
+1. **`v6AuraGmailProcessMessage_`** (`MarketingV6AuraGmailIngest.gs`) -- called both by the
+   always-scheduled hourly Gmail tick AND by Campana A's own `v6AuraGmailReprocessRecent_`
+   fallback (see #2). It had the IDENTICAL per-row bug Pass 16 already fixed elsewhere in this
+   same file: `parsed.accepted.forEach(candidate => v6AuraGmailUpsertOpportunity_(candidate,
+   ctx))` called the shared, per-call-full-table-read upsert once per accepted row across every
+   table in a message -- Pass 16 never touched this specific loop, since it lives in a different
+   file that Campana A's own ingest path doesn't call (Campana A reads the source spreadsheet
+   directly; this loop only runs for Gmail-sourced messages). Fixed identically: every
+   candidate's row shape is now computed in memory (new pure `v6AuraGmailBuildOpportunityRow_`,
+   extracted from `v6AuraGmailUpsertOpportunity_`, which itself is unchanged) and written in ONE
+   `v6BatchUpsertByKey_` call per message; `MKT_AURA_INGEST_REJECTIONS` is batched the same way.
+2. **`v6AuraGmailReprocessRecent_`** itself, called UNCONDITIONALLY by
+   `v6AuraCampanaARegenerateDryRun_` on every run (wrapped only in try/catch for errors, never
+   for slowness). This performs a real `GmailApp.search` and, for every matching message with an
+   `.xlsx` attachment, converts it to a throwaway Google Sheet via the Drive Advanced Service
+   (`Drive.Files.create` + `SpreadsheetApp.openById` + read every tab + `Drive.Files.remove`) --
+   a genuinely slow, network-bound sequence with NO relationship to Sheets read/write counts, and
+   therefore completely invisible to Pass 16's fix. Its own code comment already documents an
+   earlier, unrelated incident with the SAME ~30-minute symptom
+   (`v6AuraGmailIngestTick_`, "an unbounded search... caused v6AcqAutomationTick_ to take ~30
+   minutes per run"). It is explicitly documented as a best-effort FALLBACK, only meant to cover
+   the case where the primary direct-spreadsheet read did not itself succeed -- when the direct
+   read already returns `status: 'OK'`, reprocessing Gmail redundantly re-derives the exact same
+   accounts a second, much slower way. **Fix:** `v6AuraCampanaARegenerateDryRun_` now skips this
+   fallback (logged explicitly as `GMAIL_REPROCESS_SKIPPED`) whenever the direct read already
+   succeeded, and still runs it (unchanged) when the direct read failed. No eligibility,
+   suppression, or governance check is affected -- this only skips a redundant SECOND way of
+   deriving data the direct read already produced.
+
+**Real-time stage logging, new** (`v6AuraCampanaALog_`): every previously-silent phase --
+`SOURCE_READ`, `PARSE`, `MATCH` (account/scope resolution, and separately the per-contact index
+preload), `ELIGIBILITY` (the `v6ResolveRecipients_` call, and separately the per-contact
+stop/override check), `LANGUAGE`, `COPY`, `QUEUE_WRITE`, `PREFLIGHT`, `DISPATCH`, `AUDIT`, plus
+the two newly-discovered `GMAIL_REPROCESS`/`REFRESH_OPPORTUNITIES` phases and
+`TRIGGER_INSTALL`/`REGENERATE` -- now logs a `console.log` line the INSTANT it starts and the
+instant it finishes, plus periodic progress lines every 50 contacts inside the main build loop.
+This is deliberately different from Pass 16's `result.profile` (accumulated totals returned only
+if the function completes): these lines are visible LIVE in the Apps Script execution transcript
+while a manual run is still in progress, so a future timeout is diagnosable from "which STAGE's
+START line has no matching END line" -- exactly where it got stuck -- without needing the run to
+ever finish.
+
+**On not re-estimating from synthetic tests.** This pass does not claim a specific new execution
+time. The two fixes above are real, targeted, and each individually verified (new dedicated
+tests, see `tests.json`), but the Apps Script Execution API remains categorically blocked in this
+environment (confirmed in the original go-live pass), so no fix in this project can be time-
+verified except by DGL's own next run -- which will now show, via the real-time stage logs,
+exactly how long each phase actually takes against the real ~227-contact data and mailbox, even
+if it still does not finish.
+
+### Files changed
+
+- Modified: `backend/apps-script-v6/MarketingV6AuraGmailIngest.gs` (extracted the batching fix
+  into `v6AuraGmailProcessMessage_`'s per-row upsert loop, reusing `v6AuraGmailBuildOpportunityRow_`
+  from Pass 16), `backend/apps-script-v6/MarketingV6AuraCampanaA.gs` (real-time stage logging
+  throughout; `v6AuraCampanaARegenerateDryRun_` now skips the redundant Gmail-reprocess fallback
+  when the direct read already succeeded, and times/logs both that fallback and
+  `v6RefreshOpportunitiesFromReports_`, neither of which Pass 16 had instrumented).
+- Modified tests: `tests/v6-aura-campana-a.test.js` (test 12 updated for the new real-time log
+  lines; new test 12b verifies every stage marker logs in order and that the redundant fallback
+  is explicitly skipped).
+- New tests: `tests/v6-aura-gmail-process-message.test.js` (3 cases covering the
+  `v6AuraGmailProcessMessage_` batching fix in isolation).
+- Full suite: 38/38 files passing.
+
+### What this pass deliberately does NOT do
+
+- Does not change what counts as eligible, suppressed, stopped, or safely determined -- both
+  fixes only remove genuinely redundant or already-duplicated work.
+- Does not touch the separately-scheduled hourly Gmail tick's own search-window bound (already
+  fixed in an earlier, unrelated incident, `v6AuraGmailIngestTick_`'s 45-day `newer_than` clause)
+  -- only its shared per-row upsert cost.
+- Does not attempt `clasp run` / the Execution API again (still categorically blocked) -- the
+  real-time stage logs are the mechanism for the next real run to be diagnosable regardless.
+
 ## Pass 16 — Performance fix: the real production execution-time-limit failure
 
 **Production incident.** `RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN()` ran 8:03:08-8:33:08 and was
