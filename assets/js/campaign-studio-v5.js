@@ -9,7 +9,12 @@
   const OFFICIAL_LOGO="assets/brand/dgl-logo-white.png";
   const DEFAULT_HERO="assets/creative/dgl-ftl-truck.webp";
 
-  const state={device:"desktop",approved:false,generated:null,incoming:null,campaignNameManual:false};
+  // approvedCreative (Iniciativa 2): the backend-persisted record for the CURRENT approved
+  // version, if any -- {creativeId,creativeVersion,approvalId,htmlChecksum,html,subject}. Reset
+  // to null in lockstep with approved=false every time anything that changes the creative
+  // (objective/service/language/angle/ctaIntent/qnbWindow via generate(), a direct field edit,
+  // or a creative-system switch) fires -- an approval must never be left pointing at stale content.
+  const state={device:"desktop",approved:false,approvedCreative:null,generated:null,incoming:null,campaignNameManual:false};
 
   function audiences(){
     try{return global.DGL_MARKETING_CAMPAIGN_OS.buildAudiences()}catch(_){return[]}
@@ -122,7 +127,7 @@
   function generate(){
     const s=strategy();
     syncCampaignName();
-    state.generated=Copy().generate(s);state.approved=false;
+    state.generated=Copy().generate(s);state.approved=false;state.approvedCreative=null;
     const c=state.generated||{},set=(id,v)=>{const e=document.getElementById(id);if(e)e.value=clean(v)};
     set("v5SubjectA",c.subjectA);set("v5SubjectB",c.subjectB);set("v5Preheader",c.preheader);
     set("v5Headline",c.headline);set("v5Body",c.body);set("v5Body2",c.body2);set("v5Cta",c.cta);
@@ -472,21 +477,65 @@
   async function requestDraft(kind){
     const campaignId=state.incoming?.campaignId;if(!campaignId)throw new Error("Prepare a backend campaign before creating drafts.");
     if(kind!=="TEST_DRAFT")throw new Error("Audience draft execution is not available in V5.5.");
-    const preview=global.DGL_CAMPAIGN_STUDIO_V5.getPreview(),s=preview.strategy||{},c=preview.copy||{},subject=clean(document.getElementById("v5PreviewSubject")?.textContent||c.subjectA),base="https://dglmarketing2026.github.io/dgl-marketing-execution-os/",htmlBody=String(preview.html||"").replace(/(["'(=])assets\//g,`$1${base}assets/`),textBody=[subject,c.preheader,c.headline,c.body,c.body2,c.cta].map(clean).filter(Boolean).join("\n\n"),campaignPatch={campaignName:s.campaignName||"",audienceId:s.audienceId||state.incoming?.audienceId||"",language:s.language||"",templateId:s.creativeSystem||"",subject,preheader:c.preheader||"",headline:c.headline||"",body:c.body||"",body2:c.body2||"",cta:c.cta||"",ctaUrl:s.ctaUrl||"",heroUrl:s.heroUrl||"",logoUrl:s.logoUrl||"",senderName:s.senderName||"",replyTo:s.replyTo||""};
+    const preview=global.DGL_CAMPAIGN_STUDIO_V5.getPreview(),s=preview.strategy||{},c=preview.copy||{},subject=clean(document.getElementById("v5PreviewSubject")?.textContent||c.subjectA),base="https://dglmarketing2026.github.io/dgl-marketing-execution-os/";
+    // Iniciativa 2 punto 7 -- Test Draft must prove STUDIO HTML == STORED APPROVED HTML == TEST
+    // DRAFT HTML. Once a creative has been approved (state.approvedCreative set, never
+    // invalidated since), the Test Draft is built from that STORED html, not a fresh live
+    // preview render -- the two are only guaranteed identical if nothing in this screen has
+    // changed the preview since approval, which is exactly what state.approved tracks. Before
+    // any approval, the Test Draft still uses the live preview (there is nothing stored yet to
+    // compare against).
+    const sourceHtml=(state.approved&&state.approvedCreative&&state.approvedCreative.html)?state.approvedCreative.html:(preview.html||"");
+    const htmlBody=String(sourceHtml).replace(/(["'(=])assets\//g,`$1${base}assets/`),textBody=[subject,c.preheader,c.headline,c.body,c.body2,c.cta].map(clean).filter(Boolean).join("\n\n"),campaignPatch={campaignName:s.campaignName||"",audienceId:s.audienceId||state.incoming?.audienceId||"",language:s.language||"",templateId:s.creativeSystem||"",subject,preheader:c.preheader||"",headline:c.headline||"",body:c.body||"",body2:c.body2||"",cta:c.cta||"",ctaUrl:s.ctaUrl||"",heroUrl:s.heroUrl||"",logoUrl:s.logoUrl||"",senderName:s.senderName||"",replyTo:s.replyTo||""};
     return global.DGL_MARKETING_BACKEND_ADAPTER_V55.createTestDraft(campaignId,{subject,htmlBody,textBody,campaignPatch});
   }
   function setTestDraftButton(label,busy){const button=document.querySelector("[data-v5-test]");if(!button)return;button.disabled=!!busy;button.innerHTML=`<i data-lucide="${label==="TEST DRAFT CREATED"?"check-circle-2":"mail"}"></i>${label}`;global.lucide?.createIcons();}
 
   document.addEventListener("click",async e=>{
     const sys=e.target.closest(".v5-creative-card");
-    if(sys){document.querySelectorAll(".v5-creative-card").forEach(x=>x.classList.remove("active"));sys.classList.add("active");updatePreview();return}
+    if(sys){document.querySelectorAll(".v5-creative-card").forEach(x=>x.classList.remove("active"));sys.classList.add("active");
+      // Iniciativa 2 punto 6 -- switching the creative/layout system changes the rendered HTML
+      // just as much as an objective/service/language change already does (which generate()
+      // already invalidates approval for); an already-approved creative must not silently keep
+      // pointing at a different layout than the one it was approved under.
+      if(state.approved){state.approved=false;state.approvedCreative=null;}
+      updatePreview();updateQA();return}
     const dev=e.target.closest("[data-v5-device]");
     if(dev){
       document.querySelectorAll("[data-v5-device]").forEach(x=>x.classList.toggle("active",x===dev));
       const stage=document.getElementById("v5EmailStage");if(stage)stage.classList.toggle("mobile",dev.dataset.v5Device==="mobile");return;
     }
     if(e.target.closest("[data-v5-generate]")){generate();if(global.DGL_INTERACTIONS?.toast)global.DGL_INTERACTIONS.toast("Campaign generated.");return}
-    if(e.target.closest("[data-v5-approve]")){try{const campaignId=state.incoming?.campaignId;if(campaignId&&global.DGL_MARKETING_BACKEND_ADAPTER_V55?.isConnected()){await global.DGL_MARKETING_AUTOMATION_V55.requestApproval(campaignId,{requestedBy:"Marketing"});await global.DGL_MARKETING_AUTOMATION_V55.recordApproval(campaignId,{approved:true,approvedBy:"Marketing",approvedAt:new Date().toISOString()});}state.approved=true;updateQA();global.DGL_INTERACTIONS?.toast?.("Creative approved by Marketing.");}catch(error){global.DGL_INTERACTIONS?.toast?.(error.message,"error");}return}
+    if(e.target.closest("[data-v5-approve]")){
+      try{
+        const campaignId=state.incoming?.campaignId;
+        const preview=global.DGL_CAMPAIGN_STUDIO_V5.getPreview(),s=preview.strategy||{},c=preview.copy||{};
+        const subject=clean(document.getElementById("v5PreviewSubject")?.textContent||c.subjectA);
+        const textBody=[subject,c.preheader,c.headline,c.body,c.body2,c.cta].map(clean).filter(Boolean).join("\n\n");
+        let persisted=null;
+        if(campaignId&&global.DGL_MARKETING_BACKEND_ADAPTER_V55?.isConnected()){
+          await global.DGL_MARKETING_AUTOMATION_V55.requestApproval(campaignId,{requestedBy:"Marketing"});
+          await global.DGL_MARKETING_AUTOMATION_V55.recordApproval(campaignId,{approved:true,approvedBy:"Marketing",approvedAt:new Date().toISOString()});
+          // Iniciativa 2 punto 1/6 -- Approve Creative must persist the FULL creative (subject/
+          // preheader/htmlBody/textBody/heroUrl/logoUrl/language), never just flip a status flag.
+          // htmlBody here is preview.html -- Campaign Studio's own getPreview().html, exactly
+          // what Marketing is looking at on screen right now -- never re-rendered, re-merged or
+          // otherwise altered before it reaches the backend, so the checksum the backend computes
+          // is a checksum of this exact string.
+          persisted=await global.DGL_MARKETING_BACKEND_ADAPTER_V55.approveCreative(campaignId,{
+            templateId:s.creativeSystem||"",subject,preheader:c.preheader||"",htmlBody:preview.html||"",
+            textBody,heroUrl:s.heroUrl||"",logoUrl:s.logoUrl||"",language:s.language||"",approvedBy:"Marketing"
+          });
+        }
+        state.approved=true;
+        state.approvedCreative=persisted
+          ?{creativeId:persisted.creativeId,creativeVersion:persisted.creativeVersion,approvalId:persisted.approvalId,htmlChecksum:persisted.htmlChecksum,html:preview.html||"",subject}
+          :{creativeId:"",creativeVersion:0,approvalId:"",htmlChecksum:"",html:preview.html||"",subject};
+        updateQA();
+        global.DGL_INTERACTIONS?.toast?.("Creative approved by Marketing.");
+      }catch(error){global.DGL_INTERACTIONS?.toast?.(error.message,"error");}
+      return;
+    }
     if(e.target.closest("[data-v5-test]")){setTestDraftButton("CREATING TEST DRAFT",true);try{await requestDraft("TEST_DRAFT");setTestDraftButton("TEST DRAFT CREATED",false);global.DGL_INTERACTIONS?.toast?.("Test draft created in Gmail. Open Drafts to review it.");}catch(error){setTestDraftButton("CREATE TEST DRAFT",false);global.DGL_INTERACTIONS?.toast?.(error.message,"error");}return}
     if(e.target.closest("[data-v5-audience]")){requestDraft("AUDIENCE_DRAFTS").then(()=>global.DGL_INTERACTIONS?.toast?.("Audience drafts requested.")).catch(err=>global.DGL_INTERACTIONS?.toast?.(err.message,"error"));return}
   });
@@ -505,9 +554,16 @@
       return;
     }
     if(e.target.id==="v5Lane"){
+      if(state.approved){state.approved=false;state.approvedCreative=null;}
       syncCampaignName();renderThumbnails();updatePreview();updateQA();return;
     }
-    if(["v5SubjectA","v5SubjectB","v5Preheader","v5Headline","v5Body","v5Body2","v5Cta","v5HeroUrl","v5LogoUrl","v5Lane"].includes(e.target.id)){updatePreview();updateQA()}
+    if(["v5SubjectA","v5SubjectB","v5Preheader","v5Headline","v5Body","v5Body2","v5Cta","v5HeroUrl","v5LogoUrl","v5Lane"].includes(e.target.id)){
+      // Iniciativa 2 punto 6 -- a direct edit to subject/body/CTA/hero/logo image after approval
+      // must invalidate that approval automatically; Marketing must re-approve (a new
+      // creativeVersion) before this content can ever reach a real recipient.
+      if(state.approved){state.approved=false;state.approvedCreative=null;}
+      updatePreview();updateQA()
+    }
   });
 
   global.DGL_MODULE_RENDERERS=global.DGL_MODULE_RENDERERS||{};
