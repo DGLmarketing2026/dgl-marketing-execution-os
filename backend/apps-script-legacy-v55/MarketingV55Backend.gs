@@ -56,7 +56,14 @@ function handleMarketingV55Api_(e, method) {
 // and must never be a second way to trigger a real send.
 'v6AuraRetentionDashboard', 'v6AuraCampanaAAudit', 'v6AuraCampanaAMatchReport',
 'v6AuraCampanaAStoppedBreakdown', 'v6AuraExecutionReport', 'v6AuraAutomaticReportStatus',
-'v6AuraCampanaALatestRunSummary'
+'v6AuraCampanaALatestRunSummary',
+// Iniciativa 2 -- Campaign Studio's own Approve Creative action (MarketingV6AuraCreativeApproval.gs).
+// This persists CONTENT Marketing already designed and is about to display back to itself in the
+// same Studio -- exactly the same "Marketing executes HOW" category as v55CreateCampaign/
+// v55RecordApproval above, never a send. It writes MKT_CAMPAIGN_CREATIVES only; it never writes a
+// queue row and never calls GmailApp -- still excluded, same as before, are every AURA function
+// that writes queue rows or could ever send a real email.
+'v6AuraApproveCreative', 'v6AuraLatestApprovedCreative'
 ];
   
   if (allowed.indexOf(action) === -1) return null;
@@ -97,6 +104,8 @@ case 'v6ResolveRecipients':
 case 'v6AudienceStatus':
 case 'v55ResolveRecipients':
 case 'v55AudienceStatus':
+case 'v6AuraApproveCreative':
+case 'v6AuraLatestApprovedCreative':
   result = routeMarketingV6_(action, req);
   break;
     case 'v55CreateTestDraft':
