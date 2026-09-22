@@ -64,7 +64,8 @@ function v6AuraEmailMergeTokens_(text, vars) {
   return String(text || '')
     .replace(/\{\{firstName\}\}/g, v.firstName || '')
     .replace(/\{\{company\}\}/g, v.company || '')
-    .replace(/\{\{service\}\}/g, v.service || '');
+    .replace(/\{\{service\}\}/g, v.service || '')
+    .replace(/\{\{lane\}\}/g, v.lane || '');
 }
 function v6AuraEmailSenderName_() {
   try { if (typeof DGL_CONFIG !== 'undefined' && DGL_CONFIG.DEFAULT_SENDER_NAME) return DGL_CONFIG.DEFAULT_SENDER_NAME; } catch (_) { }
@@ -143,6 +144,7 @@ function v6AuraEmailJobId_(campaignId, contactId, sequenceStep) {
 // already exists (by jobId) -- this function only ever creates, so a job's status, once the
 // dispatcher has moved it past PENDING, is never silently reset by a later automatic tick.
 function v6AuraBuildEmailQueueForCampaign_(campaign) {
+  v6AuraEnsureCampaignCreativesSheet_();
   v6EnsureContactRecipientSchema_();
   var sequenceStep = 1;
   var recipients = v6Rows_('MKT_AUDIENCES').filter(function (r) {
@@ -150,14 +152,30 @@ function v6AuraBuildEmailQueueForCampaign_(campaign) {
       v6AuraEmailText_(r.campaignId) === campaign.campaignId &&
       v6AuraEmailText_(r.eligibilityStatus).toUpperCase() === 'ELIGIBLE';
   });
-  var result = { campaignId: campaign.campaignId, built: 0, skippedExisting: 0, skippedIneligible: 0, blockedNoReplyTo: 0, recipients: recipients.length };
+  var result = { campaignId: campaign.campaignId, built: 0, skippedExisting: 0, skippedIneligible: 0, blockedNoReplyTo: 0, recipients: recipients.length, blockedCreative: false };
   if (!recipients.length) return result;
+
+  // Iniciativa 2 -- MKT_EMAIL_QUEUE.htmlBody must come from the creative Marketing approved in
+  // Campaign Studio (MKT_CAMPAIGN_CREATIVES), never from v6AuraEmailHtml_() (the backend's own,
+  // structurally different template -- see MarketingV6AuraCopyEngine.gs, now legacy-preview/
+  // test only). Resolved once per campaign, before the recipient loop: the approved template is
+  // identical for every recipient, only the 4 allowed tokens vary per recipient below. If no
+  // valid approved creative exists, this build produces ZERO jobs -- it never writes a job with
+  // missing/incomplete/unapproved content.
+  var creative = v6AuraLatestApprovedCreative_(campaign.campaignId);
+  if (!creative || !creative.htmlBody || !creative.subject || !creative.approvalId) {
+    result.blockedCreative = true; result.blockedReason = 'CREATIVE_NOT_APPROVED';
+    return result;
+  }
+  if (String(v6AuraChecksum_(creative.htmlBody)) !== String(creative.htmlChecksum)) {
+    result.blockedCreative = true; result.blockedReason = 'CREATIVE_VERSION_MISMATCH';
+    return result;
+  }
 
   var existingIds = {};
   v6Rows_('MKT_EMAIL_QUEUE').forEach(function (r) { existingIds[v6AuraEmailText_(r.jobId)] = true; });
 
   var policyApproved = (typeof v6AuraPolicyApproved_ === 'function') ? v6AuraPolicyApproved_(campaign.objective || campaign.campaignType) : true;
-  var copy = v6AuraGenerateCopy_({}, campaign);
   var now = new Date().toISOString();
 
   recipients.forEach(function (r) {
@@ -180,14 +198,19 @@ function v6AuraBuildEmailQueueForCampaign_(campaign) {
       firstName: v6AuraEmailText_(contact.firstName) || 'Team',
       company: v6AuraEmailText_(account.accountName) || 'your company',
       service: v6AuraEmailText_(campaign.service) || 'freight',
+      lane: v6AuraEmailText_(campaign.lane) || '',
       replyTo: replyTo
     };
     var stopped = v6AuraEmailAccountStopped_(accountId);
+    // Only the 4 authorized tokens are substituted -- no re-render, no layout/copy/asset/CTA
+    // change of any kind versus what Marketing approved.
+    var personalizedSubject = v6AuraCreativePersonalize_(creative.subject, vars);
+    var personalizedHtml = v6AuraCreativePersonalize_(creative.htmlBody, vars);
     var job = {
       jobId: jobId, campaignId: campaign.campaignId, audienceId: campaign.scopeId || '',
       accountId: accountId, contactId: contactId, email: v6AuraEmailText_(r.email),
       firstName: vars.firstName, company: vars.company, service: vars.service,
-      subject: v6AuraEmailMergeTokens_(copy.subjectA, vars), htmlBody: v6AuraEmailHtml_(campaign, copy, vars),
+      subject: personalizedSubject, htmlBody: personalizedHtml,
       replyTo: replyTo,
       status: stopped ? 'STOPPED' : (replyToBlocked ? 'SUPPRESSED' : (policyApproved ? 'PENDING' : 'REVIEW_REQUIRED')),
       gmailDraftId: '', createdAt: now, processedAt: '', error: replyToBlocked ? 'MISSING_REPLY_TO_CONFIGURATION' : '',
@@ -196,7 +219,13 @@ function v6AuraBuildEmailQueueForCampaign_(campaign) {
       sequenceStep: sequenceStep, scheduledAt: now,
       approvalId: policyApproved ? '' : ('APR:' + campaign.campaignId),
       approvedAt: '', approvedBy: '',
-      stopOnResponse: true
+      stopOnResponse: true,
+      // Iniciativa 2: traceability from a queued job back to exactly which approved creative
+      // version produced it, plus both checksum levels (approved template / personalized
+      // recipient render) so the dispatcher can re-validate at send time without re-rendering.
+      creativeId: creative.creativeId, creativeVersion: creative.creativeVersion,
+      creativeApprovalId: creative.approvalId, htmlChecksum: creative.htmlChecksum,
+      recipientRenderedChecksum: v6AuraChecksum_(personalizedHtml)
     };
     v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);
     existingIds[jobId] = true;
@@ -226,15 +255,28 @@ function v6AuraBuildRetentionEmailQueue_() {
 // replyTo/copy/status derivation the builder uses for a brand-new job, never a second, divergent
 // code path. A job already at status SENT is never touched -- real send history is immutable.
 function v6AuraRepairEmailQueueContent_() {
+  v6AuraEnsureCampaignCreativesSheet_();
   var campaignsById = {};
   v6Rows_('MKT_CAMPAIGNS').forEach(function (c) { campaignsById[v6AuraEmailText_(c.campaignId)] = c; });
   var jobs = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) {
     return v6AuraEmailText_(r.playbookId) === 'Retention' && String(r.status).toUpperCase() !== 'SENT';
   });
-  var repaired = 0, skippedNoCampaign = 0;
+  var repaired = 0, skippedNoCampaign = 0, skippedNoCreative = 0;
+  var creativeByCampaignId = {};
   jobs.forEach(function (job) {
     var campaign = campaignsById[v6AuraEmailText_(job.campaignId)];
     if (!campaign) { skippedNoCampaign++; return; }
+    // Iniciativa 2 -- repair must never regenerate content via v6AuraEmailHtml_() either; it
+    // repairs a job's content from the SAME approved-creative source of truth the builder uses.
+    // A job whose campaign has no valid approved creative is left untouched (not silently
+    // downgraded to legacy content) and counted separately.
+    var campaignId = v6AuraEmailText_(job.campaignId);
+    if (!(campaignId in creativeByCampaignId)) creativeByCampaignId[campaignId] = v6AuraLatestApprovedCreative_(campaignId);
+    var creative = creativeByCampaignId[campaignId];
+    var creativeValid = creative && creative.htmlBody && creative.subject && creative.approvalId &&
+      String(v6AuraChecksum_(creative.htmlBody)) === String(creative.htmlChecksum);
+    if (!creativeValid) { skippedNoCreative++; return; }
+
     var account = v6AuraEmailAccountById_(job.accountId) || {};
     var contact = v6AuraEmailContactById_(job.contactId) || {};
     var replyTo = campaign.replyTo || v6AuraEmailCanonicalReplyTo_();
@@ -243,20 +285,24 @@ function v6AuraRepairEmailQueueContent_() {
       firstName: v6AuraEmailText_(contact.firstName) || v6AuraEmailText_(job.firstName) || 'Team',
       company: v6AuraEmailText_(account.accountName) || v6AuraEmailText_(job.company) || 'your company',
       service: v6AuraEmailText_(campaign.service) || v6AuraEmailText_(job.service) || 'freight',
+      lane: v6AuraEmailText_(campaign.lane) || '',
       replyTo: replyTo
     };
-    var copy = v6AuraGenerateCopy_({}, campaign);
     var stopped = v6AuraEmailAccountStopped_(job.accountId);
     var policyApproved = (typeof v6AuraPolicyApproved_ === 'function') ? v6AuraPolicyApproved_(campaign.objective || campaign.campaignType) : true;
+    var personalizedHtml = v6AuraCreativePersonalize_(creative.htmlBody, vars);
     job.replyTo = replyTo;
-    job.subject = v6AuraEmailMergeTokens_(copy.subjectA, vars);
-    job.htmlBody = v6AuraEmailHtml_(campaign, copy, vars);
+    job.subject = v6AuraCreativePersonalize_(creative.subject, vars);
+    job.htmlBody = personalizedHtml;
     job.status = stopped ? 'STOPPED' : (replyToBlocked ? 'SUPPRESSED' : (policyApproved ? 'PENDING' : 'REVIEW_REQUIRED'));
     job.error = replyToBlocked ? 'MISSING_REPLY_TO_CONFIGURATION' : '';
+    job.creativeId = creative.creativeId; job.creativeVersion = creative.creativeVersion;
+    job.creativeApprovalId = creative.approvalId; job.htmlChecksum = creative.htmlChecksum;
+    job.recipientRenderedChecksum = v6AuraChecksum_(personalizedHtml);
     v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);
     repaired++;
   });
-  return { status: 'REPAIR_COMPLETE', jobsChecked: jobs.length, repaired: repaired, skippedNoCampaign: skippedNoCampaign };
+  return { status: 'REPAIR_COMPLETE', jobsChecked: jobs.length, repaired: repaired, skippedNoCampaign: skippedNoCampaign, skippedNoCreative: skippedNoCreative };
 }
 
 // One convenient, no-argument call to get a fresh, verifiable DRY_RUN: forces/confirms
@@ -294,7 +340,7 @@ function auraProcessEmailQueue(limit) {
   var senderName = v6AuraEmailSenderName_();
   var jobs = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) { return v6AuraEmailText_(r.status).toUpperCase() === 'PENDING'; }).slice(0, lim);
 
-  var counts = { sent: 0, failed: 0, suppressed: 0, skipped: 0, stopped: 0, reviewRequired: 0, dryRun: 0 };
+  var counts = { sent: 0, failed: 0, suppressed: 0, skipped: 0, stopped: 0, reviewRequired: 0, dryRun: 0, blockedCreative: 0 };
   var touchedCampaigns = {};
 
   jobs.forEach(function (job) {
@@ -326,6 +372,14 @@ function auraProcessEmailQueue(limit) {
       }
       if (job.approvalId && !job.approvedAt) {
         job.status = 'REVIEW_REQUIRED'; job.processedAt = now; counts.reviewRequired++;
+        return v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);
+      }
+      // Iniciativa 2 punto 2/5 -- defense in depth: re-validate the creative-approval chain at
+      // send time too, not only at queue-build time. Never re-renders anything; only recomputes
+      // checksums over bytes already on the job / already persisted in MKT_CAMPAIGN_CREATIVES.
+      var creativeCheck = (typeof v6AuraValidateQueuedCreative_ === 'function') ? v6AuraValidateQueuedCreative_(job) : { blocked: false };
+      if (creativeCheck.blocked) {
+        job.status = 'BLOCKED'; job.error = creativeCheck.error; job.processedAt = now; counts.blockedCreative = (counts.blockedCreative || 0) + 1;
         return v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);
       }
       if (v6AuraEmailDuplicateSentExists_(job)) {
@@ -367,7 +421,7 @@ function auraProcessEmailQueue(limit) {
     try { v6AuraRefreshExecutionReportStatusOnly_(campaignId); } catch (_) { }
   });
 
-  return { status: 'DISPATCH_COMPLETE', sendMode: mode, processed: jobs.length, sent: counts.sent, failed: counts.failed, suppressed: counts.suppressed, skipped: counts.skipped, stopped: counts.stopped, reviewRequired: counts.reviewRequired, dryRun: counts.dryRun };
+  return { status: 'DISPATCH_COMPLETE', sendMode: mode, processed: jobs.length, sent: counts.sent, failed: counts.failed, suppressed: counts.suppressed, skipped: counts.skipped, stopped: counts.stopped, reviewRequired: counts.reviewRequired, dryRun: counts.dryRun, blockedCreative: counts.blockedCreative };
 }
 
 // Lightweight, dispatcher-only refresh: updates just the report row's real sent/queued/failed/
@@ -491,6 +545,12 @@ function v6AuraEmailQueueAudit_(filterFn) {
     if (duplicateKeys[dupKey]) issues.push('DUPLICATE_JOB_KEY');
     if (job.approvalId && job.approvedAt && String(job.status).toUpperCase() !== 'REVIEW_REQUIRED') issues.push('APPROVAL_RECORDED_BUT_NOT_ENFORCED');
     if (job.approvalId && !job.approvedAt && ['SENT', 'DRY_RUN'].indexOf(String(job.status).toUpperCase()) >= 0) issues.push('APPROVAL_BYPASSED');
+    // Iniciativa 2 punto 8 -- no internal classification vocabulary (campaign family names,
+    // internal record ids, stage/score terms) may ever be visible to a real recipient.
+    if (typeof v6AuraDetectInternalLabels_ === 'function') {
+      var internalLabelHits = v6AuraDetectInternalLabels_([job.subject, job.htmlBody].join(' '));
+      if (internalLabelHits.length) issues.push('CUSTOMER_VISIBLE_INTERNAL_LABEL:' + internalLabelHits.join(','));
+    }
 
     if (issues.length) findings.push({ jobId: job.jobId, accountId: job.accountId, email: v6AuraEmailMask_(job.email), issues: issues });
   });

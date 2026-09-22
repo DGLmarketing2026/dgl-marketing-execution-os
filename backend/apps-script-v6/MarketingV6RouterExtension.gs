@@ -123,6 +123,14 @@ function routeMarketingV6_(action, payload) {
     // --- AURA Email Dispatcher (MarketingV6AuraEmailDispatcher.gs) ---------------------------
     case 'v6AuraBuildRetentionEmailQueue':
       return typeof v6AuraBuildRetentionEmailQueue_ === 'function' ? v6AuraBuildRetentionEmailQueue_(p) : v6RouteMissing_(a, 'v6AuraBuildRetentionEmailQueue_');
+    // Iniciativa 2 -- Campaign Studio's Approve Creative action persists the FULL approved
+    // creative here (MarketingV6AuraCreativeApproval.gs). This is the only backend write path
+    // that can ever make a queue-build function produce a sendable job; it never sends anything
+    // itself.
+    case 'v6AuraApproveCreative':
+      return typeof v6AuraApproveCreative_ === 'function' ? v6AuraApproveCreative_(p) : v6RouteMissing_(a, 'v6AuraApproveCreative_');
+    case 'v6AuraLatestApprovedCreative':
+      return typeof v6AuraLatestApprovedCreative_ === 'function' ? v6AuraLatestApprovedCreative_((p || {}).campaignId) : v6RouteMissing_(a, 'v6AuraLatestApprovedCreative_');
     case 'auraProcessEmailQueue':
       return typeof auraProcessEmailQueue === 'function' ? auraProcessEmailQueue((p || {}).limit) : v6RouteMissing_(a, 'auraProcessEmailQueue');
     case 'v6AuraSendMode':
