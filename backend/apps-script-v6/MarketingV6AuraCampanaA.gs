@@ -343,7 +343,7 @@ function v6AuraDedicatedAccountIds_() {
 // Imports, Operations) plus a few equally generic role/mailbox labels already seen in this
 // codebase's own contact data conventions. Fails closed to "no name" (never a guess) whenever a
 // value looks like a role, a department, a mailbox alias, or is empty -- matching the exact
-// output DGL asked for ("Seguimos cerca de la operación de Progeral Corp", never "Team, ...").
+// output DGL expects ("¿Tiene un movimiento en puerta?", never a fabricated "Team, ..." greeting).
 var CAMPANA_A_GENERIC_NAME_DENYLIST_ = [
   'pricing team', 'sales team', 'correo corporativo', 'imports', 'operations',
   'team', 'equipo', 'admin', 'administracion', 'administración', 'info', 'support', 'soporte',
