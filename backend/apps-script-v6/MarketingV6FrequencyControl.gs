@@ -1,4 +1,4 @@
-var MKT_V6_PRIORITY={'QNB':1,'QUOTED NOT BOOKED':1,'RETENTION':2,'RETENTION RISK':2,'REACTIVATION':3,'CROSS-SELL':4,'CROSS SELL':4,'NURTURE':5,'RELATIONSHIP RENEWAL':5};
+var MKT_V6_PRIORITY={'QNB':1,'QUOTED NOT BOOKED':1,'ACTIVATION':2,'RETENTION':2,'RETENTION RISK':2,'REACTIVATION':3,'CROSS-SELL':4,'CROSS SELL':4,'NURTURE':5,'RELATIONSHIP RENEWAL':5};
 function v6Now_(){return new Date();}
 function v6DateValue_(value){if(!value)return null;var d=value instanceof Date?value:new Date(value);return isNaN(d.getTime())?null:d;}
 function v6DaysSince_(value,now){var d=v6DateValue_(value);return d?Math.floor((now.getTime()-d.getTime())/86400000):null;}

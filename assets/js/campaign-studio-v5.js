@@ -57,6 +57,7 @@
       return `QNB ${service} · ${windowLabel}`;
     }
     if(s.objective==="Cross-Sell")return `Cross-Sell ${service}${angle?` · ${angle}`:""}`;
+    if(s.objective==="Activation")return `Activation ${service}${angle?` · ${angle}`:""}`;
     if(s.objective==="Retention")return `Retention${angle?` · ${angle}`:""}`;
     if(s.objective==="Service Campaign")return `${service} Campaign${angle?` · ${angle}`:""}`;
     if(s.objective==="Lane Campaign")return `${service} Lane Campaign${lane?` · ${clean(lane)}`:""}`;
@@ -332,6 +333,7 @@
   function heroAssetLabel(s){
     if(s.objective==="Quoted Not Booked")return {title:`${s.service} recovery: No promotional hero`,note:"Executive Minimal stays white and response-oriented."};
     if(s.objective==="Cross-Sell")return {title:"Cross-Sell capability photography",note:`${s.service} · ${s.angle}`};
+    if(s.objective==="Activation")return {title:`${s.service} activation photography`,note:s.angle};
     if(s.objective==="Retention")return {title:"Retention relationship photography",note:s.angle};
     if(s.objective==="Reactivation")return {title:`${s.service} reactivation photography`,note:s.angle};
     if(s.objective==="Lane Campaign")return {title:`${s.service} lane photography`,note:s.lane||s.angle};

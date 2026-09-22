@@ -13,6 +13,11 @@
         { day: 4, type: "Short Follow-up", purpose: en ? "Ask for changed dates or requirements" : "Preguntar por cambios de fecha o requerimiento" },
         { day: 10, type: "Final Recovery Touch", purpose: en ? "Close the loop or reopen the quote" : "Cerrar ciclo o reabrir la cotización" }
       ],
+      "Activation": [
+        { day: 0, type: "Designed Email", purpose: en ? "Ask what movement is coming up" : "Preguntar qué movimiento tienen en puerta" },
+        { day: 6, type: "Short Follow-up", purpose: en ? "Offer to review capacity and current conditions" : "Ofrecer revisión de capacidad y condiciones actuales" },
+        { day: 15, type: "Service Value Email", purpose: en ? "Reinforce relevant service capacity" : "Reforzar capacidad del servicio relevante" }
+      ],
       "Reactivation": [
         { day: 0, type: "Designed Email", purpose: en ? "Reopen relationship" : "Reabrir la relación" },
         { day: 5, type: "Personal Follow-up", purpose: en ? "Simple reply-driven follow-up" : "Seguimiento corto orientado a respuesta" },
