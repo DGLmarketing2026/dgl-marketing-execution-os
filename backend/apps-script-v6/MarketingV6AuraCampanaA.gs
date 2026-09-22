@@ -697,7 +697,7 @@ function v6AuraCampanaABuildQueue_() {
   v6EnsureContactRecipientSchema_();
   var accounts = v6Rows_('MKT_ACCOUNTS');
   var setup = v6AuraCampanaAEnsureCampaignAndScope_(accounts);
-  var result = { status: setup.count ? 'QUEUE_BUILD_COMPLETE' : 'SOURCE_EMPTY_OR_NOT_FOUND', campaignId: CAMPANA_A_CAMPAIGN_ID_, accounts: setup.count, recipients: 0, built: 0, skippedExisting: 0, skippedIneligible: 0, blockedNoReplyTo: 0, byLanguage: { ES: 0, EN: 0, PT: 0 } };
+  var result = { status: setup.count ? 'QUEUE_BUILD_COMPLETE' : 'SOURCE_EMPTY_OR_NOT_FOUND', campaignId: CAMPANA_A_CAMPAIGN_ID_, accounts: setup.count, recipients: 0, built: 0, skippedExisting: 0, skippedIneligible: 0, blockedNoReplyTo: 0, blockedCreative: 0, byLanguage: { ES: 0, EN: 0, PT: 0 } };
   if (!setup.count) { profile.MATCH_MS = Date.now() - tMatch0; v6AuraCampanaALog_('MATCH_END (0 accounts, SOURCE_EMPTY_OR_NOT_FOUND)'); result.profile = profile; return result; }
 
   // recipients below are keyed by the REAL MKT_ACCOUNTS accountId (v6AuraCampanaAEnsureCampaignAndScope_
@@ -767,10 +767,22 @@ function v6AuraCampanaABuildQueue_() {
   var replyTo = v6AuraEmailCanonicalReplyTo_();
   var replyToBlocked = !replyTo;
   var policyApproved = (typeof v6AuraPolicyApproved_ === 'function') ? v6AuraPolicyApproved_('Activation') : true;
-  var copyCache = {};
-  function copyFor(lang) {
-    if (!copyCache[lang]) copyCache[lang] = v6AuraGenerateCopy_({}, Object.assign({}, campaign, { language: v6AuraCampanaALanguageCampaignFlag_(lang) }));
-    return copyCache[lang];
+  // Iniciativa 2 -- Campana A supports ES/EN/PT per-recipient language selection from ONE
+  // campaignId (CAMPANA_A_CAMPAIGN_ID_), so unlike the single-language Retention family, the
+  // approved creative must be looked up PER LANGUAGE, not once for the whole campaign.
+  // htmlBody/subject must come from that approved creative -- never from v6AuraEmailHtml_()
+  // (legacy-preview/test only after this change).
+  if (typeof v6AuraEnsureCampaignCreativesSheet_ === 'function') v6AuraEnsureCampaignCreativesSheet_();
+  var creativeCache = {};
+  function creativeFor(lang) {
+    var langFlag = v6AuraCampanaALanguageCampaignFlag_(lang);
+    if (!(langFlag in creativeCache)) {
+      var creative = (typeof v6AuraLatestApprovedCreativeForLanguage_ === 'function') ? v6AuraLatestApprovedCreativeForLanguage_(CAMPANA_A_CAMPAIGN_ID_, langFlag) : null;
+      var valid = creative && creative.htmlBody && creative.subject && creative.approvalId &&
+        String(v6AuraChecksum_(creative.htmlBody)) === String(creative.htmlChecksum);
+      creativeCache[langFlag] = valid ? creative : null;
+    }
+    return creativeCache[langFlag];
   }
   profile.MATCH_MS += Date.now() - tMatch1;
   v6AuraCampanaALog_('MATCH_END (per-contact index preload, ' + profile.MATCH_MS + 'ms total)');
@@ -832,14 +844,23 @@ function v6AuraCampanaABuildQueue_() {
     profile.ELIGIBILITY_MS += Date.now() - tElig0;
 
     var tCopy0 = Date.now();
-    var copy = copyFor(langInfo.language);
+    // Iniciativa 2 -- no valid approved creative for this recipient's language means this
+    // recipient is BLOCKED, never queued with legacy/incomplete content. Other recipients
+    // whose language DOES have a valid approved creative are unaffected.
+    var creative = creativeFor(langInfo.language);
+    if (!creative) {
+      result.blockedCreative++;
+      profile.COPY_MS += Date.now() - tCopy0;
+      continue;
+    }
     var now = new Date().toISOString();
     var country = tabCountry || v6AuraEmailText_(contact.country || contact.Country || account.country || account.Country || '');
+    var personalizedHtml = v6AuraCreativePersonalize_(creative.htmlBody, vars);
     var job = {
       jobId: jobId, campaignId: CAMPANA_A_CAMPAIGN_ID_, audienceId: CAMPANA_A_SCOPE_ID_,
       accountId: accountId, contactId: contactId, email: v6AuraEmailText_(r.email),
       firstName: vars.firstName, company: vars.company, service: vars.service,
-      subject: v6AuraCampanaASubject_(copy.subjectA, vars), htmlBody: v6AuraEmailHtml_(campaign, copy, vars),
+      subject: v6AuraCampanaASubject_(creative.subject, vars), htmlBody: personalizedHtml,
       replyTo: replyTo,
       status: stopped ? 'STOPPED' : (replyToBlocked ? 'SUPPRESSED' : (policyApproved ? 'PENDING' : 'REVIEW_REQUIRED')),
       gmailDraftId: '', createdAt: now, processedAt: '', error: replyToBlocked ? 'MISSING_REPLY_TO_CONFIGURATION' : '',
@@ -851,7 +872,10 @@ function v6AuraCampanaABuildQueue_() {
       stopReasonStage: rawStopped ? currentStage : '', stopReasonAt: rawStopped ? v6AuraEmailText_(pipelineRow.responseAt || pipelineRow.enteredStageAt) : '',
       stopReasonCampaignId: rawStopped ? v6AuraEmailText_(pipelineRow.campaignId) : '',
       stopOverrideApplied: overrideCheck.overridable ? 'YES' : 'NO', stopOverrideReason: rawStopped ? overrideCheck.reason : '',
-      recipientSource: r.recipientSource
+      recipientSource: r.recipientSource,
+      creativeId: creative.creativeId, creativeVersion: creative.creativeVersion,
+      creativeApprovalId: creative.approvalId, htmlChecksum: creative.htmlChecksum,
+      recipientRenderedChecksum: v6AuraChecksum_(personalizedHtml)
     };
     profile.COPY_MS += Date.now() - tCopy0;
     pendingJobs.push(job);
@@ -970,8 +994,8 @@ function v6AuraCampanaADispatchBatch_() {
   var senderName = v6AuraEmailSenderName_();
   var allQueueJobs = v6Rows_('MKT_EMAIL_QUEUE');
   var jobs = allQueueJobs.filter(function (r) { return v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && v6AuraEmailText_(r.status).toUpperCase() === 'PENDING'; });
-  var counts = { sent: 0, failed: 0, suppressed: 0, skipped: 0, stopped: 0, reviewRequired: 0, dryRun: 0 };
-  if (!jobs.length) { v6AuraCampanaALog_('DISPATCH_END (0 pending jobs)'); return { status: 'DISPATCH_COMPLETE', sendMode: mode, rounds: 0, processed: 0, sent: 0, failed: 0, suppressed: 0, skipped: 0, stopped: 0, reviewRequired: 0, dryRun: 0 }; }
+  var counts = { sent: 0, failed: 0, suppressed: 0, skipped: 0, stopped: 0, reviewRequired: 0, dryRun: 0, blockedCreative: 0 };
+  if (!jobs.length) { v6AuraCampanaALog_('DISPATCH_END (0 pending jobs)'); return { status: 'DISPATCH_COMPLETE', sendMode: mode, rounds: 0, processed: 0, sent: 0, failed: 0, suppressed: 0, skipped: 0, stopped: 0, reviewRequired: 0, dryRun: 0, blockedCreative: 0 }; }
 
   var exclusions = v6Rows_('MKT_EXCLUSIONS');
   var pipelineByAccountId = {};
@@ -1009,6 +1033,13 @@ function v6AuraCampanaADispatchBatch_() {
       if (job.approvalId && !job.approvedAt) {
         job.status = 'REVIEW_REQUIRED'; job.processedAt = now; counts.reviewRequired++; updated.push(job); return;
       }
+      // Iniciativa 2 punto 2/5 -- same dispatch-time defense in depth as the shared
+      // auraProcessEmailQueue (MarketingV6AuraEmailDispatcher.gs): re-validate the
+      // creative-approval chain at send time too, never re-rendering anything.
+      var creativeCheck = (typeof v6AuraValidateQueuedCreative_ === 'function') ? v6AuraValidateQueuedCreative_(job) : { blocked: false };
+      if (creativeCheck.blocked) {
+        job.status = 'BLOCKED'; job.error = creativeCheck.error; job.processedAt = now; counts.blockedCreative++; updated.push(job); return;
+      }
       var dupKey = [v6AuraEmailText_(job.campaignId), accountId, contactId, String(job.sequenceStep)].join('|');
       if (sentKeys[dupKey]) {
         job.status = 'SKIPPED'; job.error = 'ALREADY_SENT_DUPLICATE'; job.processedAt = now; counts.skipped++; updated.push(job); return;
@@ -1037,8 +1068,8 @@ function v6AuraCampanaADispatchBatch_() {
 
   if (updated.length) v6BatchUpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], updated);
   try { v6AuraRefreshExecutionReportStatusOnly_(CAMPANA_A_CAMPAIGN_ID_); } catch (_) { }
-  v6AuraCampanaALog_('DISPATCH_END (' + jobs.length + ' processed: ' + counts.dryRun + ' dryRun, ' + counts.sent + ' sent, ' + counts.suppressed + ' suppressed, ' + counts.stopped + ' stopped, ' + counts.skipped + ' skipped, ' + counts.reviewRequired + ' reviewRequired, ' + counts.failed + ' failed)');
-  return { status: 'DISPATCH_COMPLETE', sendMode: mode, rounds: 1, processed: jobs.length, sent: counts.sent, failed: counts.failed, suppressed: counts.suppressed, skipped: counts.skipped, stopped: counts.stopped, reviewRequired: counts.reviewRequired, dryRun: counts.dryRun };
+  v6AuraCampanaALog_('DISPATCH_END (' + jobs.length + ' processed: ' + counts.dryRun + ' dryRun, ' + counts.sent + ' sent, ' + counts.suppressed + ' suppressed, ' + counts.stopped + ' stopped, ' + counts.skipped + ' skipped, ' + counts.reviewRequired + ' reviewRequired, ' + counts.blockedCreative + ' blockedCreative, ' + counts.failed + ' failed)');
+  return { status: 'DISPATCH_COMPLETE', sendMode: mode, rounds: 1, processed: jobs.length, sent: counts.sent, failed: counts.failed, suppressed: counts.suppressed, skipped: counts.skipped, stopped: counts.stopped, reviewRequired: counts.reviewRequired, dryRun: counts.dryRun, blockedCreative: counts.blockedCreative };
 }
 // Kept as the public entry point v6AuraCampanaARegenerateDryRun_ already calls -- now a single
 // batch pass (v6AuraCampanaADispatchBatch_) instead of looping the shared, per-job-I/O
