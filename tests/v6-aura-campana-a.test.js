@@ -226,8 +226,11 @@ function gmailOpp(accountId, accountName, amOwner, sheetName) {
 })();
 
 // 6. Generic/unreliable contact names never appear in the queue: firstName is left empty and the
-// subject drops the leading "{{firstName}}, " clause and capitalizes what follows, matching the
-// exact example DGL gave -- while a real, reliable name still personalizes normally.
+// subject drops the leading "{{firstName}}, " clause and capitalizes what follows -- while a
+// real, reliable name still personalizes normally. Campana A generates ACTIVATION copy (not
+// Retention -- see the 'Retention'->'Activation' runtime fix), so the expected subject text below
+// is the real MKT_V6_AURA_ACTIVATION["Current Movement"].es subjectA template, service defaults
+// to 'Multiservicio' (Campana A's fixed campaign-level service).
 (function genericNameNeverUsedTest() {
   var tables = {
     MKT_AURA_GMAIL_OPPORTUNITIES: [gmailOpp('ACC-1', 'Progeral Corp', 'Owner'), gmailOpp('ACC-2', 'Shipper Co', 'Owner')],
@@ -241,12 +244,12 @@ function gmailOpp(accountId, accountName, amOwner, sheetName) {
   ctx.v6AuraCampanaABuildQueue_();
   var genericJob = tables.MKT_EMAIL_QUEUE.filter(function (j) { return j.contactId === 'CON-GENERIC'; })[0];
   assert.equal(genericJob.firstName, '', 'a generic role/mailbox name must never be used, and never fall back to a fabricated "Team"');
-  assert.equal(genericJob.subject, 'Seguimos cerca de la operación de Progeral Corp', 'the no-name subject must match DGL\'s own example exactly: no leading name, no comma, capitalized');
+  assert.equal(genericJob.subject, '¿tiene un movimiento Multiservicio en puerta?', 'the no-name subject must drop the leading "{{firstName}}, " clause from the real Activation subjectA template, with no fabricated "Team,"');
   assert(genericJob.subject.indexOf('Team') < 0);
   var realJob = tables.MKT_EMAIL_QUEUE.filter(function (j) { return j.contactId === 'CON-REAL'; })[0];
   assert.equal(realJob.firstName, 'Sofia');
-  assert.equal(realJob.subject, 'Sofia, seguimos cerca de la operación de Shipper Co');
-  console.log('campana-a test 6 (generic names never used; real names personalize; no-name subject matches the exact required format): PASS');
+  assert.equal(realJob.subject, 'Sofia, ¿tiene un movimiento Multiservicio en puerta?');
+  console.log('campana-a test 6 (generic names never used; real names personalize; no-name subject uses the real Activation template, no fallback to Retention): PASS');
 })();
 
 // 7. Every job's reply-to resolves to the canonical DGL identity (never empty, never invented),
@@ -702,8 +705,9 @@ function campanaASheetValuesWithContacts(dataRows) {
 })();
 
 // 26. The governed stale-cross-family override: a RESPONDED stage from a DIFFERENT campaign
-// family, more than 90 days old, no longer blocks Retention -- but a recent one, a
-// same-family(Retention) one, and a CLOSED/SUPPRESSED or LOAD/RETAINED stage are never
+// family, more than 90 days old, no longer blocks Campana A (whose real family is Activation,
+// not Retention -- see the 'Retention'->'Activation' runtime fix) -- but a recent one, a
+// same-family(Activation) one, and a CLOSED/SUPPRESSED or LOAD/RETAINED stage are never
 // overridden. Every decision is captured on the job for audit.
 (function staleCrossFamilyOverrideTest() {
   function scenario(pipelineRow, priorCampaignRow) {
@@ -726,7 +730,7 @@ function campanaASheetValuesWithContacts(dataRows) {
     { currentStage: 'RESPONDED', responseAt: oldDate, campaignId: 'CMP-OLD-QNB' },
     { campaignId: 'CMP-OLD-QNB', objective: 'Quoted Not Booked' }
   );
-  assert.notEqual(overridden.status, 'STOPPED', 'a stale, cross-family response must no longer block Retention');
+  assert.notEqual(overridden.status, 'STOPPED', 'a stale, cross-family response must no longer block Campana A');
   assert.equal(overridden.stopOverrideApplied, 'YES');
   assert.equal(overridden.stopOverrideReason, 'STALE_CROSS_FAMILY_RESPONSE');
 
@@ -739,13 +743,14 @@ function campanaASheetValuesWithContacts(dataRows) {
   assert.equal(recent.stopOverrideApplied, 'NO');
   assert.equal(recent.stopOverrideReason, 'RESPONSE_NOT_YET_STALE');
 
-  // (c) Stale RESPONDED, but from the SAME family (Retention) -> NOT overridden.
+  // (c) Stale RESPONDED, but from the SAME family (Activation -- Campana A's own family) -> NOT
+  // overridden.
   var sameFamily = scenario(
-    { currentStage: 'RESPONDED', responseAt: oldDate, campaignId: 'CMP-OLD-RETENTION' },
-    { campaignId: 'CMP-OLD-RETENTION', objective: 'Retention' }
+    { currentStage: 'RESPONDED', responseAt: oldDate, campaignId: 'CMP-OLD-ACTIVATION' },
+    { campaignId: 'CMP-OLD-ACTIVATION', objective: 'Activation' }
   );
-  assert.equal(sameFamily.status, 'STOPPED', 'a still-active Retention-family response must never be overridden by this rule');
-  assert.equal(sameFamily.stopOverrideReason, 'SAME_FAMILY_RETENTION_STILL_ACTIVE');
+  assert.equal(sameFamily.status, 'STOPPED', 'a still-active Activation-family response must never be overridden by this rule');
+  assert.equal(sameFamily.stopOverrideReason, 'SAME_FAMILY_ACTIVATION_STILL_ACTIVE');
 
   // (d) CLOSED / SUPPRESSED, even if old and cross-family -> NEVER overridden (hard stop).
   var closed = scenario(
