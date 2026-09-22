@@ -116,6 +116,11 @@ function jobFromCreative(ctx, creative, over) {
     htmlChecksum: creative.htmlChecksum
   }, over || {});
   job.recipientRenderedChecksum = ctx.v6AuraChecksum_(job.htmlBody);
+  // PR #3 audit round 2, punto 1 -- required alongside recipientRenderedChecksum; a job built
+  // through this helper without it would be treated as failing the dispatch-time content-drift
+  // check (missing == block), which is correct for a real queue job but not what most of these
+  // tests are exercising, so every real job fixture here carries it.
+  if (job.recipientContentChecksum === undefined) job.recipientContentChecksum = ctx.v6AuraJobContentChecksum_(job.subject, job.htmlBody);
   return job;
 }
 

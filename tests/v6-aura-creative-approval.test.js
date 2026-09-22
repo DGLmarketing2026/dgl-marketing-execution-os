@@ -57,7 +57,13 @@ function makeContext(opts) {
   ctx.v6Sheet_ = function (name) { return sheets[name] || null; };
   ctx.MKT_V6_CONTACT_RECIPIENT_SCHEMA = { MKT_CAMPAIGN_CREATIVES: ['creativeId', 'campaignId'] };
   ctx.v6Rows_ = function (name) { return (tables[name] || []).map(function (r) { return Object.assign({}, r); }); };
+  // opts.failUpsertFor: table name(s) whose v6UpsertByKey_ call always throws -- simulates a
+  // real Sheets write failure (transient API error, quota, lock contention) for the revocation
+  // fail-closed test below, without touching any other table's writes.
+  var failUpsertFor = {};
+  (opts.failUpsertFor ? (Array.isArray(opts.failUpsertFor) ? opts.failUpsertFor : [opts.failUpsertFor]) : []).forEach(function (n) { failUpsertFor[n] = true; });
   ctx.v6UpsertByKey_ = function (name, keys, record) {
+    if (failUpsertFor[name]) throw new Error('SIMULATED_SHEETS_WRITE_FAILURE:' + name);
     var rows = tables[name] || (tables[name] = []);
     var at = rows.findIndex(function (row) { return keys.every(function (k) { return String(row[k] || '') === String(record[k] || ''); }); });
     if (at < 0) rows.push(Object.assign({}, record)); else rows[at] = Object.assign({}, record);
@@ -190,7 +196,7 @@ function approvePayload(over) {
   var creative = ctx.v6AuraLatestApprovedCreative_('CMP-1');
   // PR #3 audit punto 8 -- dispatch must also revalidate creativeVersion (and, via `creative`,
   // the current status), not just the two checksums already covered above.
-  var goodJob = { creativeId: creative.creativeId, creativeApprovalId: approval.approvalId, creativeVersion: creative.creativeVersion, htmlChecksum: creative.htmlChecksum, htmlBody: creative.htmlBody, recipientRenderedChecksum: ctx.v6AuraChecksum_(creative.htmlBody) };
+  var goodJob = { creativeId: creative.creativeId, creativeApprovalId: approval.approvalId, creativeVersion: creative.creativeVersion, htmlChecksum: creative.htmlChecksum, subject: creative.subject, htmlBody: creative.htmlBody, recipientRenderedChecksum: ctx.v6AuraChecksum_(creative.htmlBody), recipientContentChecksum: ctx.v6AuraJobContentChecksum_(creative.subject, creative.htmlBody) };
   assert.equal(ctx.v6AuraValidateQueuedCreative_(goodJob).blocked, false);
 
   assert.equal(ctx.v6AuraValidateQueuedCreative_({ htmlBody: 'x' }).error, 'CREATIVE_NOT_APPROVED');
@@ -362,7 +368,7 @@ function approvePayload(over) {
   var ctx = makeContext({});
   var approval = ctx.v6AuraApproveCreative_(approvePayload({}));
   var creative = ctx.v6AuraLatestApprovedCreative_('CMP-1');
-  var goodJob = { creativeId: creative.creativeId, creativeApprovalId: approval.approvalId, creativeVersion: creative.creativeVersion, htmlChecksum: creative.htmlChecksum, htmlBody: creative.htmlBody, recipientRenderedChecksum: ctx.v6AuraChecksum_(creative.htmlBody) };
+  var goodJob = { creativeId: creative.creativeId, creativeApprovalId: approval.approvalId, creativeVersion: creative.creativeVersion, htmlChecksum: creative.htmlChecksum, subject: creative.subject, htmlBody: creative.htmlBody, recipientRenderedChecksum: ctx.v6AuraChecksum_(creative.htmlBody), recipientContentChecksum: ctx.v6AuraJobContentChecksum_(creative.subject, creative.htmlBody) };
 
   assert.equal(ctx.v6AuraValidateCreativeOrBlock_(goodJob).blocked, false, 'a well-formed job must still pass through the wrapper unchanged');
 
@@ -387,7 +393,7 @@ function approvePayload(over) {
   var ctx = makeContext({});
   var approval = ctx.v6AuraApproveCreative_(approvePayload({}));
   var creative = ctx.v6AuraLatestApprovedCreative_('CMP-1');
-  var goodJob = { creativeId: creative.creativeId, creativeApprovalId: approval.approvalId, creativeVersion: creative.creativeVersion, htmlChecksum: creative.htmlChecksum, htmlBody: creative.htmlBody, recipientRenderedChecksum: ctx.v6AuraChecksum_(creative.htmlBody) };
+  var goodJob = { creativeId: creative.creativeId, creativeApprovalId: approval.approvalId, creativeVersion: creative.creativeVersion, htmlChecksum: creative.htmlChecksum, subject: creative.subject, htmlBody: creative.htmlBody, recipientRenderedChecksum: ctx.v6AuraChecksum_(creative.htmlBody), recipientContentChecksum: ctx.v6AuraJobContentChecksum_(creative.subject, creative.htmlBody) };
   assert.equal(ctx.v6AuraValidateQueuedCreative_(goodJob).blocked, false);
 
   var wrongApprovalId = Object.assign({}, goodJob, { creativeApprovalId: 'CAPR:WRONG:1' });
@@ -440,6 +446,107 @@ function approvePayload(over) {
     ctxRewrite.v6AuraVerifyAndCreateTestDraft_({ campaignId: 'CMP-1', subject: 'x', htmlBody: storedHtml2, textBody: 'text' });
   }, /TEST_DRAFT_CONTENT_MISMATCH/, 'a genuine STORED-vs-actual-Gmail-draft mismatch must block, proving this reads back the real created draft rather than trusting the input');
   console.log('creative-approval test 19 (v6AuraVerifyAndCreateTestDraft_ is real end-to-end: blocks on no approval, blocks on Studio/Stored mismatch, actually calls GmailApp.createDraft, and independently verifies the real created draft): PASS');
+})();
+
+// 20. PR #3 audit round 2, punto 1 -- the per-JOB content checksum covers subject+htmlBody
+// (recipientRenderedChecksum above only ever covers htmlBody); a job whose SUBJECT alone was
+// altered after queueing must block even though htmlBody/recipientRenderedChecksum are
+// untouched, and a job missing the field entirely must also block (fail-closed, never skipped).
+(function jobContentChecksumCatchesSubjectDriftTest() {
+  var ctx = makeContext({});
+  var approval = ctx.v6AuraApproveCreative_(approvePayload({}));
+  var creative = ctx.v6AuraLatestApprovedCreative_('CMP-1');
+  var goodJob = { creativeId: creative.creativeId, creativeApprovalId: approval.approvalId, creativeVersion: creative.creativeVersion, htmlChecksum: creative.htmlChecksum, subject: creative.subject, htmlBody: creative.htmlBody, recipientRenderedChecksum: ctx.v6AuraChecksum_(creative.htmlBody), recipientContentChecksum: ctx.v6AuraJobContentChecksum_(creative.subject, creative.htmlBody) };
+  assert.equal(ctx.v6AuraValidateQueuedCreative_(goodJob).blocked, false);
+
+  var subjectDrifted = Object.assign({}, goodJob, { subject: 'Something completely different' }); // htmlBody/recipientRenderedChecksum untouched
+  var result = ctx.v6AuraValidateQueuedCreative_(subjectDrifted);
+  assert.equal(result.blocked, true, 'subject-only drift on the QUEUED JOB must block even though htmlBody and recipientRenderedChecksum never changed');
+  assert.equal(result.error, 'CREATIVE_VERSION_MISMATCH');
+
+  var missingField = Object.assign({}, goodJob); delete missingField.recipientContentChecksum;
+  assert.equal(ctx.v6AuraValidateQueuedCreative_(missingField).blocked, true, 'a job missing recipientContentChecksum entirely must also block -- fail-closed, never skip-if-absent');
+  console.log('creative-approval test 20 (per-job recipientContentChecksum covers subject+htmlBody -- subject-only drift on a queued job blocks, and a missing field blocks too): PASS');
+})();
+
+// 21. PR #3 audit round 2, punto 2 -- dispatch recomputes checksum(creative.htmlBody) and
+// canonicalContentChecksum(creative...) FRESH from the stored row's own current content,
+// independent of whatever the job itself copied -- catches the stored creative row's own
+// checksum columns going stale/corrupted even when the job's copied checksums still agree with
+// the (also stale) stored values.
+(function dispatchRecomputesStoredChecksumsFreshTest() {
+  var ctx = makeContext({});
+  var approval = ctx.v6AuraApproveCreative_(approvePayload({}));
+  var creative = ctx.v6AuraLatestApprovedCreative_('CMP-1');
+  var goodJob = { creativeId: creative.creativeId, creativeApprovalId: approval.approvalId, creativeVersion: creative.creativeVersion, htmlChecksum: creative.htmlChecksum, subject: creative.subject, htmlBody: creative.htmlBody, recipientRenderedChecksum: ctx.v6AuraChecksum_(creative.htmlBody), recipientContentChecksum: ctx.v6AuraJobContentChecksum_(creative.subject, creative.htmlBody) };
+  assert.equal(ctx.v6AuraValidateQueuedCreative_(goodJob).blocked, false);
+
+  // Corrupt the STORED ROW directly: htmlBody changes but the htmlChecksum column is left
+  // exactly as it was -- still === the job's own copied htmlChecksum. The OLD two-stored-value
+  // comparison (creative.htmlChecksum vs job.htmlChecksum) alone would have passed this. Only a
+  // fresh recompute of checksum(creative.htmlBody) catches it.
+  var row = ctx.__tables.MKT_CAMPAIGN_CREATIVES.filter(function (r) { return r.creativeId === creative.creativeId; })[0];
+  row.htmlBody = row.htmlBody + '<p>tampered directly in storage</p>'; // htmlChecksum column left untouched
+  assert.equal(row.htmlChecksum, goodJob.htmlChecksum, 'sanity: the two copied checksum values still agree with each other despite the corruption');
+  var htmlResult = ctx.v6AuraValidateQueuedCreative_(goodJob);
+  assert.equal(htmlResult.blocked, true, 'a fresh recompute of checksum(creative.htmlBody) must catch storage-level corruption the job-vs-creative comparison alone would miss');
+  assert.equal(htmlResult.error, 'CREATIVE_VERSION_MISMATCH');
+
+  // Same defense for contentChecksum, on a separate campaign: subject changes at the STORAGE
+  // level, htmlBody untouched (htmlChecksum-based checks all still pass), contentChecksum
+  // column left stale -- only a fresh recompute of canonicalContentChecksum(...) catches it.
+  var ctx2 = makeContext({});
+  var approval2 = ctx2.v6AuraApproveCreative_(approvePayload({}));
+  var creative2 = ctx2.v6AuraLatestApprovedCreative_('CMP-1');
+  var goodJob2 = { creativeId: creative2.creativeId, creativeApprovalId: approval2.approvalId, creativeVersion: creative2.creativeVersion, htmlChecksum: creative2.htmlChecksum, subject: creative2.subject, htmlBody: creative2.htmlBody, recipientRenderedChecksum: ctx2.v6AuraChecksum_(creative2.htmlBody), recipientContentChecksum: ctx2.v6AuraJobContentChecksum_(creative2.subject, creative2.htmlBody) };
+  var row2 = ctx2.__tables.MKT_CAMPAIGN_CREATIVES.filter(function (r) { return r.creativeId === creative2.creativeId; })[0];
+  row2.subject = 'Storage-level subject tamper, contentChecksum left stale';
+  var contentResult = ctx2.v6AuraValidateQueuedCreative_(goodJob2);
+  assert.equal(contentResult.blocked, true, 'a fresh recompute of canonicalContentChecksum(creative...) must catch storage-level subject tampering even when htmlChecksum-based checks all pass');
+  assert.equal(contentResult.error, 'CREATIVE_VERSION_MISMATCH');
+  console.log('creative-approval test 21 (dispatch independently recomputes checksum(creative.htmlBody) and canonicalContentChecksum(creative...) fresh from stored content, catching storage-level corruption a job-vs-creative comparison alone would miss): PASS');
+})();
+
+// 22. PR #3 audit round 2, punto 3 -- revocation is fail-closed: even when the row write itself
+// fails (simulated Sheets write failure, e.g. a transient API error), the creative must end up
+// blocked/unresolvable everywhere -- never left fully usable behind a passive warning.
+(function revocationFailsClosedOnRowWriteFailureTest() {
+  var ctx = makeContext({});
+  var approval = ctx.v6AuraApproveCreative_(approvePayload({}));
+  var creative = ctx.v6AuraLatestApprovedCreative_('CMP-1');
+  assert(ctx.v6AuraLatestApprovedCreative_('CMP-1'), 'sanity: the creative resolves as approved before any revoke attempt');
+
+  // Simulate the row write itself failing on every attempt (all 3 retries) -- the ledger write
+  // (a separate, simpler, single-key PropertiesService call) still succeeds beforehand.
+  var realUpsert = ctx.v6UpsertByKey_;
+  ctx.v6UpsertByKey_ = function (name, keys, record) {
+    if (name === 'MKT_CAMPAIGN_CREATIVES') throw new Error('SIMULATED_SHEETS_WRITE_FAILURE');
+    return realUpsert(name, keys, record);
+  };
+  assert.throws(function () { ctx.v6AuraRevokeCreativeApproval_(creative.creativeId, 'Marketing'); }, /CREATIVE_REVOKE_ROW_UPDATE_FAILED_BUT_LEDGER_BLOCKED/, 'a revoke whose row write fails after retries must throw a real, actionable error -- never a silent/soft success');
+
+  // The row itself was NEVER updated (status is still APPROVED in storage) -- prove that despite
+  // this, the creative is unresolvable everywhere thanks to the ledger.
+  var row = ctx.__tables.MKT_CAMPAIGN_CREATIVES.filter(function (r) { return r.creativeId === creative.creativeId; })[0];
+  assert.equal(String(row.status || 'APPROVED').toUpperCase(), 'APPROVED', 'sanity: the row write genuinely never landed -- status column is untouched');
+
+  assert.equal(ctx.v6AuraLatestApprovedCreative_('CMP-1'), null, 'the creative must no longer resolve as the latest approved one, even though its row still says APPROVED');
+  assert.equal(ctx.v6AuraLatestApprovedCreativeForLanguage_('CMP-1', 'Spanish'), null, 'the per-language resolver must be blocked too');
+
+  var goodJob = { creativeId: creative.creativeId, creativeApprovalId: approval.approvalId, creativeVersion: creative.creativeVersion, htmlChecksum: creative.htmlChecksum, subject: creative.subject, htmlBody: creative.htmlBody, recipientRenderedChecksum: ctx.v6AuraChecksum_(creative.htmlBody), recipientContentChecksum: ctx.v6AuraJobContentChecksum_(creative.subject, creative.htmlBody) };
+  var dispatchResult = ctx.v6AuraValidateQueuedCreative_(goodJob);
+  assert.equal(dispatchResult.blocked, true, 'dispatch-time revalidation must also block this creative via the ledger, even for a job that was already queued before the failed revoke');
+  assert.equal(dispatchResult.error, 'CREATIVE_REVOKED');
+
+  // Restore the real write path and confirm the SAME creativeId can still be fully revoked (the
+  // row itself finally updated) once the underlying write issue is gone -- e.g. campaign-studio
+  // -v5.js's own retry-before-next-approve path.
+  ctx.v6UpsertByKey_ = realUpsert;
+  var recovered = ctx.v6AuraRevokeCreativeApproval_(creative.creativeId, 'Marketing');
+  assert.equal(recovered.status, 'REVOKED');
+  var rowAfterRecovery = ctx.__tables.MKT_CAMPAIGN_CREATIVES.filter(function (r) { return r.creativeId === creative.creativeId; })[0];
+  assert.equal(rowAfterRecovery.status, 'REVOKED', 'once the write path recovers, the row itself is finally updated too');
+  console.log('creative-approval test 22 (revocation is fail-closed: a failed row write still blocks the creative everywhere via the Properties ledger, throws a real error rather than a soft warning, and a later retry can still fully recover the row): PASS');
 })();
 
 console.log('V6 AURA creative approval (Iniciativa 2 -- Campaign Studio canonical source, checksums, gates): ALL PASS');
