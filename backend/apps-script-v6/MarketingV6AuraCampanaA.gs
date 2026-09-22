@@ -483,25 +483,25 @@ function v6AuraCampanaAEnsureCampaignAndScope_(preloadedAccounts) {
   var now = new Date().toISOString();
   v6UpsertByKey_('MKT_CAMPAIGNS', ['campaignId'], {
     campaignId: CAMPANA_A_CAMPAIGN_ID_, scopeId: CAMPANA_A_SCOPE_ID_,
-    campaignName: 'Retencion Prioritaria - Campana A (HA)', campaignType: 'Retention', objective: 'Retention',
+    campaignName: 'Activation Prioritaria - Campana A (HA)', campaignType: 'Activation', objective: 'Activation',
     service: 'Multiservicio', amOwner: 'Multiple', language: 'Spanish', status: 'AUTO_ACTIVE',
     createdAt: now, updatedAt: now
   });
   v6AuraEnsureCampaignScope_({
     scopeId: CAMPANA_A_SCOPE_ID_, campaignId: CAMPANA_A_CAMPAIGN_ID_,
-    opportunityType: 'Retention', campaignType: 'Retention', accountIds: accountIds, batchWrite: true
+    opportunityType: 'Activation', campaignType: 'Activation', accountIds: accountIds, batchWrite: true
   });
   return { accountIds: accountIds, count: accountIds.length, accountMap: accountMap, realIdByHashId: realIdByHashId };
 }
 
-// --- Governed override: a stale, cross-family historical response must not block Retention
+// --- Governed override: a stale, cross-family historical response must not block Activation
 // forever -----------------------------------------------------------------------------------
 // Explicit, narrow, and logged -- never a general relaxation of stopOnResponse. CLOSED /
 // SUPPRESSED and an ongoing/successful relationship (LOAD / REACTIVATED, RETAINED / EXPANDED)
 // are NEVER overridable -- those are real, current outcomes this pipeline must always respect.
 // Only RESPONDED / RFQ RECEIVED / QUOTED / COOLDOWN-NURTURE are even eligible, and only when
 // ALL of the following are true: the prior campaign's real objective/campaignType (looked up
-// from MKT_CAMPAIGNS, never guessed) is a DIFFERENT family than Retention; a real timestamp
+// from MKT_CAMPAIGNS, never guessed) is a DIFFERENT family than Activation; a real timestamp
 // exists to evaluate age against; and that timestamp is older than
 // CAMPANA_A_STALE_RESPONSE_OVERRIDE_DAYS_ (90 -- a deliberately separate, explicit constant from
 // the unrelated 30-day SEND-frequency cap in MarketingV6FrequencyControl.gs; this one measures
@@ -523,7 +523,7 @@ function v6AuraCampanaAStopOverrideCheck_(currentStage, pipelineRow, preloadedCa
   if (currentStage === 'CLOSED / SUPPRESSED') return { overridable: false, reason: 'HARD_STOP_CLOSED_SUPPRESSED' };
   if (CAMPANA_A_STALE_OVERRIDE_ELIGIBLE_STAGES_.indexOf(currentStage) < 0) return { overridable: false, reason: 'STAGE_NOT_ELIGIBLE_FOR_OVERRIDE' };
   var priorFamily = v6AuraCampanaAPriorCampaignFamily_(v6AuraEmailText_(p.campaignId), preloadedCampaigns);
-  if (priorFamily === 'RETENTION') return { overridable: false, reason: 'SAME_FAMILY_RETENTION_STILL_ACTIVE' };
+  if (priorFamily === 'ACTIVATION') return { overridable: false, reason: 'SAME_FAMILY_ACTIVATION_STILL_ACTIVE' };
   if (!priorFamily) return { overridable: false, reason: 'PRIOR_CAMPAIGN_FAMILY_UNKNOWN' };
   var at = v6AuraEmailText_(p.responseAt || p.enteredStageAt);
   var atDate = at ? new Date(at) : null;
@@ -841,7 +841,7 @@ function v6AuraCampanaABuildQueue_() {
       status: stopped ? 'STOPPED' : (replyToBlocked ? 'SUPPRESSED' : (policyApproved ? 'PENDING' : 'REVIEW_REQUIRED')),
       gmailDraftId: '', createdAt: now, processedAt: '', error: replyToBlocked ? 'MISSING_REPLY_TO_CONFIGURATION' : '',
       requestId: CAMPANA_A_CAMPAIGN_ID_, amOwner: v6AuraEmailText_(gmailOpp.amOwner) || v6AuraEmailText_(account.amOwner) || '',
-      playbookId: 'Retention', sequenceStep: sequenceStep, scheduledAt: now,
+      playbookId: 'Activation', sequenceStep: sequenceStep, scheduledAt: now,
       approvalId: policyApproved ? '' : ('APR:' + CAMPANA_A_CAMPAIGN_ID_), approvedAt: '', approvedBy: '',
       stopOnResponse: true, country: country, preferredLanguage: langInfo.language,
       languageSource: langInfo.source, languageReason: langInfo.reason,
@@ -1236,7 +1236,7 @@ function v6AuraCampanaARegenerateDryRun_() {
     v6AuraCampanaALog_('GMAIL_REPROCESS_END (' + gmailReprocessMs + 'ms, ' + JSON.stringify(gmailReprocess && gmailReprocess.status) + ')');
   }
 
-  // v6RefreshOpportunitiesFromReports_ is the SHARED, cross-family (QNB/Retention/Reactivation/
+  // v6RefreshOpportunitiesFromReports_ is the SHARED, cross-family (QNB/Activation/Retention/Reactivation/
   // Cross-Sell/Nurture) detection refresh -- it reads the full real NOVA/AM report workbook
   // (several tabs, the entire account base, not just this campaign's ~65 accounts) and was never
   // part of Campana A's own O(n^2) bug (its own write path, v6WriteOpportunities_, already does a
