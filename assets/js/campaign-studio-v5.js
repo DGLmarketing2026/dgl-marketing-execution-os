@@ -6,8 +6,26 @@
   const Lib=()=>global.DGL_CREATIVE_LIBRARY_V5;
   const Copy=()=>global.DGL_COPY_ENGINE_V5;
   const Seq=()=>global.DGL_CAMPAIGN_SEQUENCES_V4;
-  const OFFICIAL_LOGO="assets/brand/dgl-logo-white.png";
-  const DEFAULT_HERO="assets/creative/dgl-ftl-truck.webp";
+  // PR #3 audit punto 1 -- Campaign Studio's email HTML must carry absolute public URLs for
+  // every assets/... reference BEFORE approval; there is no post-processing step left anywhere
+  // (requestDraft() no longer rewrites relative paths -- see below). absUrl() is the single
+  // place that turns a relative asset path into a public URL, called from every function that
+  // ever contributes an assets/... reference to emailHtml()'s output, so approveCreative always
+  // receives already-absolute HTML.
+  const BASE_URL="https://dglmarketing2026.github.io/dgl-marketing-execution-os/";
+  function absUrl(u){
+    const s=String(u||"").trim();
+    if(!s)return s;
+    if(/^(https?:|data:|mailto:)/i.test(s))return s;
+    return BASE_URL+s.replace(/^\/+/,"");
+  }
+  const OFFICIAL_LOGO=absUrl("assets/brand/dgl-logo-white.png");
+  const DEFAULT_HERO=absUrl("assets/creative/dgl-ftl-truck.webp");
+  // PR #3 audit punto 2 -- the CTA must be a real, functional action, never href="#". Mirrors
+  // the precedented mailto: pattern already used by the backend's own editorial template
+  // (v6AuraEmailHtml_, MarketingV6AuraCopyEngine.gs) and its canonical reply-to fallback
+  // (AURA_CANONICAL_REPLY_TO_FALLBACK_ / AURA_GMAIL_SOURCE_MAILBOX).
+  const DGL_CANONICAL_REPLY_TO="info@dglus.com";
 
   // approvedCreative (Iniciativa 2): the backend-persisted record for the CURRENT approved
   // version, if any -- {creativeId,creativeVersion,approvalId,htmlChecksum,html,subject}. Reset
@@ -15,6 +33,25 @@
   // (objective/service/language/angle/ctaIntent/qnbWindow via generate(), a direct field edit,
   // or a creative-system switch) fires -- an approval must never be left pointing at stale content.
   const state={device:"desktop",approved:false,approvedCreative:null,generated:null,incoming:null,campaignNameManual:false};
+
+  // PR #3 audit punto 4 -- editing an approved creative must invalidate/revoke the approved
+  // BACKEND record (MKT_CAMPAIGN_CREATIVES), not only local UI state. Every place that used to
+  // do a bare `state.approved=false;state.approvedCreative=null;` now calls this instead, so a
+  // second tab / stale session / direct API replay can never resolve a creative that was just
+  // edited out from under it here. Fire-and-forget on the backend call: local state is
+  // invalidated immediately and synchronously either way (never trust the network round-trip to
+  // decide whether the UI itself lets Marketing keep editing); a revoke failure surfaces as a
+  // toast so Marketing knows the backend row may still need manual attention.
+  function invalidateApproval(){
+    if(!state.approved)return;
+    const prior=state.approvedCreative;
+    state.approved=false;state.approvedCreative=null;
+    if(prior&&prior.creativeId&&global.DGL_MARKETING_BACKEND_ADAPTER_V55?.isConnected()){
+      global.DGL_MARKETING_BACKEND_ADAPTER_V55.revokeApprovedCreative(prior.creativeId,"Marketing").catch(err=>{
+        global.DGL_INTERACTIONS?.toast?.(`Warning: backend revoke failed for ${prior.creativeId} — ${err.message}`,"error");
+      });
+    }
+  }
 
   function audiences(){
     try{return global.DGL_MARKETING_CAMPAIGN_OS.buildAudiences()}catch(_){return[]}
@@ -127,7 +164,7 @@
   function generate(){
     const s=strategy();
     syncCampaignName();
-    state.generated=Copy().generate(s);state.approved=false;state.approvedCreative=null;
+    state.generated=Copy().generate(s);invalidateApproval();
     const c=state.generated||{},set=(id,v)=>{const e=document.getElementById(id);if(e)e.value=clean(v)};
     set("v5SubjectA",c.subjectA);set("v5SubjectB",c.subjectB);set("v5Preheader",c.preheader);
     set("v5Headline",c.headline);set("v5Body",c.body);set("v5Body2",c.body2);set("v5Cta",c.cta);
@@ -135,11 +172,11 @@
   }
 
   function brandHeader(s){
-    return `<div style="min-height:72px;display:flex;align-items:center;padding:0 34px;background:#05035C;border-bottom:4px solid #77B82A"><img src="${esc(s.logoUrl||OFFICIAL_LOGO)}" alt="DGL — Dedicated Ground Logistics" style="display:block;width:184px;max-width:46%;height:52px;object-fit:contain;object-position:left center;border:0"></div>`;
+    return `<div style="min-height:72px;display:flex;align-items:center;padding:0 34px;background:#05035C;border-bottom:4px solid #77B82A"><img src="${esc(absUrl(s.logoUrl||OFFICIAL_LOGO))}" alt="DGL — Dedicated Ground Logistics" style="display:block;width:184px;max-width:46%;height:52px;object-fit:contain;object-position:left center;border:0"></div>`;
   }
 
   function assetPath(s){
-    return s.heroUrl||Lib().resolveAsset({objective:s.objective,service:s.service,angle:s.angle});
+    return absUrl(s.heroUrl||Lib().resolveAsset({objective:s.objective,service:s.service,angle:s.angle}));
   }
 
   function heroAsset(s,height=250){
@@ -178,8 +215,11 @@
     const s=strategy(),c=currentCopy(),sys=Lib().CREATIVE_SYSTEMS[s.creativeSystem]||Lib().CREATIVE_SYSTEMS["editorial-white"];
     const service=Lib().SERVICES[s.service]||Lib().SERVICES.Multiservicio;
     const h=sample(c.headline,s),b=sample(c.body,s),b2=sample(c.body2,s),cta=sample(c.cta,s),pre=sample(c.preheader,s);
+    const subjectSample=sample(c.subjectA,s)||h;
     const proof=service.proof.map(x=>`<td style="padding:0 16px 0 0;font-family:Arial,sans-serif"><div style="width:18px;height:2px;background:#77B82A;margin-bottom:7px"></div><div style="font-size:9px;font-weight:800;line-height:1.35;color:#526071">${esc(x)}</div></td>`).join("");
-    const button=`<table role="presentation" cellspacing="0" cellpadding="0"><tr><td bgcolor="#77B82A" style="border-radius:7px"><a href="#" style="display:inline-block;padding:14px 21px;font-family:Arial,sans-serif;font-size:12px;font-weight:900;color:#071005;text-decoration:none">${esc(cta)} →</a></td></tr></table>`;
+    // PR #3 audit punto 2 -- functional CTA (mailto:), never href="#".
+    const ctaHref=`mailto:${DGL_CANONICAL_REPLY_TO}?subject=${encodeURIComponent(subjectSample)}`;
+    const button=`<table role="presentation" cellspacing="0" cellpadding="0"><tr><td bgcolor="#77B82A" style="border-radius:7px"><a href="${ctaHref}" style="display:inline-block;padding:14px 21px;font-family:Arial,sans-serif;font-size:12px;font-weight:900;color:#071005;text-decoration:none">${esc(cta)} →</a></td></tr></table>`;
 
     if(sys.layout==="minimal"){
       return `<!doctype html><html><body style="margin:0;background:#F4F5F7">
@@ -477,16 +517,21 @@
   async function requestDraft(kind){
     const campaignId=state.incoming?.campaignId;if(!campaignId)throw new Error("Prepare a backend campaign before creating drafts.");
     if(kind!=="TEST_DRAFT")throw new Error("Audience draft execution is not available in V5.5.");
-    const preview=global.DGL_CAMPAIGN_STUDIO_V5.getPreview(),s=preview.strategy||{},c=preview.copy||{},subject=clean(document.getElementById("v5PreviewSubject")?.textContent||c.subjectA),base="https://dglmarketing2026.github.io/dgl-marketing-execution-os/";
-    // Iniciativa 2 punto 7 -- Test Draft must prove STUDIO HTML == STORED APPROVED HTML == TEST
-    // DRAFT HTML. Once a creative has been approved (state.approvedCreative set, never
+    const preview=global.DGL_CAMPAIGN_STUDIO_V5.getPreview(),s=preview.strategy||{},c=preview.copy||{},subject=clean(document.getElementById("v5PreviewSubject")?.textContent||c.subjectA);
+    // Iniciativa 2 punto 7 / PR #3 audit puntos 1+9 -- Test Draft must prove STUDIO HTML ==
+    // STORED APPROVED HTML == GMAIL DRAFT HTML with NO post-processing step anywhere in this
+    // path. emailHtml() already emits absolute assets/... URLs and a functional mailto: CTA at
+    // generation time (see absUrl()/DGL_CANONICAL_REPLY_TO above), so there is nothing left to
+    // rewrite here -- htmlBody is passed through verbatim, byte for byte, whichever source it
+    // comes from. Once a creative has been approved (state.approvedCreative set, never
     // invalidated since), the Test Draft is built from that STORED html, not a fresh live
     // preview render -- the two are only guaranteed identical if nothing in this screen has
     // changed the preview since approval, which is exactly what state.approved tracks. Before
     // any approval, the Test Draft still uses the live preview (there is nothing stored yet to
-    // compare against).
+    // compare against). The backend (v6AuraVerifyAndCreateTestDraft_) independently re-verifies
+    // this htmlBody against the stored approved creative and the actual created Gmail draft.
     const sourceHtml=(state.approved&&state.approvedCreative&&state.approvedCreative.html)?state.approvedCreative.html:(preview.html||"");
-    const htmlBody=String(sourceHtml).replace(/(["'(=])assets\//g,`$1${base}assets/`),textBody=[subject,c.preheader,c.headline,c.body,c.body2,c.cta].map(clean).filter(Boolean).join("\n\n"),campaignPatch={campaignName:s.campaignName||"",audienceId:s.audienceId||state.incoming?.audienceId||"",language:s.language||"",templateId:s.creativeSystem||"",subject,preheader:c.preheader||"",headline:c.headline||"",body:c.body||"",body2:c.body2||"",cta:c.cta||"",ctaUrl:s.ctaUrl||"",heroUrl:s.heroUrl||"",logoUrl:s.logoUrl||"",senderName:s.senderName||"",replyTo:s.replyTo||""};
+    const htmlBody=String(sourceHtml),textBody=[subject,c.preheader,c.headline,c.body,c.body2,c.cta].map(clean).filter(Boolean).join("\n\n"),campaignPatch={campaignName:s.campaignName||"",audienceId:s.audienceId||state.incoming?.audienceId||"",language:s.language||"",templateId:s.creativeSystem||"",subject,preheader:c.preheader||"",headline:c.headline||"",body:c.body||"",body2:c.body2||"",cta:c.cta||"",ctaUrl:s.ctaUrl||"",heroUrl:s.heroUrl||"",logoUrl:s.logoUrl||"",senderName:s.senderName||"",replyTo:s.replyTo||""};
     return global.DGL_MARKETING_BACKEND_ADAPTER_V55.createTestDraft(campaignId,{subject,htmlBody,textBody,campaignPatch});
   }
   function setTestDraftButton(label,busy){const button=document.querySelector("[data-v5-test]");if(!button)return;button.disabled=!!busy;button.innerHTML=`<i data-lucide="${label==="TEST DRAFT CREATED"?"check-circle-2":"mail"}"></i>${label}`;global.lucide?.createIcons();}
@@ -498,7 +543,7 @@
       // just as much as an objective/service/language change already does (which generate()
       // already invalidates approval for); an already-approved creative must not silently keep
       // pointing at a different layout than the one it was approved under.
-      if(state.approved){state.approved=false;state.approvedCreative=null;}
+      invalidateApproval();
       updatePreview();updateQA();return}
     const dev=e.target.closest("[data-v5-device]");
     if(dev){
@@ -508,32 +553,37 @@
     if(e.target.closest("[data-v5-generate]")){generate();if(global.DGL_INTERACTIONS?.toast)global.DGL_INTERACTIONS.toast("Campaign generated.");return}
     if(e.target.closest("[data-v5-approve]")){
       try{
+        // PR #3 audit punto 3 -- approval must FAIL, not silently succeed with empty/local-only
+        // state, when there is no campaignId, no connected private backend, or the backend does
+        // not hand back a valid creativeId+approvalId+creativeVersion+checksum. There is no
+        // longer any code path here that can set state.approved=true without all four.
         const campaignId=state.incoming?.campaignId;
+        if(!campaignId)throw new Error("Approval blocked: no campaignId. Prepare a backend campaign before approving.");
+        if(!global.DGL_MARKETING_BACKEND_ADAPTER_V55?.isConnected())throw new Error("Approval blocked: private backend is not connected.");
         const preview=global.DGL_CAMPAIGN_STUDIO_V5.getPreview(),s=preview.strategy||{},c=preview.copy||{};
         const subject=clean(document.getElementById("v5PreviewSubject")?.textContent||c.subjectA);
         const textBody=[subject,c.preheader,c.headline,c.body,c.body2,c.cta].map(clean).filter(Boolean).join("\n\n");
-        let persisted=null;
-        if(campaignId&&global.DGL_MARKETING_BACKEND_ADAPTER_V55?.isConnected()){
-          await global.DGL_MARKETING_AUTOMATION_V55.requestApproval(campaignId,{requestedBy:"Marketing"});
-          await global.DGL_MARKETING_AUTOMATION_V55.recordApproval(campaignId,{approved:true,approvedBy:"Marketing",approvedAt:new Date().toISOString()});
-          // Iniciativa 2 punto 1/6 -- Approve Creative must persist the FULL creative (subject/
-          // preheader/htmlBody/textBody/heroUrl/logoUrl/language), never just flip a status flag.
-          // htmlBody here is preview.html -- Campaign Studio's own getPreview().html, exactly
-          // what Marketing is looking at on screen right now -- never re-rendered, re-merged or
-          // otherwise altered before it reaches the backend, so the checksum the backend computes
-          // is a checksum of this exact string.
-          persisted=await global.DGL_MARKETING_BACKEND_ADAPTER_V55.approveCreative(campaignId,{
-            templateId:s.creativeSystem||"",subject,preheader:c.preheader||"",htmlBody:preview.html||"",
-            textBody,heroUrl:s.heroUrl||"",logoUrl:s.logoUrl||"",language:s.language||"",approvedBy:"Marketing"
-          });
+        await global.DGL_MARKETING_AUTOMATION_V55.requestApproval(campaignId,{requestedBy:"Marketing"});
+        await global.DGL_MARKETING_AUTOMATION_V55.recordApproval(campaignId,{approved:true,approvedBy:"Marketing",approvedAt:new Date().toISOString()});
+        // Iniciativa 2 punto 1/6 -- Approve Creative must persist the FULL creative (subject/
+        // preheader/htmlBody/textBody/heroUrl/logoUrl/language), never just flip a status flag.
+        // htmlBody here is preview.html -- Campaign Studio's own getPreview().html, exactly
+        // what Marketing is looking at on screen right now (already carrying absolute asset
+        // URLs and a functional mailto: CTA -- see emailHtml()) -- never re-rendered, re-merged
+        // or otherwise altered before it reaches the backend, so the checksum the backend
+        // computes is a checksum of this exact string.
+        const persisted=await global.DGL_MARKETING_BACKEND_ADAPTER_V55.approveCreative(campaignId,{
+          templateId:s.creativeSystem||"",subject,preheader:c.preheader||"",htmlBody:preview.html||"",
+          textBody,heroUrl:s.heroUrl||"",logoUrl:s.logoUrl||"",language:s.language||"",approvedBy:"Marketing"
+        });
+        if(!persisted||!persisted.creativeId||!persisted.approvalId||!(Number(persisted.creativeVersion)>0)||!persisted.htmlChecksum){
+          throw new Error("Approval blocked: backend did not return a valid creativeId/approvalId/creativeVersion/checksum.");
         }
         state.approved=true;
-        state.approvedCreative=persisted
-          ?{creativeId:persisted.creativeId,creativeVersion:persisted.creativeVersion,approvalId:persisted.approvalId,htmlChecksum:persisted.htmlChecksum,html:preview.html||"",subject}
-          :{creativeId:"",creativeVersion:0,approvalId:"",htmlChecksum:"",html:preview.html||"",subject};
+        state.approvedCreative={creativeId:persisted.creativeId,creativeVersion:persisted.creativeVersion,approvalId:persisted.approvalId,htmlChecksum:persisted.htmlChecksum,contentChecksum:persisted.contentChecksum||"",html:preview.html||"",subject};
         updateQA();
         global.DGL_INTERACTIONS?.toast?.("Creative approved by Marketing.");
-      }catch(error){global.DGL_INTERACTIONS?.toast?.(error.message,"error");}
+      }catch(error){updateQA();global.DGL_INTERACTIONS?.toast?.(error.message,"error");}
       return;
     }
     if(e.target.closest("[data-v5-test]")){setTestDraftButton("CREATING TEST DRAFT",true);try{await requestDraft("TEST_DRAFT");setTestDraftButton("TEST DRAFT CREATED",false);global.DGL_INTERACTIONS?.toast?.("Test draft created in Gmail. Open Drafts to review it.");}catch(error){setTestDraftButton("CREATE TEST DRAFT",false);global.DGL_INTERACTIONS?.toast?.(error.message,"error");}return}
@@ -554,14 +604,15 @@
       return;
     }
     if(e.target.id==="v5Lane"){
-      if(state.approved){state.approved=false;state.approvedCreative=null;}
+      invalidateApproval();
       syncCampaignName();renderThumbnails();updatePreview();updateQA();return;
     }
     if(["v5SubjectA","v5SubjectB","v5Preheader","v5Headline","v5Body","v5Body2","v5Cta","v5HeroUrl","v5LogoUrl","v5Lane"].includes(e.target.id)){
-      // Iniciativa 2 punto 6 -- a direct edit to subject/body/CTA/hero/logo image after approval
-      // must invalidate that approval automatically; Marketing must re-approve (a new
-      // creativeVersion) before this content can ever reach a real recipient.
-      if(state.approved){state.approved=false;state.approvedCreative=null;}
+      // Iniciativa 2 punto 6 / PR #3 audit punto 4 -- a direct edit to subject/body/CTA/hero/logo
+      // image after approval must invalidate that approval automatically (local AND backend);
+      // Marketing must re-approve (a new creativeVersion) before this content can ever reach a
+      // real recipient.
+      invalidateApproval();
       updatePreview();updateQA()
     }
   });
