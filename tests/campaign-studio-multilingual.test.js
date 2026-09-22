@@ -66,4 +66,28 @@ OBJECTIVES.forEach(objective=>{
   console.log('PASS: Campaign Studio brief bar never regresses to literal "undefined" text after a field change');
 })();
 
+// Iniciativa 2 -- Campaign Studio como unica fuente canonica del email. Static-source checks
+// (same convention as checkNoUndefinedInBriefBar above) that the Approve Creative action
+// persists the FULL creative content (never just a status flag), and that every path which
+// changes the rendered creative after an approval -- a direct field edit, a creative-system
+// switch, or generate() itself -- resets state.approved/state.approvedCreative so a stale
+// approval can never be left pointing at content Marketing no longer sees on screen.
+(function checkApproveCreativePersistsFullContent(){
+  const studioSource=fs.readFileSync(path.join(root,'assets/js/campaign-studio-v5.js'),'utf8');
+  assert(/approveCreative\(campaignId,\{/.test(studioSource),'the Approve Creative handler must call the backend adapter\'s approveCreative, not just recordApproval');
+  assert(/htmlBody:preview\.html\|\|""/.test(studioSource),'approveCreative must be sent preview.html verbatim -- Campaign Studio\'s own getPreview().html, never a re-render');
+  assert(/state\.approvedCreative=persisted/.test(studioSource),'a successful approval must store the persisted creative record locally, not just flip a boolean');
+  console.log('PASS: Approve Creative persists the full creative (subject/preheader/htmlBody/textBody/heroUrl/logoUrl/language), not just a status flag');
+})();
+(function checkApprovalInvalidatesOnEveryContentChange(){
+  const studioSource=fs.readFileSync(path.join(root,'assets/js/campaign-studio-v5.js'),'utf8');
+  // generate() (objective/service/language/angle/ctaIntent/qnbWindow changes) already resets both.
+  assert(/state\.generated=Copy\(\)\.generate\(s\);state\.approved=false;state\.approvedCreative=null;/.test(studioSource),'generate() must reset both approved and approvedCreative together');
+  // A direct field edit (subject/body/CTA/hero/logo/lane) after approval must invalidate it.
+  assert(/if\(state\.approved\)\{state\.approved=false;state\.approvedCreative=null;\}\s*\n\s*updatePreview\(\);updateQA\(\)\s*\n\s*\}/.test(studioSource),'a direct content-field edit must invalidate an existing approval before updating the preview');
+  // Switching the creative/layout system after approval must also invalidate it.
+  assert(/if\(state\.approved\)\{state\.approved=false;state\.approvedCreative=null;\}\s*\n\s*updatePreview\(\);updateQA\(\);return\}/.test(studioSource),'switching the creative system after approval must invalidate it, the same as any other content change');
+  console.log('PASS: every path that changes the rendered creative after approval (generate/field edit/creative-system switch) invalidates state.approved and state.approvedCreative');
+})();
+
 console.log('Campaign Studio multilingual (EN/ES/PT-BR) copy generation: ALL PASS');
