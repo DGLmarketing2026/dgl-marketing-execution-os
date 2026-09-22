@@ -4,6 +4,7 @@ const src = name => fs.readFileSync(path.join(root, 'backend/apps-script-v6', na
 const gmailIngestSource = src('MarketingV6AuraGmailIngest.gs');
 const copyEngineSource = src('MarketingV6AuraCopyEngine.gs');
 const dispatcherSource = src('MarketingV6AuraEmailDispatcher.gs');
+const creativeApprovalSource = src('MarketingV6AuraCreativeApproval.gs');
 const campanaASource = src('MarketingV6AuraCampanaA.gs');
 
 function fakePropertiesService(store) {
@@ -69,6 +70,7 @@ function makeContext(opts) {
   vm.runInContext(gmailIngestSource, ctx, { filename: 'MarketingV6AuraGmailIngest.gs' });
   vm.runInContext(copyEngineSource, ctx, { filename: 'MarketingV6AuraCopyEngine.gs' });
   vm.runInContext(dispatcherSource, ctx, { filename: 'MarketingV6AuraEmailDispatcher.gs' });
+  vm.runInContext(creativeApprovalSource, ctx, { filename: 'MarketingV6AuraCreativeApproval.gs' });
   vm.runInContext(campanaASource, ctx, { filename: 'MarketingV6AuraCampanaA.gs' });
 
   var callCounts = { v6Rows_: {}, v6UpsertByKey_: {}, v6BatchUpsertByKey_: {} };
@@ -103,6 +105,10 @@ function makeContext(opts) {
   };
   ctx.v6EnsureContactRecipientSchema_ = function () { return { status: 'SCHEMA READY' }; };
   ctx.v6AuraCampanaAEnsureRunSummarySheet_ = function () { return { status: 'ALREADY_EXISTS' }; };
+  // Same stub pattern as v6EnsureContactRecipientSchema_ above -- MarketingV6AuraCreativeApproval.gs's
+  // own ensure function opens a real SpreadsheetApp; this file isolates queue-build behavior
+  // against MKT_CAMPAIGN_CREATIVES via v6Rows_/v6UpsertByKey_ exactly like every other table.
+  ctx.v6AuraEnsureCampaignCreativesSheet_ = function () { return { status: 'ALREADY_EXISTS' }; };
   ctx.v6AuraEnsureCampaignScope_ = function (p) {
     var scopeRows = tables.MKT_CAMPAIGN_SCOPES || (tables.MKT_CAMPAIGN_SCOPES = []);
     scopeRows.push({ scopeId: p.scopeId, campaignId: p.campaignId });
@@ -129,6 +135,31 @@ function makeContext(opts) {
   ctx.v6PipelineAdvanced_ = function (stage) { return ['CAMPAIGN ACTIVE', 'RESPONDED', 'RFQ RECEIVED', 'QUOTED', 'LOAD / REACTIVATED', 'RETAINED / EXPANDED', 'COOLDOWN / NURTURE'].indexOf(String(stage || '').toUpperCase()) >= 0; };
   ctx.v6RecordMarketingTouch_ = function () { return {}; };
   ctx.v6RefreshOpportunitiesFromReports_ = function () { return { status: 'REFRESHED' }; };
+  // Iniciativa 2 -- v6AuraCampanaABuildQueue_ now requires a valid approved creative (per
+  // recipient language) before it will build ANY job (see MarketingV6AuraCreativeApproval.gs).
+  // Every test in this file that predates that change assumes the queue simply builds from
+  // v6AuraGenerateCopy_/v6AuraEmailHtml_, so a default, checksum-consistent approved creative is
+  // seeded here for all three Campana A languages (ES/EN/PT) unless the caller either already
+  // supplied its own MKT_CAMPAIGN_CREATIVES rows or explicitly opts out (opts.noDefaultCreative)
+  // to exercise the CREATIVE_NOT_APPROVED/CREATIVE_VERSION_MISMATCH blocking path itself.
+  if (!opts.noDefaultCreative && !tables.MKT_CAMPAIGN_CREATIVES) {
+    var creativeTemplates = [
+      { language: 'Spanish', subject: '{{firstName}}, ¿tiene un movimiento en puerta?', htmlBody: '<p>Hola {{firstName}} de {{company}}, servicio {{service}}.</p><a href="mailto:info@dglus.com?subject=RE%20Movimiento">ENVIAR MOVIMIENTO</a> DGL Freight Broker' },
+      { language: 'English', subject: '{{firstName}}, do you have a shipment moving?', htmlBody: '<p>Hi {{firstName}} from {{company}}, service {{service}}.</p><a href="mailto:info@dglus.com?subject=RE%20Movement">SEND MOVEMENT</a> DGL Freight Broker' },
+      { language: 'Português (Brasil)', subject: '{{firstName}}, tem um embarque em andamento?', htmlBody: '<p>Ola {{firstName}} de {{company}}, servico {{service}}.</p><a href="mailto:info@dglus.com?subject=RE%20Embarque">ENVIAR EMBARQUE</a> DGL Freight Broker' }
+    ];
+    tables.MKT_CAMPAIGN_CREATIVES = creativeTemplates.map(function (t, i) {
+      var rec = {
+        creativeId: 'CMP-CAMPANA-A-HA-PRIORITARIA:CREATIVE:' + (i + 1), campaignId: 'CMP-CAMPANA-A-HA-PRIORITARIA',
+        templateId: 'editorial', creativeVersion: i + 1, subject: t.subject, preheader: 'Preheader',
+        htmlBody: t.htmlBody, textBody: 'Text body', heroUrl: '', logoUrl: '', language: t.language,
+        approvedAt: new Date().toISOString(), approvedBy: 'Marketing',
+        approvalId: 'CAPR:CMP-CAMPANA-A-HA-PRIORITARIA:' + (i + 1), createdAt: new Date().toISOString()
+      };
+      rec.htmlChecksum = ctx.v6AuraChecksum_(rec.htmlBody);
+      return rec;
+    });
+  }
   ctx.__tables = tables; ctx.__sentEmails = sentEmails; ctx.__loggedLines = loggedLines; ctx.__callCounts = callCounts;
   return ctx;
 }
@@ -241,6 +272,20 @@ function gmailOpp(accountId, accountName, amOwner, sheetName) {
     ]
   };
   var ctx = makeContext({ tables: tables });
+  // This test's whole point is the no-name-subject transformation (v6AuraCampanaASubject_,
+  // unchanged by Iniciativa 2), so the approved-creative fixture carries the real Activation
+  // subjectA template's exact wording -- "{{firstName}}, ...{{service}}..." -- as a FIXED literal
+  // rather than a fresh v6AuraGenerateCopy_() call, since that engine can select among more than
+  // one real variant non-deterministically and this test needs one specific, known template.
+  var realTemplateCreative = {
+    creativeId: 'CMP-CAMPANA-A-HA-PRIORITARIA:CREATIVE:TEST6', campaignId: 'CMP-CAMPANA-A-HA-PRIORITARIA',
+    templateId: 'editorial', creativeVersion: 99, subject: '{{firstName}}, ¿tiene un movimiento {{service}} en puerta?', preheader: 'Preheader',
+    htmlBody: '<p>{{firstName}} {{company}} {{service}}</p><a href="mailto:info@dglus.com?subject=RE">ENVIAR MOVIMIENTO</a> DGL Freight Broker',
+    textBody: 'Text body', heroUrl: '', logoUrl: '', language: 'Spanish',
+    approvedAt: new Date().toISOString(), approvedBy: 'Marketing', approvalId: 'CAPR:TEST6', createdAt: new Date().toISOString()
+  };
+  realTemplateCreative.htmlChecksum = ctx.v6AuraChecksum_(realTemplateCreative.htmlBody);
+  tables.MKT_CAMPAIGN_CREATIVES = [realTemplateCreative];
   ctx.v6AuraCampanaABuildQueue_();
   var genericJob = tables.MKT_EMAIL_QUEUE.filter(function (j) { return j.contactId === 'CON-GENERIC'; })[0];
   assert.equal(genericJob.firstName, '', 'a generic role/mailbox name must never be used, and never fall back to a fabricated "Team"');
@@ -1105,6 +1150,25 @@ function campanaASheetValuesWithContacts(dataRows) {
   assert.equal(audit.byRecipientSource.CAMPANA_A_SOURCE, 1);
   assert.equal(audit.byRecipientSource.MERGED, 1);
   console.log('campana-a test 42 (the audit reports an accurate byRecipientSource breakdown from the durable job records): PASS');
+})();
+
+// 42b. Iniciativa 2 punto 2/5 -- Campana A's OWN dedicated dispatch batch
+// (v6AuraCampanaADispatchBatch_) re-validates the creative-approval chain at send time too, the
+// same defense in depth as the shared auraProcessEmailQueue. A PENDING job with no
+// creativeId/creativeApprovalId (e.g. a legacy row) is blocked, never sent, even under LIVE.
+(function campanaADispatchBlocksJobWithNoCreativeReferenceTest() {
+  var tables = {
+    MKT_EMAIL_QUEUE: [{ jobId: 'JOB:LEGACY:CAMPANA-A:1', campaignId: 'CMP-CAMPANA-A-HA-PRIORITARIA', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: '<p>legacy, no creative reference</p>', replyTo: 'info@dglus.com', status: 'PENDING', sequenceStep: 1, preferredLanguage: 'ES' }]
+  };
+  var ctx = makeContext({ tables: tables });
+  ctx.auraEnableLiveSending();
+  var out = ctx.v6AuraCampanaADispatchBatch_();
+  assert.equal(out.sent, 0);
+  assert.equal(out.blockedCreative, 1);
+  assert.equal(ctx.__sentEmails.length, 0, 'a Campana A job with no creative-approval reference must never be sent, even under LIVE');
+  assert.equal(tables.MKT_EMAIL_QUEUE[0].status, 'BLOCKED');
+  assert.equal(tables.MKT_EMAIL_QUEUE[0].error, 'CREATIVE_NOT_APPROVED');
+  console.log('campana-a test 42b (Campana A\'s own dispatch batch blocks a job with no creative-approval reference, even under LIVE): PASS');
 })();
 
 // 43. Durable run-summary audit trail (2026-09-16, third finding): the Apps Script execution log
