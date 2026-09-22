@@ -1036,7 +1036,7 @@ function v6AuraCampanaADispatchBatch_() {
       // Iniciativa 2 punto 2/5 -- same dispatch-time defense in depth as the shared
       // auraProcessEmailQueue (MarketingV6AuraEmailDispatcher.gs): re-validate the
       // creative-approval chain at send time too, never re-rendering anything.
-      var creativeCheck = (typeof v6AuraValidateQueuedCreative_ === 'function') ? v6AuraValidateQueuedCreative_(job) : { blocked: false };
+      var creativeCheck = v6AuraValidateCreativeOrBlock_(job);
       if (creativeCheck.blocked) {
         job.status = 'BLOCKED'; job.error = creativeCheck.error; job.processedAt = now; counts.blockedCreative++; updated.push(job); return;
       }

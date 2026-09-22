@@ -63,7 +63,13 @@ var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
   // justification as MKT_RETENTION_RUN_SUMMARY/MKT_AURA_RUN_LOG below. Every row here is
   // immutable once written -- an approval never overwrites a prior creativeId, it only adds a
   // new row with the next creativeVersion for that campaignId.
-  MKT_CAMPAIGN_CREATIVES:['creativeId','campaignId','templateId','creativeVersion','subject','preheader','htmlBody','textBody','heroUrl','logoUrl','language','approvedAt','approvedBy','approvalId','htmlChecksum','createdAt']
+  // status/contentChecksum/revokedAt/revokedBy added for the PR #3 audit remediation
+  // (MarketingV6AuraCreativeApproval.gs): status is APPROVED until an edit in Campaign Studio
+  // revokes this exact row server-side (never only a local UI flag); contentChecksum is the
+  // canonical checksum over subject+htmlBody+textBody+templateId+creativeVersion (catches
+  // subject-only drift, which htmlChecksum alone -- htmlBody only -- cannot). Additive only,
+  // every existing reader of this table is unaffected.
+  MKT_CAMPAIGN_CREATIVES:['creativeId','campaignId','templateId','creativeVersion','subject','preheader','htmlBody','textBody','heroUrl','logoUrl','language','approvedAt','approvedBy','approvalId','htmlChecksum','createdAt','status','contentChecksum','revokedAt','revokedBy']
 };
 // The one table in MKT_V6_CONTACT_RECIPIENT_SCHEMA that is safe to auto-create end to end
 // (tab + header row), because it is a brand-new, AURA-owned reporting table with no historical

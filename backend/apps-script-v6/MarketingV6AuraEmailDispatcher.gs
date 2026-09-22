@@ -377,7 +377,7 @@ function auraProcessEmailQueue(limit) {
       // Iniciativa 2 punto 2/5 -- defense in depth: re-validate the creative-approval chain at
       // send time too, not only at queue-build time. Never re-renders anything; only recomputes
       // checksums over bytes already on the job / already persisted in MKT_CAMPAIGN_CREATIVES.
-      var creativeCheck = (typeof v6AuraValidateQueuedCreative_ === 'function') ? v6AuraValidateQueuedCreative_(job) : { blocked: false };
+      var creativeCheck = v6AuraValidateCreativeOrBlock_(job);
       if (creativeCheck.blocked) {
         job.status = 'BLOCKED'; job.error = creativeCheck.error; job.processedAt = now; counts.blockedCreative = (counts.blockedCreative || 0) + 1;
         return v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);

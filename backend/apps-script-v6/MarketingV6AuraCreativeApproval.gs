@@ -34,6 +34,51 @@ function v6AuraChecksum_(s) {
   return h;
 }
 
+// --- Canonical content checksum (PR #3 audit, punto 7) --------------------------------
+// htmlChecksum above only ever covered htmlBody -- a subject-only edit to an already-stored
+// row (or a future caller that persists a mismatched subject/htmlBody pair) would pass every
+// existing check. contentChecksum covers subject+htmlBody+textBody+templateId+creativeVersion
+// with a separator byte (\u0001) that cannot appear in any of these fields, so no
+// concatenation ever collides across a field boundary. Recomputed at resolve/dispatch time and
+// compared to the value captured at approval -- any drift, including subject-only drift, blocks.
+function v6AuraCanonicalContentChecksum_(subject, htmlBody, textBody, templateId, creativeVersion) {
+  var sep = '\u0001';
+  return v6AuraChecksum_(
+    String(subject == null ? '' : subject) + sep +
+    String(htmlBody == null ? '' : htmlBody) + sep +
+    String(textBody == null ? '' : textBody) + sep +
+    String(templateId == null ? '' : templateId) + sep +
+    String(creativeVersion == null ? '' : creativeVersion)
+  );
+}
+
+// --- Internal-label hard gate (PR #3 audit, punto 6) -----------------------------------
+// v6AuraDetectInternalLabels_/AURA_INTERNAL_LABELS_ (further below) already existed as an
+// AUDIT-only check (v6AuraEmailQueueAudit_ reported violations but never blocked anything).
+// This throws/blocks -- used at BOTH approval persistence and dispatch-time revalidation, so
+// internal classification vocabulary can never reach a real recipient via either path.
+function v6AuraAssertNoInternalLabels_(subject, htmlBody, textBody, errorPrefix) {
+  var labels = v6AuraDetectInternalLabels_([subject, htmlBody, textBody].join(' '));
+  if (labels.length) throw new Error((errorPrefix || 'INTERNAL_LABEL_DETECTED') + ':' + labels.join(','));
+}
+
+// --- Absolute-asset / functional-CTA hard gate (PR #3 audit, puntos 1/2) ----------------
+// Campaign Studio (assets/js/campaign-studio-v5.js) must itself emit absolute public URLs for
+// every assets/... reference and a real mailto:/https:// CTA href BEFORE calling Approve
+// Creative -- there is no post-processing step left anywhere (Test Draft no longer rewrites
+// relative paths either). This is the backend's own defense-in-depth check: a relative
+// assets/... reference or a placeholder href="#" in the HTML Marketing is about to approve is
+// rejected here too, never silently accepted and fixed up later.
+function v6AuraAssertHtmlProductionSafe_(htmlBody) {
+  var html = String(htmlBody == null ? '' : htmlBody);
+  if (/(?:src|href)\s*=\s*["'](?!https?:\/\/|data:)assets\//i.test(html) || /url\(\s*['"]?(?!https?:\/\/|data:)assets\//i.test(html)) {
+    throw new Error('CREATIVE_APPROVAL_RELATIVE_ASSET_URL');
+  }
+  if (/href\s*=\s*["']\s*#\s*["']/i.test(html) || /href\s*=\s*["']\s*["']/i.test(html)) {
+    throw new Error('CREATIVE_APPROVAL_NONFUNCTIONAL_CTA');
+  }
+}
+
 // --- Persistence ---------------------------------------------------------------------
 // MKT_CAMPAIGN_CREATIVES is a brand-new, AURA-owned table (like MKT_RETENTION_RUN_SUMMARY
 // / MKT_AURA_RUN_LOG in MarketingV6SchemaMigration.gs) -- no historical data at risk, so
@@ -72,21 +117,30 @@ function v6AuraPersistApprovedCreative_(payload) {
   if (!subject) throw new Error('CREATIVE_APPROVAL_MISSING_SUBJECT');
   var approvedBy = v6AuraEmailText_(p.approvedBy);
   if (!approvedBy) throw new Error('CREATIVE_APPROVAL_MISSING_APPROVED_BY');
+  var textBody = String(p.textBody || '');
+  var templateId = String(p.templateId || '');
+
+  // PR #3 audit puntos 1/2/6 -- hard gates, BEFORE anything is written. A creative that fails
+  // any of these is never persisted, never versioned, never approved.
+  v6AuraAssertHtmlProductionSafe_(htmlBody);
+  v6AuraAssertNoInternalLabels_(subject, htmlBody, textBody, 'CREATIVE_APPROVAL_INTERNAL_LABEL_DETECTED');
 
   var existing = v6Rows_('MKT_CAMPAIGN_CREATIVES').filter(function (r) { return v6AuraEmailText_(r.campaignId) === campaignId; });
   var maxVersion = existing.reduce(function (max, r) { var v = Number(r.creativeVersion || 0); return v > max ? v : max; }, 0);
   var version = maxVersion + 1;
   var creativeId = campaignId + ':CREATIVE:' + version;
   var htmlChecksum = v6AuraChecksum_(htmlBody);
+  var contentChecksum = v6AuraCanonicalContentChecksum_(subject, htmlBody, textBody, templateId, version);
   var approvalId = 'CAPR:' + campaignId + ':' + version;
   var now = new Date().toISOString();
   var record = {
-    creativeId: creativeId, campaignId: campaignId, templateId: String(p.templateId || ''),
+    creativeId: creativeId, campaignId: campaignId, templateId: templateId,
     creativeVersion: version, subject: subject, preheader: String(p.preheader || ''),
-    htmlBody: htmlBody, textBody: String(p.textBody || ''), heroUrl: String(p.heroUrl || ''),
+    htmlBody: htmlBody, textBody: textBody, heroUrl: String(p.heroUrl || ''),
     logoUrl: String(p.logoUrl || ''), language: String(p.language || ''),
     approvedAt: now, approvedBy: approvedBy, approvalId: approvalId,
-    htmlChecksum: htmlChecksum, createdAt: now
+    htmlChecksum: htmlChecksum, createdAt: now,
+    status: 'APPROVED', contentChecksum: contentChecksum, revokedAt: '', revokedBy: ''
   };
   v6UpsertByKey_('MKT_CAMPAIGN_CREATIVES', ['creativeId'], record);
   return record;
@@ -95,13 +149,48 @@ function v6AuraPersistApprovedCreative_(payload) {
 // Public v6-router-facing wrapper (see MarketingV6RouterExtension.gs / v6AuraApproveCreative).
 // Same anti-fabrication discipline as every other v6Xxx_ handler in this codebase: returns
 // a plain, verifiable result, never a bare boolean.
+//
+// PR #3 audit punto 3 -- this is the backend's OWN self-check that persistence actually
+// succeeded (the frontend, campaign-studio-v5.js, independently re-checks this same shape
+// before ever flipping state.approved=true -- belt and suspenders, neither trusts the other
+// blindly). A persisted row missing any of these is a persistence bug, not a valid approval,
+// and must never be reported back as one.
 function v6AuraApproveCreative_(payload) {
   var record = v6AuraPersistApprovedCreative_(payload);
+  if (!record || !record.creativeId || !record.approvalId || !(Number(record.creativeVersion) > 0) || !record.htmlChecksum || !record.contentChecksum) {
+    throw new Error('CREATIVE_APPROVAL_PERSISTENCE_INCOMPLETE');
+  }
   return {
     status: 'APPROVED', creativeId: record.creativeId, campaignId: record.campaignId,
     creativeVersion: record.creativeVersion, approvalId: record.approvalId,
-    approvedAt: record.approvedAt, approvedBy: record.approvedBy, htmlChecksum: record.htmlChecksum
+    approvedAt: record.approvedAt, approvedBy: record.approvedBy,
+    htmlChecksum: record.htmlChecksum, contentChecksum: record.contentChecksum
   };
+}
+
+// --- Revocation (PR #3 audit, punto 4) ---------------------------------------------------
+// Editing an approved creative in Campaign Studio must invalidate the BACKEND record, not
+// only the browser's local state -- otherwise a second tab, a stale session, or a direct API
+// replay could still resolve the "approved" creative that was just edited out from under it.
+// Revocation never deletes/overwrites content (the row stays for audit history); it only
+// flips status to REVOKED, which every resolver below (v6AuraLatestApprovedCreative_,
+// v6AuraLatestApprovedCreativeForLanguage_, v6AuraValidateQueuedCreative_) treats as
+// unapproved. Idempotent -- revoking an already-revoked row is a no-op, not an error.
+// Rebuilds the FULL row before writing: v6UpsertByKey_ replaces every column with whatever the
+// record object provides (missing keys become '' ), so writing only {creativeId,status} here
+// would silently blank out htmlBody/subject/checksums on the matched row.
+function v6AuraRevokeCreativeApproval_(creativeId, revokedBy) {
+  var id = v6AuraEmailText_(creativeId);
+  if (!id) throw new Error('CREATIVE_REVOKE_MISSING_CREATIVE_ID');
+  var row = v6Rows_('MKT_CAMPAIGN_CREATIVES').filter(function (r) { return v6AuraEmailText_(r.creativeId) === id; })[0];
+  if (!row) throw new Error('CREATIVE_REVOKE_NOT_FOUND');
+  if (String(row.status || '').toUpperCase() === 'REVOKED') {
+    return { status: 'ALREADY_REVOKED', creativeId: id, revokedAt: row.revokedAt || '', revokedBy: row.revokedBy || '' };
+  }
+  var now = new Date().toISOString();
+  var merged = Object.assign({}, row, { status: 'REVOKED', revokedAt: now, revokedBy: v6AuraEmailText_(revokedBy) || 'Marketing' });
+  v6UpsertByKey_('MKT_CAMPAIGN_CREATIVES', ['creativeId'], merged);
+  return { status: 'REVOKED', creativeId: id, revokedAt: now, revokedBy: merged.revokedBy };
 }
 
 // The current, single approved creative for a campaign -- highest creativeVersion.
@@ -110,7 +199,11 @@ function v6AuraApproveCreative_(payload) {
 // ambiguous between two rows claiming the same version.
 function v6AuraLatestApprovedCreative_(campaignId) {
   var id = v6AuraEmailText_(campaignId);
-  var rows = v6Rows_('MKT_CAMPAIGN_CREATIVES').filter(function (r) { return v6AuraEmailText_(r.campaignId) === id; });
+  // status is blank on any row that predates this column (additive migration default) -- treated
+  // as APPROVED for backward compatibility. Only an explicit REVOKED status excludes a row.
+  var rows = v6Rows_('MKT_CAMPAIGN_CREATIVES').filter(function (r) {
+    return v6AuraEmailText_(r.campaignId) === id && String(r.status || 'APPROVED').toUpperCase() !== 'REVOKED';
+  });
   if (!rows.length) return null;
   rows.sort(function (a, b) { return Number(b.creativeVersion || 0) - Number(a.creativeVersion || 0); });
   return rows[0];
@@ -125,7 +218,8 @@ function v6AuraLatestApprovedCreative_(campaignId) {
 function v6AuraLatestApprovedCreativeForLanguage_(campaignId, language) {
   var id = v6AuraEmailText_(campaignId), lang = v6AuraEmailText_(language);
   var rows = v6Rows_('MKT_CAMPAIGN_CREATIVES').filter(function (r) {
-    return v6AuraEmailText_(r.campaignId) === id && (!lang || v6AuraEmailText_(r.language) === lang);
+    return v6AuraEmailText_(r.campaignId) === id && (!lang || v6AuraEmailText_(r.language) === lang) &&
+      String(r.status || 'APPROVED').toUpperCase() !== 'REVOKED';
   });
   if (!rows.length) return null;
   rows.sort(function (a, b) { return Number(b.creativeVersion || 0) - Number(a.creativeVersion || 0); });
@@ -163,6 +257,18 @@ function v6AuraResolveApprovedCreativeForSend_(campaignId, vars) {
   if (String(approvedTemplateChecksum) !== String(creative.htmlChecksum)) {
     return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
   }
+  // PR #3 audit punto 7 -- htmlChecksum alone only ever covers htmlBody; a subject that
+  // drifted out of sync with the stored row (direct cell edit, corruption) would pass the
+  // check above. contentChecksum covers subject too, so subject drift blocks here.
+  var currentContentChecksum = v6AuraCanonicalContentChecksum_(creative.subject, creative.htmlBody, creative.textBody, creative.templateId, creative.creativeVersion);
+  if (creative.contentChecksum && String(currentContentChecksum) !== String(creative.contentChecksum)) {
+    return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
+  }
+  // PR #3 audit punto 6 -- hard gate at resolve time too (defense in depth alongside the
+  // approval-time gate): no internal classification vocabulary may reach a real recipient.
+  if (v6AuraDetectInternalLabels_([creative.subject, creative.htmlBody, creative.textBody].join(' ')).length) {
+    return { blocked: true, error: 'INTERNAL_LABEL_DETECTED' };
+  }
   var personalizedSubject = v6AuraCreativePersonalize_(creative.subject, vars);
   var personalizedHtml = v6AuraCreativePersonalize_(creative.htmlBody, vars);
   var personalizedText = v6AuraCreativePersonalize_(creative.textBody, vars);
@@ -186,20 +292,55 @@ function v6AuraResolveApprovedCreativeForSend_(campaignId, vars) {
 // queue build and dispatch): never re-renders anything, only recomputes checksums over
 // bytes already sitting on the job / already persisted in MKT_CAMPAIGN_CREATIVES.
 function v6AuraValidateQueuedCreative_(job) {
-  if (!job.creativeId || !job.creativeApprovalId) return { blocked: true, error: 'CREATIVE_NOT_APPROVED' };
+  var j = job || {};
+  if (!j.creativeId || !j.creativeApprovalId) return { blocked: true, error: 'CREATIVE_NOT_APPROVED' };
   // (a) the job row itself has not drifted from what was queued.
-  var currentHtmlChecksum = v6AuraChecksum_(job.htmlBody);
-  if (String(currentHtmlChecksum) !== String(job.recipientRenderedChecksum)) {
+  var currentHtmlChecksum = v6AuraChecksum_(j.htmlBody);
+  if (String(currentHtmlChecksum) !== String(j.recipientRenderedChecksum)) {
     return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
   }
-  // (b) the approved creative this job claims to come from still exists and still
-  // matches the template checksum captured at build time.
-  var creative = v6Rows_('MKT_CAMPAIGN_CREATIVES').filter(function (r) { return v6AuraEmailText_(r.creativeId) === v6AuraEmailText_(job.creativeId); })[0];
+  // (b) the approved creative this job claims to come from still exists.
+  var creative = v6Rows_('MKT_CAMPAIGN_CREATIVES').filter(function (r) { return v6AuraEmailText_(r.creativeId) === v6AuraEmailText_(j.creativeId); })[0];
   if (!creative) return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
-  if (String(creative.htmlChecksum) !== String(job.htmlChecksum)) {
+  // PR #3 audit punto 8 -- dispatch must revalidate approvalId, creativeVersion, the stored
+  // HTML checksum, AND the creative's CURRENT status (not just that it existed at build time --
+  // it may have been revoked, punto 4, since this job was queued).
+  if (String(creative.htmlChecksum) !== String(j.htmlChecksum)) {
     return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
+  }
+  if (v6AuraEmailText_(creative.approvalId) !== v6AuraEmailText_(j.creativeApprovalId)) {
+    return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
+  }
+  if (String(creative.creativeVersion) !== String(j.creativeVersion)) {
+    return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
+  }
+  if (String(creative.status || 'APPROVED').toUpperCase() !== 'APPROVED') {
+    return { blocked: true, error: 'CREATIVE_REVOKED' };
+  }
+  // PR #3 audit punto 6 -- hard gate at dispatch too: re-check the actual bytes on the job
+  // (subject + htmlBody), not just the stored creative, since the job's own text is what would
+  // actually reach the recipient.
+  if (v6AuraDetectInternalLabels_([j.subject, j.htmlBody].join(' ')).length) {
+    return { blocked: true, error: 'INTERNAL_LABEL_DETECTED' };
   }
   return { blocked: false };
+}
+
+// --- Fail-closed dispatch wrapper (PR #3 audit, punto 5) --------------------------------
+// Both real dispatch loops (auraProcessEmailQueue in MarketingV6AuraEmailDispatcher.gs and
+// v6AuraCampanaADispatchBatch_ in MarketingV6AuraCampanaA.gs) previously called
+// v6AuraValidateQueuedCreative_ through a `typeof fn === 'function' ? fn(job) : {blocked:false}`
+// guard -- meant only to tolerate this file not being loaded in an isolated test context, but
+// in PRODUCTION it meant a missing/renamed/broken validator FAILED OPEN and let a job through
+// unvalidated. This wrapper is the one thing either dispatcher may call: no validator function,
+// or the validator itself throwing, both resolve to BLOCKED, never to an open gate.
+function v6AuraValidateCreativeOrBlock_(job) {
+  if (typeof v6AuraValidateQueuedCreative_ !== 'function') return { blocked: true, error: 'CREATIVE_VALIDATION_UNAVAILABLE' };
+  try {
+    return v6AuraValidateQueuedCreative_(job);
+  } catch (err) {
+    return { blocked: true, error: 'CREATIVE_VALIDATION_UNAVAILABLE' };
+  }
 }
 
 // --- Customer-visible internal labels (Iniciativa 2, punto 8) ---------------------------
@@ -250,5 +391,66 @@ function v6AuraTestDraftExactMatch_(studioHtml, storedApprovedHtml, testDraftHtm
     match: a === b && b === c,
     studioVsStoredMatch: a === b, storedVsDraftMatch: b === c,
     studioChecksum: v6AuraChecksum_(a), storedChecksum: v6AuraChecksum_(b), draftChecksum: v6AuraChecksum_(c)
+  };
+}
+
+// --- Real end-to-end Test Draft (PR #3 audit, punto 9) -----------------------------------
+// The audit's finding: v6AuraTestDraftExactMatch_ above existed only as a pure, unit-tested
+// comparator -- nothing in the real v55CreateTestDraft request path ever called it, and the
+// legacy function that path referenced (createMarketingV55TestDraft_) is not defined anywhere
+// in this repository (grep confirms it exists only, if at all, in the live Apps Script editor,
+// outside this PR's reach). This function is the real, in-repo replacement wired into
+// MarketingV55Backend.gs's 'v55CreateTestDraft' case (see there): it (1) hard-blocks BEFORE
+// any draft is created unless the campaign has a current, non-revoked APPROVED creative whose
+// stored htmlBody matches the Studio HTML the request just sent, byte-for-byte after only MIME
+// normalization -- the STUDIO-vs-STORED leg can never be skipped; (2) creates the real Gmail
+// draft itself via GmailApp.createDraft (never GmailApp.sendEmail -- this only ever produces an
+// unsent draft, exactly the pre-existing, already-approved "Test Draft" feature); (3)
+// immediately reads the real draft's rendered body back from Gmail and runs the SAME
+// v6AuraTestDraftExactMatch_ comparator against it for the STORED-vs-DRAFT leg -- an actual
+// live comparison, not a stand-in. Never sends anything; AURA_SEND_MODE is untouched and
+// irrelevant here (a draft is never a send).
+function v6AuraVerifyAndCreateTestDraft_(req) {
+  var r = req || {};
+  var draftInput = r.draft && typeof r.draft === 'object' ? r.draft : r;
+  var campaignId = v6AuraEmailText_(r.campaignId || draftInput.campaignId);
+  if (!campaignId) throw new Error('TEST_DRAFT_MISSING_CAMPAIGN_ID');
+
+  var creative = v6AuraLatestApprovedCreative_(campaignId);
+  if (!creative || !creative.htmlBody || !creative.subject || !creative.approvalId || String(creative.status || 'APPROVED').toUpperCase() === 'REVOKED') {
+    throw new Error('TEST_DRAFT_CREATIVE_NOT_APPROVED');
+  }
+
+  var studioHtml = String(draftInput.htmlBody || '');
+  if (!studioHtml) throw new Error('TEST_DRAFT_MISSING_HTML_BODY');
+  var storedHtml = String(creative.htmlBody || '');
+
+  // Leg 1/2 (STUDIO vs STORED) is checked and enforced BEFORE any draft is created -- a real
+  // production gate, not something a caller can route around.
+  var preCheck = v6AuraTestDraftExactMatch_(studioHtml, storedHtml, studioHtml);
+  if (!preCheck.studioVsStoredMatch) throw new Error('TEST_DRAFT_STUDIO_STORED_MISMATCH');
+
+  var subject = String(draftInput.subject || creative.subject || '');
+  var textBody = String(draftInput.textBody || creative.textBody || '');
+  var to = (typeof Session !== 'undefined' && Session.getActiveUser) ? v6AuraEmailText_(Session.getActiveUser().getEmail()) : '';
+  if (!to) to = v6AuraEmailCanonicalReplyTo_();
+  if (!to) throw new Error('TEST_DRAFT_NO_RECIPIENT_AVAILABLE');
+
+  var plainText = (typeof v6AuraEmailStripHtml_ === 'function') ? v6AuraEmailStripHtml_(studioHtml) : textBody;
+  var draft = GmailApp.createDraft(to, subject, plainText, { htmlBody: studioHtml });
+  var draftId = (typeof draft.getId === 'function') ? draft.getId() : '';
+  var actualDraftHtml = (typeof draft.getMessage === 'function') ? draft.getMessage().getBody() : '';
+
+  // Leg 2/3 (STORED vs the REAL rendered draft Gmail now holds) -- a genuine live read-back,
+  // not a second call against the same in-memory string.
+  var finalCheck = v6AuraTestDraftExactMatch_(studioHtml, storedHtml, actualDraftHtml);
+  if (!finalCheck.match) throw new Error('TEST_DRAFT_CONTENT_MISMATCH');
+
+  return {
+    status: 'TEST_DRAFT_VERIFIED', draftId: draftId, campaignId: campaignId,
+    creativeId: creative.creativeId, creativeApprovalId: creative.approvalId,
+    studioVsStoredMatch: finalCheck.studioVsStoredMatch, storedVsDraftMatch: finalCheck.storedVsDraftMatch,
+    match: finalCheck.match,
+    studioChecksum: finalCheck.studioChecksum, storedChecksum: finalCheck.storedChecksum, draftChecksum: finalCheck.draftChecksum
   };
 }

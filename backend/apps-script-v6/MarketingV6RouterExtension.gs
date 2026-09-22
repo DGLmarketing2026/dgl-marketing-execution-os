@@ -131,6 +131,10 @@ function routeMarketingV6_(action, payload) {
       return typeof v6AuraApproveCreative_ === 'function' ? v6AuraApproveCreative_(p) : v6RouteMissing_(a, 'v6AuraApproveCreative_');
     case 'v6AuraLatestApprovedCreative':
       return typeof v6AuraLatestApprovedCreative_ === 'function' ? v6AuraLatestApprovedCreative_((p || {}).campaignId) : v6RouteMissing_(a, 'v6AuraLatestApprovedCreative_');
+    // PR #3 audit punto 4 -- editing an approved creative must revoke the BACKEND record
+    // (MarketingV6AuraCreativeApproval.gs), not only local browser state.
+    case 'v6AuraRevokeCreativeApproval':
+      return typeof v6AuraRevokeCreativeApproval_ === 'function' ? v6AuraRevokeCreativeApproval_((p || {}).creativeId, (p || {}).revokedBy) : v6RouteMissing_(a, 'v6AuraRevokeCreativeApproval_');
     case 'auraProcessEmailQueue':
       return typeof auraProcessEmailQueue === 'function' ? auraProcessEmailQueue((p || {}).limit) : v6RouteMissing_(a, 'auraProcessEmailQueue');
     case 'v6AuraSendMode':
