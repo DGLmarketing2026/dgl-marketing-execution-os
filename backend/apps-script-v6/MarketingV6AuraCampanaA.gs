@@ -1,9 +1,9 @@
 // AURA — "Campana A - HA prioritaria" dedicated pipeline (Phase 1 activation).
 //
 // DGL asked AURA to work, for this first phase, with EXACTLY ONE tab (65 accounts / 227
-// contacts) from the House-Account priority Retention report, ignoring every other tab in the
+// contacts) from the House-Account priority report, ignoring every other tab in the
 // same workbook (including Campana B), and to add real per-contact ES/EN/PT language selection
-// and generic-name detection that the shared, multi-source Retention pipeline
+// and generic-name detection that the shared, multi-source pipeline
 // (MarketingV6AuraAutomation.gs, MarketingV6AuraEmailDispatcher.gs) does not need and must not
 // change for every other campaign. Rather than bolt single-purpose behavior onto shared code,
 // this file is a self-contained, dedicated pipeline: it reuses every existing governed primitive
@@ -451,8 +451,10 @@ function v6AuraCampanaALanguageCampaignFlag_(lang) {
 // "{{firstName}}, ..." subject clause (MarketingV6AuraCopyEngine.gs) -- headline/body/body2/
 // preheader never reference it. So a name-aware subject only needs to handle that one real
 // pattern: with no reliable name, drop the "{{firstName}}, " prefix and capitalize what follows
-// (DGL's own example: "Team, seguimos cerca de la operación de Progeral Corp" -> "Seguimos cerca
-// de la operación de Progeral Corp"), instead of ever sending a fabricated "Team,".
+// (this pipeline's real Activation subject, e.g. "Sofia, ¿tiene un movimiento Multiservicio en
+// puerta?" -> "¿tiene un movimiento Multiservicio en puerta?" -- capitalization has no visible
+// effect here since the character right after the comma is the accented "¿", which has no
+// uppercase form), instead of ever sending a fabricated "Team,".
 function v6AuraCampanaASubject_(template, vars) {
   var v = vars || {};
   if (v.firstName) return v6AuraEmailMergeTokens_(template, v);
