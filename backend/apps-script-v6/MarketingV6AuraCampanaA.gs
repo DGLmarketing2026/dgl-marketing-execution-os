@@ -856,11 +856,12 @@ function v6AuraCampanaABuildQueue_() {
     var now = new Date().toISOString();
     var country = tabCountry || v6AuraEmailText_(contact.country || contact.Country || account.country || account.Country || '');
     var personalizedHtml = v6AuraCreativePersonalize_(creative.htmlBody, vars);
+    var personalizedSubject = v6AuraCampanaASubject_(creative.subject, vars);
     var job = {
       jobId: jobId, campaignId: CAMPANA_A_CAMPAIGN_ID_, audienceId: CAMPANA_A_SCOPE_ID_,
       accountId: accountId, contactId: contactId, email: v6AuraEmailText_(r.email),
       firstName: vars.firstName, company: vars.company, service: vars.service,
-      subject: v6AuraCampanaASubject_(creative.subject, vars), htmlBody: personalizedHtml,
+      subject: personalizedSubject, htmlBody: personalizedHtml,
       replyTo: replyTo,
       status: stopped ? 'STOPPED' : (replyToBlocked ? 'SUPPRESSED' : (policyApproved ? 'PENDING' : 'REVIEW_REQUIRED')),
       gmailDraftId: '', createdAt: now, processedAt: '', error: replyToBlocked ? 'MISSING_REPLY_TO_CONFIGURATION' : '',
@@ -875,7 +876,10 @@ function v6AuraCampanaABuildQueue_() {
       recipientSource: r.recipientSource,
       creativeId: creative.creativeId, creativeVersion: creative.creativeVersion,
       creativeApprovalId: creative.approvalId, htmlChecksum: creative.htmlChecksum,
-      recipientRenderedChecksum: v6AuraChecksum_(personalizedHtml)
+      recipientRenderedChecksum: v6AuraChecksum_(personalizedHtml),
+      // PR #3 audit round 2, punto 1 -- subject+htmlBody, so a subject-only edit to this job
+      // after queueing blocks too (recipientRenderedChecksum above only ever covers htmlBody).
+      recipientContentChecksum: v6AuraJobContentChecksum_(personalizedSubject, personalizedHtml)
     };
     profile.COPY_MS += Date.now() - tCopy0;
     pendingJobs.push(job);

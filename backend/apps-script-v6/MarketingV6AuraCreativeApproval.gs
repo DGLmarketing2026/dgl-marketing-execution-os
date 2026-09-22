@@ -52,6 +52,18 @@ function v6AuraCanonicalContentChecksum_(subject, htmlBody, textBody, templateId
   );
 }
 
+// --- Per-job (post-personalization) content checksum (PR #3 audit round 2, punto 1) -------
+// recipientRenderedChecksum (below, set by both queue-builders) only ever covered htmlBody --
+// a job whose SUBJECT was altered after queueing (direct cell edit, a second divergent code
+// path) with htmlBody left untouched would pass every existing dispatch-time check. This
+// covers subject+htmlBody on the exact, already-personalized strings that will reach the
+// recipient, so subject-only drift on a QUEUED JOB (not just on the stored creative -- see
+// v6AuraCanonicalContentChecksum_ above for that) blocks too.
+function v6AuraJobContentChecksum_(subject, htmlBody) {
+  var sep = '\u0001';
+  return v6AuraChecksum_(String(subject == null ? '' : subject) + sep + String(htmlBody == null ? '' : htmlBody));
+}
+
 // --- Internal-label hard gate (PR #3 audit, punto 6) -----------------------------------
 // v6AuraDetectInternalLabels_/AURA_INTERNAL_LABELS_ (further below) already existed as an
 // AUDIT-only check (v6AuraEmailQueueAudit_ reported violations but never blocked anything).
@@ -168,7 +180,33 @@ function v6AuraApproveCreative_(payload) {
   };
 }
 
-// --- Revocation (PR #3 audit, punto 4) ---------------------------------------------------
+// --- Revocation ledger (PR #3 audit round 2 -- fail-closed revocation) ------------------
+// The row-level REVOKED status write below is a normal MKT_CAMPAIGN_CREATIVES upsert -- like
+// any Sheets write it can fail (transient API error, quota, lock contention). A revoke that
+// simply throws and leaves the row's status untouched at APPROVED is NOT fail-closed: the
+// exact creative Marketing just edited out from under would still resolve as approved for
+// every future queue-build. This ledger is a second, independent, single-key Properties write
+// (cheap, high-reliability, no row/column shape to get wrong) recorded BEFORE the row write is
+// even attempted -- every resolver below (v6AuraLatestApprovedCreative_,
+// v6AuraLatestApprovedCreativeForLanguage_, v6AuraValidateQueuedCreative_) checks it IN
+// ADDITION TO the row's own status column, so a creativeId in this ledger can never resolve as
+// approved again, whether or not the row write that follows ever succeeds.
+var AURA_REVOKED_LEDGER_PROPERTY_KEY_ = 'AURA_REVOKED_CREATIVE_IDS';
+function v6AuraRevokedLedger_() {
+  var raw = PropertiesService.getScriptProperties().getProperty(AURA_REVOKED_LEDGER_PROPERTY_KEY_);
+  if (!raw) return {};
+  try { var parsed = JSON.parse(raw); return (parsed && typeof parsed === 'object') ? parsed : {}; } catch (e) { return {}; }
+}
+function v6AuraIsRevokedInLedger_(creativeId) {
+  return Object.prototype.hasOwnProperty.call(v6AuraRevokedLedger_(), v6AuraEmailText_(creativeId));
+}
+function v6AuraMarkRevokedInLedger_(creativeId, revokedBy, revokedAt) {
+  var ledger = v6AuraRevokedLedger_();
+  ledger[v6AuraEmailText_(creativeId)] = { revokedAt: revokedAt, revokedBy: revokedBy };
+  PropertiesService.getScriptProperties().setProperty(AURA_REVOKED_LEDGER_PROPERTY_KEY_, JSON.stringify(ledger));
+}
+
+// --- Revocation (PR #3 audit, punto 4; fail-closed hardening, audit round 2) -------------
 // Editing an approved creative in Campaign Studio must invalidate the BACKEND record, not
 // only the browser's local state -- otherwise a second tab, a stale session, or a direct API
 // replay could still resolve the "approved" creative that was just edited out from under it.
@@ -179,6 +217,12 @@ function v6AuraApproveCreative_(payload) {
 // Rebuilds the FULL row before writing: v6UpsertByKey_ replaces every column with whatever the
 // record object provides (missing keys become '' ), so writing only {creativeId,status} here
 // would silently blank out htmlBody/subject/checksums on the matched row.
+// FAIL-CLOSED: the ledger entry above is written FIRST, before the row write is even
+// attempted, and the row write itself is retried up to 3 times. If every attempt still fails,
+// this throws (never a silent/soft success) -- but because the ledger entry already landed,
+// the creative is unresolvable everywhere regardless of whether the row itself ever gets
+// updated. The caller (the router, then campaign-studio-v5.js's invalidateApproval()) must
+// treat that thrown error as a real failure, not a background warning.
 function v6AuraRevokeCreativeApproval_(creativeId, revokedBy) {
   var id = v6AuraEmailText_(creativeId);
   if (!id) throw new Error('CREATIVE_REVOKE_MISSING_CREATIVE_ID');
@@ -187,10 +231,25 @@ function v6AuraRevokeCreativeApproval_(creativeId, revokedBy) {
   if (String(row.status || '').toUpperCase() === 'REVOKED') {
     return { status: 'ALREADY_REVOKED', creativeId: id, revokedAt: row.revokedAt || '', revokedBy: row.revokedBy || '' };
   }
+  var resolvedRevokedBy = v6AuraEmailText_(revokedBy) || 'Marketing';
   var now = new Date().toISOString();
-  var merged = Object.assign({}, row, { status: 'REVOKED', revokedAt: now, revokedBy: v6AuraEmailText_(revokedBy) || 'Marketing' });
-  v6UpsertByKey_('MKT_CAMPAIGN_CREATIVES', ['creativeId'], merged);
-  return { status: 'REVOKED', creativeId: id, revokedAt: now, revokedBy: merged.revokedBy };
+  // Ledger write first -- if THIS throws, nothing has changed yet (no partial/ambiguous state)
+  // and the error propagates immediately.
+  v6AuraMarkRevokedInLedger_(id, resolvedRevokedBy, now);
+  var merged = Object.assign({}, row, { status: 'REVOKED', revokedAt: now, revokedBy: resolvedRevokedBy });
+  var lastError = null;
+  for (var attempt = 1; attempt <= 3; attempt++) {
+    try {
+      v6UpsertByKey_('MKT_CAMPAIGN_CREATIVES', ['creativeId'], merged);
+      return { status: 'REVOKED', creativeId: id, revokedAt: now, revokedBy: resolvedRevokedBy };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  // The row write never succeeded after 3 attempts. The creative IS still safely blocked (the
+  // ledger entry above already makes it unresolvable in every resolver below), but this must
+  // reach the caller as a real, actionable failure -- never swallowed into a soft success.
+  throw new Error('CREATIVE_REVOKE_ROW_UPDATE_FAILED_BUT_LEDGER_BLOCKED:' + id + ':' + (lastError && lastError.message || 'unknown error'));
 }
 
 // The current, single approved creative for a campaign -- highest creativeVersion.
@@ -199,10 +258,13 @@ function v6AuraRevokeCreativeApproval_(creativeId, revokedBy) {
 // ambiguous between two rows claiming the same version.
 function v6AuraLatestApprovedCreative_(campaignId) {
   var id = v6AuraEmailText_(campaignId);
+  var ledger = v6AuraRevokedLedger_();
   // status is blank on any row that predates this column (additive migration default) -- treated
   // as APPROVED for backward compatibility. Only an explicit REVOKED status excludes a row.
+  // The ledger check catches a revoke whose row write itself failed (fail-closed, see above).
   var rows = v6Rows_('MKT_CAMPAIGN_CREATIVES').filter(function (r) {
-    return v6AuraEmailText_(r.campaignId) === id && String(r.status || 'APPROVED').toUpperCase() !== 'REVOKED';
+    return v6AuraEmailText_(r.campaignId) === id && String(r.status || 'APPROVED').toUpperCase() !== 'REVOKED' &&
+      !Object.prototype.hasOwnProperty.call(ledger, v6AuraEmailText_(r.creativeId));
   });
   if (!rows.length) return null;
   rows.sort(function (a, b) { return Number(b.creativeVersion || 0) - Number(a.creativeVersion || 0); });
@@ -217,9 +279,11 @@ function v6AuraLatestApprovedCreative_(campaignId) {
 // v6AuraLatestApprovedCreative_ above; this is additive, not a replacement.
 function v6AuraLatestApprovedCreativeForLanguage_(campaignId, language) {
   var id = v6AuraEmailText_(campaignId), lang = v6AuraEmailText_(language);
+  var ledger = v6AuraRevokedLedger_();
   var rows = v6Rows_('MKT_CAMPAIGN_CREATIVES').filter(function (r) {
     return v6AuraEmailText_(r.campaignId) === id && (!lang || v6AuraEmailText_(r.language) === lang) &&
-      String(r.status || 'APPROVED').toUpperCase() !== 'REVOKED';
+      String(r.status || 'APPROVED').toUpperCase() !== 'REVOKED' &&
+      !Object.prototype.hasOwnProperty.call(ledger, v6AuraEmailText_(r.creativeId));
   });
   if (!rows.length) return null;
   rows.sort(function (a, b) { return Number(b.creativeVersion || 0) - Number(a.creativeVersion || 0); });
@@ -283,7 +347,11 @@ function v6AuraResolveApprovedCreativeForSend_(campaignId, vars) {
     creativeId: creative.creativeId, creativeVersion: creative.creativeVersion,
     creativeApprovalId: creative.approvalId,
     approvedTemplateChecksum: approvedTemplateChecksum,
-    recipientRenderedChecksum: recipientRenderedChecksum
+    recipientRenderedChecksum: recipientRenderedChecksum,
+    // PR #3 audit round 2, punto 1 -- subject+htmlBody on the personalized job content; any
+    // caller building a job from this result must copy this onto job.recipientContentChecksum
+    // (see MarketingV6AuraEmailDispatcher.gs / MarketingV6AuraCampanaA.gs).
+    recipientContentChecksum: v6AuraJobContentChecksum_(personalizedSubject, personalizedHtml)
   };
 }
 
@@ -294,9 +362,18 @@ function v6AuraResolveApprovedCreativeForSend_(campaignId, vars) {
 function v6AuraValidateQueuedCreative_(job) {
   var j = job || {};
   if (!j.creativeId || !j.creativeApprovalId) return { blocked: true, error: 'CREATIVE_NOT_APPROVED' };
-  // (a) the job row itself has not drifted from what was queued.
+  // (a) the job row itself has not drifted from what was queued (htmlBody only).
   var currentHtmlChecksum = v6AuraChecksum_(j.htmlBody);
   if (String(currentHtmlChecksum) !== String(j.recipientRenderedChecksum)) {
+    return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
+  }
+  // PR #3 audit round 2, punto 1 -- recipientRenderedChecksum above only ever covers htmlBody;
+  // a job whose SUBJECT alone was altered after queueing (htmlBody left untouched) would pass
+  // it. recipientContentChecksum covers subject+htmlBody on the exact personalized strings the
+  // job carries, recomputed fresh here -- subject-only drift on a queued job blocks too. The
+  // field is REQUIRED (both production queue-builders always set it); a job missing it is
+  // treated the same as a job that fails the check, never silently skipped.
+  if (!j.recipientContentChecksum || String(v6AuraJobContentChecksum_(j.subject, j.htmlBody)) !== String(j.recipientContentChecksum)) {
     return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
   }
   // (b) the approved creative this job claims to come from still exists.
@@ -308,13 +385,30 @@ function v6AuraValidateQueuedCreative_(job) {
   if (String(creative.htmlChecksum) !== String(j.htmlChecksum)) {
     return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
   }
+  // PR #3 audit round 2, punto 2 -- the check above only compares two ALREADY-STORED values
+  // (creative.htmlChecksum vs the job's own captured copy) against each other; neither is
+  // recomputed fresh from creative.htmlBody, so if both were corrupted/edited identically (or a
+  // future bug ever wrote them out of step with the actual content) this alone would not catch
+  // it. Recompute checksum(creative.htmlBody) fresh, independent of the job entirely, and
+  // require it still matches the CURRENT stored htmlChecksum column.
+  if (String(v6AuraChecksum_(creative.htmlBody)) !== String(creative.htmlChecksum)) {
+    return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
+  }
+  // Same independent-recompute defense for the canonical contentChecksum (subject+htmlBody+
+  // textBody+templateId+creativeVersion) -- catches the stored row's own contentChecksum column
+  // going stale relative to its content, not just drift between the job and the creative.
+  if (creative.contentChecksum && String(v6AuraCanonicalContentChecksum_(creative.subject, creative.htmlBody, creative.textBody, creative.templateId, creative.creativeVersion)) !== String(creative.contentChecksum)) {
+    return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
+  }
   if (v6AuraEmailText_(creative.approvalId) !== v6AuraEmailText_(j.creativeApprovalId)) {
     return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
   }
   if (String(creative.creativeVersion) !== String(j.creativeVersion)) {
     return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
   }
-  if (String(creative.status || 'APPROVED').toUpperCase() !== 'APPROVED') {
+  // Fail-closed revocation (audit round 2) -- a revoke whose row write failed still lands this
+  // creativeId in the Properties ledger; check it here too, not just the row's status column.
+  if (String(creative.status || 'APPROVED').toUpperCase() !== 'APPROVED' || v6AuraIsRevokedInLedger_(creative.creativeId)) {
     return { blocked: true, error: 'CREATIVE_REVOKED' };
   }
   // PR #3 audit punto 6 -- hard gate at dispatch too: re-check the actual bytes on the job

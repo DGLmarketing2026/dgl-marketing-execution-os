@@ -225,7 +225,10 @@ function v6AuraBuildEmailQueueForCampaign_(campaign) {
       // recipient render) so the dispatcher can re-validate at send time without re-rendering.
       creativeId: creative.creativeId, creativeVersion: creative.creativeVersion,
       creativeApprovalId: creative.approvalId, htmlChecksum: creative.htmlChecksum,
-      recipientRenderedChecksum: v6AuraChecksum_(personalizedHtml)
+      recipientRenderedChecksum: v6AuraChecksum_(personalizedHtml),
+      // PR #3 audit round 2, punto 1 -- subject+htmlBody, so a subject-only edit to this job
+      // after queueing (recipientRenderedChecksum above only ever covers htmlBody) blocks too.
+      recipientContentChecksum: v6AuraJobContentChecksum_(personalizedSubject, personalizedHtml)
     };
     v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);
     existingIds[jobId] = true;
@@ -299,6 +302,9 @@ function v6AuraRepairEmailQueueContent_() {
     job.creativeId = creative.creativeId; job.creativeVersion = creative.creativeVersion;
     job.creativeApprovalId = creative.approvalId; job.htmlChecksum = creative.htmlChecksum;
     job.recipientRenderedChecksum = v6AuraChecksum_(personalizedHtml);
+    // PR #3 audit round 2, punto 1 -- repair must set the same subject+htmlBody job checksum
+    // the builder sets, using job.subject already assigned just above.
+    job.recipientContentChecksum = v6AuraJobContentChecksum_(job.subject, personalizedHtml);
     v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);
     repaired++;
   });

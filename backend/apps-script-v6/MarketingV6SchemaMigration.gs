@@ -53,7 +53,12 @@ var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
   // htmlChecksum mirrors that creative's own htmlChecksum (the pre-personalization "approved
   // template" checksum); recipientRenderedChecksum is the checksum of the actual, personalized
   // job.htmlBody -- the two checksum levels Iniciativa 2 punto 4 requires.
-  MKT_EMAIL_QUEUE:['jobId','campaignId','audienceId','accountId','contactId','email','firstName','company','service','subject','htmlBody','replyTo','status','gmailDraftId','createdAt','processedAt','error','requestId','amOwner','playbookId','sequenceStep','scheduledAt','approvalId','approvedAt','approvedBy','stopOnResponse','country','preferredLanguage','languageSource','languageReason','stopReasonStage','stopReasonAt','stopReasonCampaignId','stopOverrideApplied','stopOverrideReason','recipientSource','creativeId','creativeVersion','creativeApprovalId','htmlChecksum','recipientRenderedChecksum'],
+  // recipientContentChecksum added (PR #3 audit round 2, punto 1): recipientRenderedChecksum
+  // above only ever covers htmlBody, so a job whose SUBJECT alone drifted after queueing would
+  // pass every existing dispatch-time check. This is checksum(subject+htmlBody) on the same
+  // already-personalized strings, required (not optional) at dispatch -- see
+  // v6AuraJobContentChecksum_ / v6AuraValidateQueuedCreative_ in MarketingV6AuraCreativeApproval.gs.
+  MKT_EMAIL_QUEUE:['jobId','campaignId','audienceId','accountId','contactId','email','firstName','company','service','subject','htmlBody','replyTo','status','gmailDraftId','createdAt','processedAt','error','requestId','amOwner','playbookId','sequenceStep','scheduledAt','approvalId','approvedAt','approvedBy','stopOnResponse','country','preferredLanguage','languageSource','languageReason','stopReasonStage','stopReasonAt','stopReasonCampaignId','stopOverrideApplied','stopOverrideReason','recipientSource','creativeId','creativeVersion','creativeApprovalId','htmlChecksum','recipientRenderedChecksum','recipientContentChecksum'],
   // Pre-existing legacy table (MarketingDataHub.gs); listed here only so
   // v6RequireContactRecipientHeaders_/v6EnsureContactRecipientSchema_ can validate it before
   // the dispatcher logs a real send touch into it -- no column added or changed.
