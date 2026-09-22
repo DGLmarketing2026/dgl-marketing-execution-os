@@ -446,7 +446,8 @@ function v6AuraCampanaALanguageCampaignFlag_(lang) {
 }
 
 // --- No-name-aware subject merge -----------------------------------------------------------
-// Every AURA Retention copy template's ONLY use of {{firstName}} is as a leading
+// Every AURA copy template (including the Activation templates this dedicated Campana A
+// pipeline actually generates via v6AuraGenerateCopy_) has its ONLY use of {{firstName}} as a leading
 // "{{firstName}}, ..." subject clause (MarketingV6AuraCopyEngine.gs) -- headline/body/body2/
 // preheader never reference it. So a name-aware subject only needs to handle that one real
 // pattern: with no reliable name, drop the "{{firstName}}, " prefix and capitalize what follows
@@ -718,7 +719,7 @@ function v6AuraCampanaABuildQueue_() {
     var name = v6AuraEmailText_(setup.accountMap[hashId].accountName);
     if (name) accountRealIdByName[name] = setup.realIdByHashId[hashId];
   });
-  var resolved = v6AuraCampanaAResolveRecipients_(setup.accountIds, accountRealIdByName, 'Retention');
+  var resolved = v6AuraCampanaAResolveRecipients_(setup.accountIds, accountRealIdByName, 'Activation');
   var recipients = resolved.eligible;
   result.recipients = recipients.length;
   result.candidates = resolved.candidates.length;
@@ -763,7 +764,7 @@ function v6AuraCampanaABuildQueue_() {
 
   var replyTo = v6AuraEmailCanonicalReplyTo_();
   var replyToBlocked = !replyTo;
-  var policyApproved = (typeof v6AuraPolicyApproved_ === 'function') ? v6AuraPolicyApproved_('Retention') : true;
+  var policyApproved = (typeof v6AuraPolicyApproved_ === 'function') ? v6AuraPolicyApproved_('Activation') : true;
   var copyCache = {};
   function copyFor(lang) {
     if (!copyCache[lang]) copyCache[lang] = v6AuraGenerateCopy_({}, Object.assign({}, campaign, { language: v6AuraCampanaALanguageCampaignFlag_(lang) }));
