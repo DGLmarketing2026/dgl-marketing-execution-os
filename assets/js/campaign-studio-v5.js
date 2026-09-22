@@ -32,23 +32,32 @@
   // to null in lockstep with approved=false every time anything that changes the creative
   // (objective/service/language/angle/ctaIntent/qnbWindow via generate(), a direct field edit,
   // or a creative-system switch) fires -- an approval must never be left pointing at stale content.
-  const state={device:"desktop",approved:false,approvedCreative:null,generated:null,incoming:null,campaignNameManual:false};
+  const state={device:"desktop",approved:false,approvedCreative:null,generated:null,incoming:null,campaignNameManual:false,revokeBlockedCreativeId:null};
 
   // PR #3 audit punto 4 -- editing an approved creative must invalidate/revoke the approved
   // BACKEND record (MKT_CAMPAIGN_CREATIVES), not only local UI state. Every place that used to
   // do a bare `state.approved=false;state.approvedCreative=null;` now calls this instead, so a
   // second tab / stale session / direct API replay can never resolve a creative that was just
-  // edited out from under it here. Fire-and-forget on the backend call: local state is
-  // invalidated immediately and synchronously either way (never trust the network round-trip to
-  // decide whether the UI itself lets Marketing keep editing); a revoke failure surfaces as a
-  // toast so Marketing knows the backend row may still need manual attention.
+  // edited out from under it here. Local state is invalidated immediately and synchronously
+  // either way (never trust the network round-trip to decide whether the UI itself lets
+  // Marketing keep editing).
+  // PR #3 audit round 2 -- "fail-closed, not just a warning": the backend
+  // (v6AuraRevokeCreativeApproval_) is itself fail-closed via a Properties-based ledger, so the
+  // stale creative can no longer resolve as approved for dispatch even if this call fails. But
+  // Campaign Studio must ALSO refuse to move forward here, not just toast a passive notice:
+  // state.revokeBlockedCreativeId records the unresolved failure, and the Approve Creative
+  // handler below hard-blocks (throws, never silently proceeds) until a retry there succeeds.
   function invalidateApproval(){
     if(!state.approved)return;
     const prior=state.approvedCreative;
     state.approved=false;state.approvedCreative=null;
     if(prior&&prior.creativeId&&global.DGL_MARKETING_BACKEND_ADAPTER_V55?.isConnected()){
-      global.DGL_MARKETING_BACKEND_ADAPTER_V55.revokeApprovedCreative(prior.creativeId,"Marketing").catch(err=>{
-        global.DGL_INTERACTIONS?.toast?.(`Warning: backend revoke failed for ${prior.creativeId} — ${err.message}`,"error");
+      global.DGL_MARKETING_BACKEND_ADAPTER_V55.revokeApprovedCreative(prior.creativeId,"Marketing").then(()=>{
+        if(state.revokeBlockedCreativeId===prior.creativeId)state.revokeBlockedCreativeId=null;
+      }).catch(err=>{
+        state.revokeBlockedCreativeId=prior.creativeId;
+        global.DGL_INTERACTIONS?.toast?.(`Approval blocked: backend revoke failed for ${prior.creativeId}. Retry on next Approve — ${err.message}`,"error");
+        updateQA();
       });
     }
   }
@@ -560,6 +569,20 @@
         const campaignId=state.incoming?.campaignId;
         if(!campaignId)throw new Error("Approval blocked: no campaignId. Prepare a backend campaign before approving.");
         if(!global.DGL_MARKETING_BACKEND_ADAPTER_V55?.isConnected())throw new Error("Approval blocked: private backend is not connected.");
+        // PR #3 audit round 2 -- fail-closed revocation: a prior edit's revoke call may have
+        // failed (see invalidateApproval()). The stale creative is already unresolvable on the
+        // backend (Properties ledger), but Campaign Studio must not let Marketing submit a NEW
+        // approval while that failure is unresolved -- retry it now; only proceed once it
+        // actually succeeds.
+        if(state.revokeBlockedCreativeId){
+          const staleId=state.revokeBlockedCreativeId;
+          try{
+            await global.DGL_MARKETING_BACKEND_ADAPTER_V55.revokeApprovedCreative(staleId,"Marketing");
+            state.revokeBlockedCreativeId=null;
+          }catch(retryErr){
+            throw new Error(`Approval blocked: prior creative ${staleId} could not be revoked from the backend (retry failed: ${retryErr.message}). Approval cannot proceed until this is resolved.`);
+          }
+        }
         const preview=global.DGL_CAMPAIGN_STUDIO_V5.getPreview(),s=preview.strategy||{},c=preview.copy||{};
         const subject=clean(document.getElementById("v5PreviewSubject")?.textContent||c.subjectA);
         const textBody=[subject,c.preheader,c.headline,c.body,c.body2,c.cta].map(clean).filter(Boolean).join("\n\n");
