@@ -10,13 +10,35 @@ const src = name => fs.readFileSync(path.join(root, 'backend/apps-script-v6', na
 const dispatcherSource = src('MarketingV6AuraEmailDispatcher.gs'); // for the real v6AuraEmailText_
 const creativeApprovalSource = src('MarketingV6AuraCreativeApproval.gs');
 
+function fakePropertiesService(store) {
+  store = store || {};
+  return { getScriptProperties: function () { return { getProperty: function (k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; }, setProperty: function (k, v) { store[k] = v; return this; } }; } };
+}
+
 function makeContext(opts) {
   opts = opts || {};
   var tables = opts.tables || {};
   var sheets = opts.sheets || {};
+  var props = opts.props || {};
+  var gmailDrafts = opts.gmailDrafts || [];
   var ctx = {
     String: String, Number: Number, Object: Object, Array: Array, Error: Error, Date: Date, JSON: JSON, RegExp: RegExp,
     MKT_V6_DATA_HUB_ID: 'FAKE-HUB-ID',
+    PropertiesService: fakePropertiesService(props),
+    // PR #3 audit punto 9 -- v6AuraVerifyAndCreateTestDraft_ real-draft test coverage. createDraft
+    // returns a draft object whose getMessage().getBody() reflects opts.draftServerRewrite (if
+    // given) so a test can simulate Gmail's OWN MIME rewriting of the html it was handed, proving
+    // the comparator (not a stub) is what actually decides STORED-vs-DRAFT.
+    GmailApp: {
+      createDraft: function (to, subject, plainText, options) {
+        var htmlBody = (options || {}).htmlBody || '';
+        var rendered = typeof opts.draftServerRewrite === 'function' ? opts.draftServerRewrite(htmlBody) : htmlBody;
+        var record = { to: to, subject: subject, plainText: plainText, htmlBody: htmlBody, rendered: rendered, id: 'draft-' + (gmailDrafts.length + 1) };
+        gmailDrafts.push(record);
+        return { getId: function () { return record.id; }, getMessage: function () { return { getBody: function () { return record.rendered; } }; } };
+      }
+    },
+    Session: opts.session === null ? undefined : { getActiveUser: function () { return { getEmail: function () { return (opts.session && opts.session.email) || 'marketing@dglus.com'; } }; } },
     SpreadsheetApp: {
       openById: function () {
         return {
@@ -41,7 +63,7 @@ function makeContext(opts) {
     if (at < 0) rows.push(Object.assign({}, record)); else rows[at] = Object.assign({}, record);
     return record;
   };
-  ctx.__tables = tables; ctx.__sheets = sheets;
+  ctx.__tables = tables; ctx.__sheets = sheets; ctx.__gmailDrafts = gmailDrafts;
   return ctx;
 }
 
@@ -166,7 +188,9 @@ function approvePayload(over) {
   var ctx = makeContext({});
   var approval = ctx.v6AuraApproveCreative_(approvePayload({}));
   var creative = ctx.v6AuraLatestApprovedCreative_('CMP-1');
-  var goodJob = { creativeId: creative.creativeId, creativeApprovalId: approval.approvalId, htmlChecksum: creative.htmlChecksum, htmlBody: creative.htmlBody, recipientRenderedChecksum: ctx.v6AuraChecksum_(creative.htmlBody) };
+  // PR #3 audit punto 8 -- dispatch must also revalidate creativeVersion (and, via `creative`,
+  // the current status), not just the two checksums already covered above.
+  var goodJob = { creativeId: creative.creativeId, creativeApprovalId: approval.approvalId, creativeVersion: creative.creativeVersion, htmlChecksum: creative.htmlChecksum, htmlBody: creative.htmlBody, recipientRenderedChecksum: ctx.v6AuraChecksum_(creative.htmlBody) };
   assert.equal(ctx.v6AuraValidateQueuedCreative_(goodJob).blocked, false);
 
   assert.equal(ctx.v6AuraValidateQueuedCreative_({ htmlBody: 'x' }).error, 'CREATIVE_NOT_APPROVED');
@@ -231,6 +255,191 @@ function approvePayload(over) {
   var second = ctx.v6AuraEnsureCampaignCreativesSheet_();
   assert.equal(second.status, 'ALREADY_EXISTS');
   console.log('creative-approval test 11 (MKT_CAMPAIGN_CREATIVES sheet creation is idempotent): PASS');
+})();
+
+// 12. PR #3 audit punto 6 -- persisting an approval hard-blocks (never just audits) when
+// internal classification vocabulary appears anywhere in subject/htmlBody/textBody.
+(function persistBlocksInternalLabelsTest() {
+  var ctx = makeContext({});
+  assert.throws(function () {
+    ctx.v6AuraPersistApprovedCreative_(approvePayload({ subject: 'Activation follow-up for {{firstName}}' }));
+  }, /CREATIVE_APPROVAL_INTERNAL_LABEL_DETECTED/);
+  assert.throws(function () {
+    ctx.v6AuraPersistApprovedCreative_(approvePayload({ htmlBody: '<p>Internal: campaignId CMP-1</p>' }));
+  }, /CREATIVE_APPROVAL_INTERNAL_LABEL_DETECTED/);
+  assert.equal(ctx.__tables.MKT_CAMPAIGN_CREATIVES, undefined, 'a rejected approval must never be persisted');
+  console.log('creative-approval test 12 (persist hard-blocks internal classification vocabulary in subject/htmlBody/textBody): PASS');
+})();
+
+// 13. PR #3 audit puntos 1/2 -- persisting an approval hard-blocks a relative assets/... URL
+// (src/href/url()) and a non-functional placeholder href="#"/"" CTA, defense-in-depth on the
+// backend even though Campaign Studio itself must never send either.
+(function persistBlocksUnsafeHtmlTest() {
+  var ctx = makeContext({});
+  assert.throws(function () {
+    ctx.v6AuraPersistApprovedCreative_(approvePayload({ htmlBody: '<img src="assets/creative/hero.webp"><a href="mailto:info@dglus.com">CTA</a>' }));
+  }, /CREATIVE_APPROVAL_RELATIVE_ASSET_URL/);
+  assert.throws(function () {
+    ctx.v6AuraPersistApprovedCreative_(approvePayload({ htmlBody: '<div style="background:url(\'assets/x.png\')"></div><a href="mailto:info@dglus.com">CTA</a>' }));
+  }, /CREATIVE_APPROVAL_RELATIVE_ASSET_URL/);
+  assert.throws(function () {
+    ctx.v6AuraPersistApprovedCreative_(approvePayload({ htmlBody: '<p>x</p><a href="#">CTA</a>' }));
+  }, /CREATIVE_APPROVAL_NONFUNCTIONAL_CTA/);
+  assert.throws(function () {
+    ctx.v6AuraPersistApprovedCreative_(approvePayload({ htmlBody: '<p>x</p><a href="">CTA</a>' }));
+  }, /CREATIVE_APPROVAL_NONFUNCTIONAL_CTA/);
+  // An absolute assets URL and a real mailto: CTA must both be accepted.
+  var ok = ctx.v6AuraPersistApprovedCreative_(approvePayload({ htmlBody: '<img src="https://dglmarketing2026.github.io/dgl-marketing-execution-os/assets/creative/hero.webp"><a href="mailto:info@dglus.com?subject=Hi">CTA</a>' }));
+  assert.equal(ok.status, 'APPROVED');
+  console.log('creative-approval test 13 (persist hard-blocks relative assets/ URLs and href="#"/"" CTAs; absolute URL + mailto: CTA is accepted): PASS');
+})();
+
+// 14. PR #3 audit punto 3 -- v6AuraApproveCreative_ (the router-facing wrapper) throws
+// CREATIVE_APPROVAL_PERSISTENCE_INCOMPLETE if the persisted record is ever missing any of
+// creativeId/approvalId/creativeVersion/htmlChecksum/contentChecksum -- the backend's OWN
+// self-check, independent of whatever the frontend separately verifies.
+(function approveThrowsOnIncompletePersistenceTest() {
+  var ctx = makeContext({});
+  var real = ctx.v6AuraPersistApprovedCreative_;
+  ctx.v6AuraPersistApprovedCreative_ = function (payload) {
+    var record = real(payload);
+    delete record.approvalId; // simulate a persistence bug
+    return record;
+  };
+  assert.throws(function () { ctx.v6AuraApproveCreative_(approvePayload({})); }, /CREATIVE_APPROVAL_PERSISTENCE_INCOMPLETE/);
+  console.log('creative-approval test 14 (v6AuraApproveCreative_ throws CREATIVE_APPROVAL_PERSISTENCE_INCOMPLETE on any incomplete persisted record): PASS');
+})();
+
+// 15. PR #3 audit punto 4 -- revocation flips status to REVOKED without touching any other
+// column (full-row-merge, never a v6UpsertByKey_ blank-out), is idempotent, and every resolver
+// (campaign-wide and per-language) excludes the revoked row afterward.
+(function revokeCreativeTest() {
+  var ctx = makeContext({});
+  var approved = ctx.v6AuraApproveCreative_(approvePayload({ language: 'Spanish' }));
+  var before = ctx.v6AuraLatestApprovedCreative_('CMP-1');
+  assert.equal(before.creativeId, approved.creativeId);
+
+  var revoked = ctx.v6AuraRevokeCreativeApproval_(approved.creativeId, 'Marketing');
+  assert.equal(revoked.status, 'REVOKED');
+  assert(revoked.revokedAt);
+
+  var row = ctx.__tables.MKT_CAMPAIGN_CREATIVES.filter(function (r) { return r.creativeId === approved.creativeId; })[0];
+  assert.equal(row.status, 'REVOKED');
+  assert.equal(row.subject, approvePayload({}).subject, 'revocation must never blank out subject/htmlBody/any other column');
+  assert.equal(row.htmlBody, approvePayload({}).htmlBody, 'revocation must never blank out the stored htmlBody');
+
+  assert.equal(ctx.v6AuraLatestApprovedCreative_('CMP-1'), null, 'a revoked creative must no longer resolve as the latest approved one');
+  assert.equal(ctx.v6AuraLatestApprovedCreativeForLanguage_('CMP-1', 'Spanish'), null, 'the per-language resolver must exclude a revoked row too');
+
+  var again = ctx.v6AuraRevokeCreativeApproval_(approved.creativeId, 'Someone Else');
+  assert.equal(again.status, 'ALREADY_REVOKED', 'revoking an already-revoked row must be idempotent, not an error');
+  assert.equal(again.revokedBy, revoked.revokedBy, 'a second revoke call must not overwrite who/when it was first revoked');
+
+  assert.throws(function () { ctx.v6AuraRevokeCreativeApproval_('CMP-1:CREATIVE:999'); }, /CREATIVE_REVOKE_NOT_FOUND/);
+  assert.throws(function () { ctx.v6AuraRevokeCreativeApproval_(''); }, /CREATIVE_REVOKE_MISSING_CREATIVE_ID/);
+  console.log('creative-approval test 15 (revoke flips status only, preserves every other column, is idempotent, and every resolver excludes the revoked row): PASS');
+})();
+
+// 16. PR #3 audit punto 7 -- contentChecksum covers subject too (htmlChecksum alone does not),
+// so a subject-only drift on an otherwise-untouched stored row blocks at resolve time.
+(function contentChecksumCatchesSubjectDriftTest() {
+  var ctx = makeContext({});
+  ctx.v6AuraApproveCreative_(approvePayload({}));
+  var creative = ctx.v6AuraLatestApprovedCreative_('CMP-1');
+  creative.subject = 'Something completely different'; // htmlBody/htmlChecksum untouched
+  ctx.__tables.MKT_CAMPAIGN_CREATIVES[0] = creative;
+  var resolved = ctx.v6AuraResolveApprovedCreativeForSend_('CMP-1', { firstName: 'Maria' });
+  assert.equal(resolved.blocked, true, 'subject-only drift must block even though htmlBody/htmlChecksum never changed');
+  assert.equal(resolved.error, 'CREATIVE_VERSION_MISMATCH');
+  console.log('creative-approval test 16 (canonical contentChecksum catches subject-only drift that htmlChecksum alone would miss): PASS');
+})();
+
+// 17. PR #3 audit punto 5 -- the fail-closed dispatch wrapper. A missing validator function
+// blocks with CREATIVE_VALIDATION_UNAVAILABLE (never {blocked:false}); a validator that THROWS
+// also blocks the same way (never lets the exception propagate and never opens the gate); and a
+// real, working validator's own verdict passes through unchanged either way.
+(function validateCreativeOrBlockFailsClosedTest() {
+  var ctx = makeContext({});
+  var approval = ctx.v6AuraApproveCreative_(approvePayload({}));
+  var creative = ctx.v6AuraLatestApprovedCreative_('CMP-1');
+  var goodJob = { creativeId: creative.creativeId, creativeApprovalId: approval.approvalId, creativeVersion: creative.creativeVersion, htmlChecksum: creative.htmlChecksum, htmlBody: creative.htmlBody, recipientRenderedChecksum: ctx.v6AuraChecksum_(creative.htmlBody) };
+
+  assert.equal(ctx.v6AuraValidateCreativeOrBlock_(goodJob).blocked, false, 'a well-formed job must still pass through the wrapper unchanged');
+
+  var realValidator = ctx.v6AuraValidateQueuedCreative_;
+  ctx.v6AuraValidateQueuedCreative_ = undefined;
+  assert.equal(ctx.v6AuraValidateCreativeOrBlock_(goodJob).blocked, true, 'a missing validator function must block, never fail open');
+  assert.equal(ctx.v6AuraValidateCreativeOrBlock_(goodJob).error, 'CREATIVE_VALIDATION_UNAVAILABLE');
+
+  ctx.v6AuraValidateQueuedCreative_ = function () { throw new Error('boom -- validator itself is broken'); };
+  var thrown = ctx.v6AuraValidateCreativeOrBlock_(goodJob);
+  assert.equal(thrown.blocked, true, 'a validator that throws must also block, never let the exception fail the gate open');
+  assert.equal(thrown.error, 'CREATIVE_VALIDATION_UNAVAILABLE');
+
+  ctx.v6AuraValidateQueuedCreative_ = realValidator;
+  assert.equal(ctx.v6AuraValidateCreativeOrBlock_(goodJob).blocked, false, 'restoring the real validator must resume normal pass-through behavior');
+  console.log('creative-approval test 17 (v6AuraValidateCreativeOrBlock_ fails closed on a missing OR a throwing validator, never {blocked:false}): PASS');
+})();
+
+// 18. PR #3 audit punto 8 -- dispatch-time revalidation of approvalId, creativeVersion, AND the
+// creative's CURRENT status individually (not only the two checksums covered in test 8 above).
+(function dispatchRevalidatesApprovalIdVersionAndStatusTest() {
+  var ctx = makeContext({});
+  var approval = ctx.v6AuraApproveCreative_(approvePayload({}));
+  var creative = ctx.v6AuraLatestApprovedCreative_('CMP-1');
+  var goodJob = { creativeId: creative.creativeId, creativeApprovalId: approval.approvalId, creativeVersion: creative.creativeVersion, htmlChecksum: creative.htmlChecksum, htmlBody: creative.htmlBody, recipientRenderedChecksum: ctx.v6AuraChecksum_(creative.htmlBody) };
+  assert.equal(ctx.v6AuraValidateQueuedCreative_(goodJob).blocked, false);
+
+  var wrongApprovalId = Object.assign({}, goodJob, { creativeApprovalId: 'CAPR:WRONG:1' });
+  assert.equal(ctx.v6AuraValidateQueuedCreative_(wrongApprovalId).error, 'CREATIVE_VERSION_MISMATCH', 'a job whose approvalId no longer matches the stored creative must block');
+
+  var wrongVersion = Object.assign({}, goodJob, { creativeVersion: 999 });
+  assert.equal(ctx.v6AuraValidateQueuedCreative_(wrongVersion).error, 'CREATIVE_VERSION_MISMATCH', 'a job whose creativeVersion no longer matches the stored creative must block');
+
+  // Revoke the creative AFTER the job was queued -- everything on the job itself is still
+  // internally consistent (checksums/approvalId/version all still match what was true when it
+  // was queued), so only the CURRENT status check can catch this.
+  ctx.v6AuraRevokeCreativeApproval_(creative.creativeId, 'Marketing');
+  assert.equal(ctx.v6AuraValidateQueuedCreative_(goodJob).error, 'CREATIVE_REVOKED', 'dispatch must revalidate the creative\'s CURRENT status, not just checksums frozen at queue time');
+  console.log('creative-approval test 18 (dispatch independently revalidates approvalId, creativeVersion, and current status -- a revoke after queueing blocks even an otherwise-untampered job): PASS');
+})();
+
+// 19. PR #3 audit punto 9 -- v6AuraVerifyAndCreateTestDraft_ is a REAL end-to-end path: it
+// throws before any campaign has an approved creative, throws if the Studio HTML the caller
+// sent does not match the STORED approved HTML (leg 1), actually calls GmailApp.createDraft (a
+// real, verified side effect -- see __gmailDrafts), and on success returns a genuine
+// STUDIO==STORED==DRAFT verification, never a unit-test-only comparison.
+(function verifyAndCreateTestDraftTest() {
+  var ctx0 = makeContext({});
+  assert.throws(function () { ctx0.v6AuraVerifyAndCreateTestDraft_({ campaignId: 'CMP-1', htmlBody: '<p>x</p>' }); }, /TEST_DRAFT_CREATIVE_NOT_APPROVED/, 'no approved creative on file must block before any draft is created');
+
+  var ctx = makeContext({});
+  var approved = ctx.v6AuraApproveCreative_(approvePayload({}));
+  var storedHtml = ctx.v6AuraLatestApprovedCreative_('CMP-1').htmlBody;
+
+  assert.throws(function () {
+    ctx.v6AuraVerifyAndCreateTestDraft_({ campaignId: 'CMP-1', subject: 'x', htmlBody: '<p>totally different from what was stored</p>' });
+  }, /TEST_DRAFT_STUDIO_STORED_MISMATCH/, 'Studio HTML that does not match the STORED approved HTML must block before any draft is created');
+  assert.equal(ctx.__gmailDrafts.length, 0, 'no draft may ever be created when the pre-check fails');
+
+  var result = ctx.v6AuraVerifyAndCreateTestDraft_({ campaignId: 'CMP-1', subject: approved.subject || 'x', htmlBody: storedHtml, textBody: 'text' });
+  assert.equal(result.status, 'TEST_DRAFT_VERIFIED');
+  assert.equal(result.match, true);
+  assert.equal(result.studioVsStoredMatch, true);
+  assert.equal(result.storedVsDraftMatch, true);
+  assert.equal(ctx.__gmailDrafts.length, 1, 'a real GmailApp.createDraft call must have happened');
+  assert.equal(ctx.__gmailDrafts[0].htmlBody, storedHtml, 'the actual draft created in Gmail must carry the exact Studio/stored HTML');
+
+  // Now prove the comparator is checking a REAL read-back, not a stub: simulate Gmail rewriting
+  // the html it was handed (e.g. a MIME transform gone wrong) into something with a genuine
+  // content difference, and confirm the function still catches it via the actual draft object.
+  var ctxRewrite = makeContext({ draftServerRewrite: function (html) { return html.replace('Hola', 'Something else entirely'); } });
+  ctxRewrite.v6AuraApproveCreative_(approvePayload({}));
+  var storedHtml2 = ctxRewrite.v6AuraLatestApprovedCreative_('CMP-1').htmlBody;
+  assert.throws(function () {
+    ctxRewrite.v6AuraVerifyAndCreateTestDraft_({ campaignId: 'CMP-1', subject: 'x', htmlBody: storedHtml2, textBody: 'text' });
+  }, /TEST_DRAFT_CONTENT_MISMATCH/, 'a genuine STORED-vs-actual-Gmail-draft mismatch must block, proving this reads back the real created draft rather than trusting the input');
+  console.log('creative-approval test 19 (v6AuraVerifyAndCreateTestDraft_ is real end-to-end: blocks on no approval, blocks on Studio/Stored mismatch, actually calls GmailApp.createDraft, and independently verifies the real created draft): PASS');
 })();
 
 console.log('V6 AURA creative approval (Iniciativa 2 -- Campaign Studio canonical source, checksums, gates): ALL PASS');
