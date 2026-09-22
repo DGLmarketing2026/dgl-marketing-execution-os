@@ -8,7 +8,7 @@
       id:"editorial-white",name:"DGL Editorial White",
       use:"Reactivation / Retention",
       desc:"Composición blanca, headline dominante, fotografía integrada y mucho aire.",
-      thumb:"editorial",layout:"editorial",recommendedFor:["Reactivation","Retention"]
+      thumb:"editorial",layout:"editorial",recommendedFor:["Reactivation","Retention","Activation"]
     },
     "split-hero":{
       id:"split-hero",name:"DGL Split Hero",
@@ -43,6 +43,11 @@
   };
 
   const OBJECTIVES={
+    "Activation":{
+      recommendedSystem:"editorial-white",
+      angles:["Current Movement"],
+      defaultAngle:"Current Movement",defaultCta:"Generate Quote"
+    },
     "Reactivation":{
       recommendedSystem:"editorial-white",
       angles:["Previous Relationship","Ready to Quote","Service Reminder"],
@@ -156,6 +161,8 @@
 
   function resolveAsset({objective="Reactivation",service="FTL",angle=""}={}){
     if(objective==="Quoted Not Booked")return "";
+
+    if(objective==="Activation")return serviceAsset(service);
 
     if(objective==="Cross-Sell"){
       const capabilityMatrix={
