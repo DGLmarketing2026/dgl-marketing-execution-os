@@ -54,7 +54,7 @@ function handleMarketingV55Api_(e, method) {
 // (v6AuraCampanaARegenerateDryRun_, auraProcessEmailQueue, auraEnableLiveSending): this
 // GitHub Pages frontend is presentation-only, per this project's own stated architecture,
 // and must never be a second way to trigger a real send.
-'v6AuraRetentionDashboard', 'v6AuraCampanaAAudit', 'v6AuraCampanaAMatchReport',
+'v6AuraEmailPerformance', 'v6AuraRetentionDashboard', 'v6AuraCampanaAAudit', 'v6AuraCampanaAMatchReport',
 'v6AuraCampanaAStoppedBreakdown', 'v6AuraExecutionReport', 'v6AuraAutomaticReportStatus',
 'v6AuraCampanaALatestRunSummary',
 // Iniciativa 2 -- Campaign Studio's own Approve Creative action (MarketingV6AuraCreativeApproval.gs).
@@ -94,6 +94,7 @@ case 'v6CopyUsage':
 case 'v6RecordCopyUsage':
 case 'v6CreativeUsage':
 case 'v6RecordCreativeUsage':
+case 'v6AuraEmailPerformance':
 case 'v6AuraRetentionDashboard':
 case 'v6AuraCampanaAAudit':
 case 'v6AuraCampanaAMatchReport':

@@ -1,0 +1,100 @@
+/** Private recipient reporting. Reads never ingest Gmail or send mail.
+ * DSN ingestion is a separate, manually scheduled admin operation; no trigger installed here.
+ */
+var AURA_EMAIL_EVENT_HEADERS_ = ['eventId','jobId','campaignId','accountId','contactId','email','eventType','occurredAt','source','externalId','reasonCode','reasonText','createdAt'];
+var AURA_EMAIL_EVENT_TYPES_ = ['SENT','FAILED','BOUNCE','SOFT_BOUNCE','DELIVERED','OPEN','CLICK','REPLY','UNSUBSCRIBE','SPAM_COMPLAINT'];
+function v6AuraEnsureEmailEvents_() {
+  var sheet=v6Sheet_('MKT_EMAIL_EVENTS');
+  if(!sheet) sheet=SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).insertSheet('MKT_EMAIL_EVENTS');
+  var headers=sheet.getLastRow()?sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0]:[];
+  AURA_EMAIL_EVENT_HEADERS_.forEach(function(h){if(headers.indexOf(h)<0)headers.push(h);});
+  sheet.getRange(1,1,1,headers.length).setValues([headers]);
+}
+function v6AuraEmailDate_(value) {
+  if(!value)return '';
+  var d=new Date(value);return isFinite(d.getTime())?d.toISOString():'';
+}
+// Admin-only reconciliation: materialize authoritative queue/response evidence without
+// inferring delivery, opens or clicks. The report also reads these sources directly.
+function v6AuraReconcileEmailEvents_() {
+  var queue=v6Rows_('MKT_EMAIL_QUEUE');
+  queue.forEach(function(q){
+    if(!q.jobId||!/^(SENT|FAILED)$/.test(q.status))return;
+    var event={eventId:'QUEUE:'+q.jobId+':'+q.status,jobId:q.jobId,campaignId:q.campaignId,accountId:q.accountId,contactId:q.contactId,email:q.email,eventType:q.status,occurredAt:v6AuraEmailDate_(q.processedAt),source:'MKT_EMAIL_QUEUE',externalId:q.jobId,reasonCode:q.status==='FAILED'?'SEND_FAILED':'',reasonText:q.error||'',createdAt:new Date().toISOString()};
+    if(!v6Rows_('MKT_EMAIL_EVENTS').some(function(e){return e.eventId===event.eventId;}))v6UpsertByKey_('MKT_EMAIL_EVENTS',['eventId'],event);
+  });
+  v6Rows_('MKT_RESPONSES').forEach(function(r){
+    if(!/^(REPLY|CUSTOMER_REPLIED)$/.test(String(r.eventType||r.responseType).toUpperCase())||!r.responseId)return;
+    var jobs=queue.filter(function(q){return q.status==='SENT'&&v6AuraEmailDate_(q.processedAt||q.sentAt)&&v6AuraEmailDate_(q.processedAt||q.sentAt)<=v6AuraEmailDate_(r.responseAt)&&q.campaignId===r.campaignId&&((r.contactId&&r.contactId===q.contactId)||(r.email&&String(r.email).toLowerCase()===String(q.email).toLowerCase()));});
+    if(jobs.length!==1)return;
+    var q=jobs[0],eventId='REPLY:'+r.responseId;
+    if(!v6Rows_('MKT_EMAIL_EVENTS').some(function(e){return e.eventId===eventId;}))v6UpsertByKey_('MKT_EMAIL_EVENTS',['eventId'],{eventId:eventId,jobId:q.jobId,campaignId:q.campaignId,accountId:q.accountId,contactId:q.contactId,email:q.email,eventType:'REPLY',occurredAt:v6AuraEmailDate_(r.responseAt),source:'MKT_RESPONSES',externalId:r.externalMessageId||r.responseId,createdAt:new Date().toISOString()});
+  });
+}
+function v6AuraEmailPerformance_() {
+  var events=v6Rows_('MKT_EMAIL_EVENTS'),responses=v6Rows_('MKT_RESPONSES'),queue=v6Rows_('MKT_EMAIL_QUEUE');
+  var campaigns=v6Rows_('MKT_CAMPAIGNS'),contacts=v6Rows_('MKT_CONTACTS_SECURE'),accounts=v6Rows_('MKT_ACCOUNTS');
+  function find(list,key,value){return list.filter(function(r){return value&&String(r[key])===String(value);})[0]||{};}
+  // Tracking availability requires a real event with explicit source provenance.
+  var tracking={opened:events.some(function(e){return e.eventType==='OPEN'&&e.source&&v6AuraEmailDate_(e.occurredAt);})?'TRACKED':'NOT_TRACKED',clicked:events.some(function(e){return e.eventType==='CLICK'&&e.source&&v6AuraEmailDate_(e.occurredAt);})?'TRACKED':'NOT_TRACKED'};
+  var rows=queue.map(function(q){
+    var c=find(campaigns,'campaignId',q.campaignId),ct=find(contacts,'contactId',q.contactId),a=find(accounts,'accountId',q.accountId);
+    var ev=events.filter(function(e){return e.jobId&&e.jobId===q.jobId;});
+    function at(type){return ev.filter(function(e){return e.eventType===type&&e.source;}).map(function(e){return v6AuraEmailDate_(e.occurredAt);}).filter(Boolean).sort()[0]||'';}
+    var replies=responses.filter(function(r){return r.campaignId===q.campaignId&&((r.contactId&&r.contactId===q.contactId)||(r.email&&String(r.email).toLowerCase()===String(q.email).toLowerCase()))&&/^(REPLY|CUSTOMER_REPLIED)$/.test(String(r.eventType||r.responseType).toUpperCase());});
+    replies=replies.filter(function(r){
+      if(r.jobId)return r.jobId===q.jobId;
+      var prior=queue.filter(function(j){return j.status==='SENT'&&j.campaignId===r.campaignId&&((r.contactId&&r.contactId===j.contactId)||(r.email&&String(r.email).toLowerCase()===String(j.email).toLowerCase()))&&v6AuraEmailDate_(j.processedAt||j.sentAt)&&v6AuraEmailDate_(j.processedAt||j.sentAt)<=v6AuraEmailDate_(r.responseAt||r.occurredAt);});
+      return prior.length===1&&prior[0].jobId===q.jobId;
+    });
+    var replyAt=at('REPLY')||replies.map(function(r){return v6AuraEmailDate_(r.responseAt||r.occurredAt);}).filter(Boolean).sort()[0]||'';
+    var bounce=ev.filter(function(e){return /^(BOUNCE|SOFT_BOUNCE)$/.test(e.eventType);}).sort(function(x,y){return String(y.occurredAt).localeCompare(String(x.occurredAt));})[0]||{};
+    return {jobId:q.jobId,accountId:q.accountId,contactId:q.contactId,company:q.company||a.accountName||'',contactName:q.contactName||[q.firstName||ct.firstName,ct.lastName].filter(Boolean).join(' '),email:q.email||'',campaignId:q.campaignId||'',campaignFamily:q.campaignFamily||c.campaignFamily||c.campaignType||'',service:q.service||c.service||'',language:q.preferredLanguage||q.language||'',amOwner:q.amOwner||a.amOwner||'',sendStatus:q.status||'UNKNOWN',sentAt:at('SENT')||(q.status==='SENT'?v6AuraEmailDate_(q.sentAt||q.processedAt):''),failedAt:at('FAILED')||(q.status==='FAILED'?v6AuraEmailDate_(q.failedAt||q.processedAt):''),bounceStatus:bounce.eventType||'',bounceReason:bounce.reasonCode||'',replied:!!replyAt,replyAt:replyAt,opened:tracking.opened==='NOT_TRACKED'?null:!!at('OPEN'),openAt:at('OPEN'),clicked:tracking.clicked==='NOT_TRACKED'?null:!!at('CLICK'),clickAt:at('CLICK')};
+  });
+  var summary={sent:0,failed:0,bounced:0,replied:0,opened:tracking.opened==='NOT_TRACKED'?null:0,clicked:tracking.clicked==='NOT_TRACKED'?null:0};
+  rows.forEach(function(r){if(r.sentAt||r.sendStatus==='SENT')summary.sent++;if(r.failedAt||r.sendStatus==='FAILED')summary.failed++;if(r.bounceStatus)summary.bounced++;if(r.replied)summary.replied++;if(r.opened)summary.opened++;if(r.clicked)summary.clicked++;});
+  return {summary:summary,rows:rows,tracking:tracking};
+}
+// Parse each RFC 3464 recipient block independently. Unattributed/ambiguous DSNs are
+// skipped rather than assigned to the latest campaign for an email address.
+function v6AuraParseDsn_(raw) {
+  if(!/delivery-status|Delivery Status Notification|Undelivered Mail/i.test(raw))return [];
+  return String(raw).split(/(?=Final-Recipient:)/i).slice(1).map(function(block){
+    var email=(block.match(/^Final-Recipient:\s*rfc822;\s*([^\s<>;]+)/im)||[])[1];
+    var status=(block.match(/^Status:\s*([245]\.\d+\.\d+)/im)||[])[1]||'';
+    var diagnostic=(block.match(/^Diagnostic-Code:[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*/im)||[])[0]||'';
+    if(!email||!status)return null;
+    var hard=status==='5.1.1'||/550\s+5\.1\.1/.test(diagnostic),blocked=status==='5.4.1'||/550\s+5\.4\.1/.test(diagnostic);
+    if(!hard&&!blocked&&status.charAt(0)!=='4')return null;
+    return {email:email.toLowerCase(),eventType:status.charAt(0)==='4'?'SOFT_BOUNCE':'BOUNCE',reasonCode:hard?'HARD_BOUNCE':blocked?'BLOCKED':'TEMPORARY',reasonText:diagnostic.slice(0,1000)};
+  }).filter(Boolean);
+}
+function v6AuraIngestDsnMessage_(message) {
+  var parsed=v6AuraParseDsn_(message.getRawContent()),queue=v6Rows_('MKT_EMAIL_QUEUE'),count=0;
+  var when=v6AuraEmailDate_(message.getDate()),id=message.getId();
+  parsed.forEach(function(d){
+    var matches=queue.filter(function(q){return String(q.email||'').toLowerCase()===d.email&&q.status==='SENT'&&v6AuraEmailDate_(q.processedAt||q.sentAt)<=when;});
+    if(matches.length!==1)return;
+    var q=matches[0],eventId='DSN:'+id+':'+q.jobId;
+    if(v6Rows_('MKT_EMAIL_EVENTS').some(function(e){return e.eventId===eventId;}))return;
+    var event=Object.assign({},d,{eventId:eventId,jobId:q.jobId,campaignId:q.campaignId,accountId:q.accountId,contactId:q.contactId,occurredAt:when,source:'GMAIL_DSN',externalId:id,createdAt:new Date().toISOString()});
+    // Apply safety before recording completion: a retry after a partial failure is safe.
+    if(d.reasonCode==='HARD_BOUNCE'&&q.contactId){
+      v6ClassifyResponseEvent_(event);
+      v6UpsertByKey_('MKT_EXCLUSIONS',['exclusionId'],{exclusionId:'HARD_BOUNCE:'+q.contactId,accountId:q.accountId,contactId:q.contactId,status:'ACTIVE',active:true,reasonCode:'HARD_BOUNCE',expiresAt:'',updatedAt:when});
+    }
+    else if(d.eventType==='SOFT_BOUNCE')v6ClassifyResponseEvent_(event);
+    v6UpsertByKey_('MKT_EMAIL_EVENTS',['eventId'],event);count++;
+  });return count;
+}
+function v6AuraIngestGmailDsn_(options) {
+  var lock=LockService.getScriptLock();lock.waitLock(30000);
+  try {
+    v6AuraEnsureEmailEvents_();
+    v6AuraReconcileEmailEvents_();
+    var start=Math.max(0,Math.floor(Number((options||{}).start)||0)),count=0;
+    var threads=GmailApp.search('in:anywhere newer_than:90d {subject:"Delivery Status Notification" subject:"Undelivered Mail" from:mailer-daemon}',start,50);
+    threads.forEach(function(t){t.getMessages().forEach(function(m){count+=v6AuraIngestDsnMessage_(m);});});
+    return {ingested:count,nextStart:threads.length===50?start+50:null};
+  } finally {lock.releaseLock();}
+}

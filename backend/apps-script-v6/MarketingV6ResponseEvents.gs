@@ -65,6 +65,8 @@ function v6ClassifyResponseEvent_(rawEvent){
     if(e.amount!=null&&e.amount!=='')loadPayload.attributedRevenue=Number(e.amount);
     result=v6UpsertPipelineStage_(loadPayload);
     action='PIPELINE_UPDATED';
+  }else if(eventType==='BOUNCE'&&e.reasonCode==='BLOCKED'){
+    action='BLOCKED_NO_RETRY';
   }else if(eventType==='BOUNCE'){
     result=v6MarkContactEmailInvalid_({contactId:e.contactId,email:e.email});
     action='CONTACT_MARKED_INVALID';
