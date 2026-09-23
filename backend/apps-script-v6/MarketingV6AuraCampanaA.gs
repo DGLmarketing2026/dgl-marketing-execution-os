@@ -1134,7 +1134,13 @@ function v6AuraCampanaAAudit_() {
   // CONTACTS_SECURE = already known in MKT_CONTACTS_SECURE, not listed with an email on this tab.
   var byRecipientSource = { MERGED: 0, CAMPANA_A_SOURCE: 0, CONTACTS_SECURE: 0 };
   jobs.forEach(function (j) { var s = v6AuraEmailText_(j.recipientSource) || 'UNKNOWN'; byRecipientSource[s] = (byRecipientSource[s] || 0) + 1; });
+  var historicalSent=jobs.filter(function(j){return j.status==='SENT';});
+  var currentCampaign=v6Rows_('MKT_CAMPAIGNS').filter(function(c){return c.campaignId===CAMPANA_A_CAMPAIGN_ID_;})[0]||{};
   return Object.assign({}, base, {
+    currentCanonicalFamily:currentCampaign.campaignType||currentCampaign.objective||'',
+    historicalSentFamilies:Array.from(new Set(historicalSent.map(function(j){return j.playbookId||j.campaignFamily||'UNKNOWN';}))),
+    historicalSentRecipientJobs:historicalSent.length,
+    historicalUniqueAccounts:new Set(historicalSent.map(function(j){return j.accountId;}).filter(Boolean)).size,
     campaignId: CAMPANA_A_CAMPAIGN_ID_, jobsForCampaignA: jobs.length,
     sourceStatus: sourceEmpty ? 'SOURCE_EMPTY_OR_NOT_FOUND' : 'SOURCE_OK', sourceAccountCount: sourceAccountCount,
     byLanguage: byLanguage, byLanguageSource: byLanguageSource, byStatusForCampaignA: byStatus, byRecipientSource: byRecipientSource,

@@ -215,6 +215,9 @@ function gmailOpp(accountId, accountName, amOwner, sheetName) {
   assert.equal(build.built, 2, 'both contacts of the same account must each get their own job');
   var jobs = tables.MKT_EMAIL_QUEUE.filter(function (j) { return j.accountId === 'ACC-1'; });
   assert.equal(jobs.length, 2);
+  assert(jobs.every(j=>j.playbookId==='Activation'), 'future jobs must stay Activation');
+  assert.equal(tables.MKT_CAMPAIGNS[0].campaignType, 'Activation');
+  assert.equal(tables.MKT_CAMPAIGNS[0].objective, 'Activation');
   assert.notEqual(jobs[0].contactId, jobs[1].contactId);
   console.log('campana-a test 3 (multiple eligible contacts of the same account are never collapsed to one job): PASS');
 })();
@@ -1213,3 +1216,9 @@ function campanaASheetValuesWithContacts(dataRows) {
 })();
 
 console.log('V6 AURA Campana A (dedicated tab, per-contact language, name reliability): ALL PASS');
+
+(function historicalFamilyAuditTest(){
+ const ctx=makeContext({tables:{MKT_CAMPAIGNS:[{campaignId:'CMP-CAMPANA-A-HA-PRIORITARIA',campaignType:'Activation'}],MKT_EMAIL_QUEUE:[{jobId:'historical',campaignId:'CMP-CAMPANA-A-HA-PRIORITARIA',accountId:'A',email:'old@example.com',status:'SENT',playbookId:'Retention'}]}});
+ const audit=ctx.v6AuraCampanaAAudit_();assert.equal(audit.currentCanonicalFamily,'Activation');assert.deepEqual(Array.from(audit.historicalSentFamilies),['Retention']);assert.equal(audit.historicalSentRecipientJobs,1);assert.equal(audit.historicalUniqueAccounts,1);
+ console.log('PASS separate current canonical and historical sent family audit');
+})();
