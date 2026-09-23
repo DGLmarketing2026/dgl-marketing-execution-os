@@ -56,7 +56,18 @@ function handleMarketingV55Api_(e, method) {
 // and must never be a second way to trigger a real send.
 'v6AuraRetentionDashboard', 'v6AuraCampanaAAudit', 'v6AuraCampanaAMatchReport',
 'v6AuraCampanaAStoppedBreakdown', 'v6AuraExecutionReport', 'v6AuraAutomaticReportStatus',
-'v6AuraCampanaALatestRunSummary'
+'v6AuraCampanaALatestRunSummary',
+// Iniciativa 2 -- Campaign Studio's own Approve Creative action (MarketingV6AuraCreativeApproval.gs).
+// This persists CONTENT Marketing already designed and is about to display back to itself in the
+// same Studio -- exactly the same "Marketing executes HOW" category as v55CreateCampaign/
+// v55RecordApproval above, never a send. It writes MKT_CAMPAIGN_CREATIVES only; it never writes a
+// queue row and never calls GmailApp -- still excluded, same as before, are every AURA function
+// that writes queue rows or could ever send a real email.
+'v6AuraApproveCreative', 'v6AuraLatestApprovedCreative',
+// PR #3 audit remediation -- editing an approved creative must revoke the BACKEND record, not
+// only local browser state. Writes MKT_CAMPAIGN_CREATIVES only (flips status to REVOKED on the
+// exact row that was edited); never writes a queue row and never calls GmailApp.
+'v6AuraRevokeCreativeApproval'
 ];
   
   if (allowed.indexOf(action) === -1) return null;
@@ -97,10 +108,22 @@ case 'v6ResolveRecipients':
 case 'v6AudienceStatus':
 case 'v55ResolveRecipients':
 case 'v55AudienceStatus':
+case 'v6AuraApproveCreative':
+case 'v6AuraLatestApprovedCreative':
+case 'v6AuraRevokeCreativeApproval':
   result = routeMarketingV6_(action, req);
   break;
     case 'v55CreateTestDraft':
-  result = createMarketingV55TestDraft_(req);
+  // PR #3 audit punto 9 -- createMarketingV55TestDraft_ is not defined anywhere in this
+  // repository (confirmed by grep across the whole backend/ tree); the real, verified,
+  // in-repo implementation lives in MarketingV6AuraCreativeApproval.gs. It creates the real
+  // Gmail draft itself and reads it back for a genuine end-to-end comparison -- see that
+  // file's doc comment. On success it also writes the same MKT_ACTIVITY row
+  // (actionType TEST_DRAFT_CREATED) the frontend's createTestDraft() polling already expects;
+  // on any thrown error the existing catch-all below writes the matching API_ERROR row, same
+  // as for every other action.
+  result = v6AuraVerifyAndCreateTestDraft_(req);
+  mktV55Audit_('TEST_DRAFT_CREATED', req, 'COMPLETED', result);
   break;
       case 'v55Health':
         result = {ok:true,service:'DGL Marketing OS V5.5 Private Backend',version:'5.5',mode:'PRIVATE_BACKEND',claudeConnected:false,hubId:MKT_V55.HUB_ID};

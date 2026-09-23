@@ -14,6 +14,7 @@ const archiveSource=src('MarketingV6DriveArchive.gs');
 const reportSource=src('MarketingV6RetentionReport.gs');
 const contactIngestionSource=src('MarketingV6ContactIngestion.gs');
 const runLogSource=src('MarketingV6AuraRunLog.gs');
+const creativeApprovalSource=src('MarketingV6AuraCreativeApproval.gs');
 const bootstrapSource=src('MarketingV6AuraBootstrap.gs');
 const routerSource=src('MarketingV6RouterExtension.gs');
 
@@ -199,7 +200,7 @@ function makeContext(opts){
     Date:Date,String:String,Array:Array,Object:Object,Number:Number,RegExp:RegExp,isNaN:isNaN,console:console,JSON:JSON,Math:Math,Error:Error
   };
   vm.createContext(ctx);
-  [opportunityEngineSource,schemaMigrationSource,frequencySource,ingestionSource,recipientSource,freshnessSource,canonicalIdentitySource,bridgeSource,archiveSource,reportSource,contactIngestionSource,runLogSource,bootstrapSource].forEach(function(source,i){
+  [opportunityEngineSource,schemaMigrationSource,frequencySource,ingestionSource,recipientSource,freshnessSource,canonicalIdentitySource,bridgeSource,archiveSource,reportSource,contactIngestionSource,runLogSource,creativeApprovalSource,bootstrapSource].forEach(function(source,i){
     vm.runInContext(source,ctx,{filename:'src-'+i+'.gs'});
   });
   ctx.__sheets=sheets;ctx.__drive=driveState;ctx.__props=props;ctx.__script=scriptState;

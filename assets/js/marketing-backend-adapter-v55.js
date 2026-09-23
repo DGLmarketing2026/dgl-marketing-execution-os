@@ -267,7 +267,17 @@
     v6AuraCampanaAMatchReport:()=>mutate("v6AuraCampanaAMatchReport",{},false),
     v6AuraCampanaAStoppedBreakdown:()=>mutate("v6AuraCampanaAStoppedBreakdown",{},false),
     v6AuraAutomaticReportStatus:()=>mutate("v6AuraAutomaticReportStatus",{},false),
-    v6AuraCampanaALatestRunSummary:()=>mutate("v6AuraCampanaALatestRunSummary",{},false)
+    v6AuraCampanaALatestRunSummary:()=>mutate("v6AuraCampanaALatestRunSummary",{},false),
+    // Iniciativa 2 -- Campaign Studio como unica fuente canonica del email. approveCreative
+    // persists the FULL approved creative (never just a status flag); getLatestApprovedCreative
+    // reads it back for a post-approval invalidation check or a Test Draft comparison. Neither
+    // writes a queue row nor sends anything -- still no second way to trigger a real send.
+    approveCreative:(campaignId,creative)=>mutate("v6AuraApproveCreative",{campaignId,...(creative||{})},false),
+    getLatestApprovedCreative:campaignId=>mutate("v6AuraLatestApprovedCreative",{campaignId},false),
+    // PR #3 audit punto 4 -- editing an approved creative must revoke the BACKEND record, not
+    // only local UI state. Called by campaign-studio-v5.js's invalidateApproval() helper on
+    // every content change after an approval, before local state is reset.
+    revokeApprovedCreative:(creativeId,revokedBy)=>mutate("v6AuraRevokeCreativeApproval",{creativeId,revokedBy},false)
   };
   Object.defineProperty(adapter,"mode",{enumerable:true,get:()=>state===STATES.PRIVATE_BACKEND?"PRIVATE_BACKEND":"LOCAL_DEMO"});
   global.DGL_MARKETING_BACKEND_ADAPTER_V55=adapter;

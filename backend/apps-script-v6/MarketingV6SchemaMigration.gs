@@ -42,11 +42,39 @@ var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
   // records whether this recipient came from the Campana A tab directly (and was never
   // gated on already existing in MKT_CONTACTS_SECURE), from MKT_CONTACTS_SECURE alone, or both
   // (deterministic merge by exact account+email match). See MarketingV6AuraCampanaA.gs.
-  MKT_EMAIL_QUEUE:['jobId','campaignId','audienceId','accountId','contactId','email','firstName','company','service','subject','htmlBody','replyTo','status','gmailDraftId','createdAt','processedAt','error','requestId','amOwner','playbookId','sequenceStep','scheduledAt','approvalId','approvedAt','approvedBy','stopOnResponse','country','preferredLanguage','languageSource','languageReason','stopReasonStage','stopReasonAt','stopReasonCampaignId','stopOverrideApplied','stopOverrideReason','recipientSource'],
+  // creativeId/creativeVersion/creativeApprovalId/htmlChecksum/recipientRenderedChecksum added
+  // for Iniciativa 2 (Campaign Studio como unica fuente canonica del email --
+  // MarketingV6AuraCreativeApproval.gs). Additive only, every existing reader of this table is
+  // unaffected. creativeApprovalId is intentionally a DIFFERENT field from the existing
+  // approvalId column above -- approvalId already has an established, different meaning (a
+  // POLICY-level family-approval gate consumed by v6AuraEmailQueueAudit_'s
+  // APPROVAL_RECORDED_BUT_NOT_ENFORCED/APPROVAL_BYPASSED checks); creativeApprovalId is the
+  // reference to the specific approved MKT_CAMPAIGN_CREATIVES row this job's content came from.
+  // htmlChecksum mirrors that creative's own htmlChecksum (the pre-personalization "approved
+  // template" checksum); recipientRenderedChecksum is the checksum of the actual, personalized
+  // job.htmlBody -- the two checksum levels Iniciativa 2 punto 4 requires.
+  // recipientContentChecksum added (PR #3 audit round 2, punto 1): recipientRenderedChecksum
+  // above only ever covers htmlBody, so a job whose SUBJECT alone drifted after queueing would
+  // pass every existing dispatch-time check. This is checksum(subject+htmlBody) on the same
+  // already-personalized strings, required (not optional) at dispatch -- see
+  // v6AuraJobContentChecksum_ / v6AuraValidateQueuedCreative_ in MarketingV6AuraCreativeApproval.gs.
+  MKT_EMAIL_QUEUE:['jobId','campaignId','audienceId','accountId','contactId','email','firstName','company','service','subject','htmlBody','replyTo','status','gmailDraftId','createdAt','processedAt','error','requestId','amOwner','playbookId','sequenceStep','scheduledAt','approvalId','approvedAt','approvedBy','stopOnResponse','country','preferredLanguage','languageSource','languageReason','stopReasonStage','stopReasonAt','stopReasonCampaignId','stopOverrideApplied','stopOverrideReason','recipientSource','creativeId','creativeVersion','creativeApprovalId','htmlChecksum','recipientRenderedChecksum','recipientContentChecksum'],
   // Pre-existing legacy table (MarketingDataHub.gs); listed here only so
   // v6RequireContactRecipientHeaders_/v6EnsureContactRecipientSchema_ can validate it before
   // the dispatcher logs a real send touch into it -- no column added or changed.
-  MKT_TOUCHES:['touchId','campaignId','audienceId','accountId','contactId','channel','eventType','eventAt','externalId','metadata']
+  MKT_TOUCHES:['touchId','campaignId','audienceId','accountId','contactId','channel','eventType','eventAt','externalId','metadata'],
+  // Brand-new, AURA-owned table (Iniciativa 2 -- MarketingV6AuraCreativeApproval.gs). No
+  // historical data at risk (see v6AuraEnsureCampaignCreativesSheet_ there), same auto-create
+  // justification as MKT_RETENTION_RUN_SUMMARY/MKT_AURA_RUN_LOG below. Every row here is
+  // immutable once written -- an approval never overwrites a prior creativeId, it only adds a
+  // new row with the next creativeVersion for that campaignId.
+  // status/contentChecksum/revokedAt/revokedBy added for the PR #3 audit remediation
+  // (MarketingV6AuraCreativeApproval.gs): status is APPROVED until an edit in Campaign Studio
+  // revokes this exact row server-side (never only a local UI flag); contentChecksum is the
+  // canonical checksum over subject+htmlBody+textBody+templateId+creativeVersion (catches
+  // subject-only drift, which htmlChecksum alone -- htmlBody only -- cannot). Additive only,
+  // every existing reader of this table is unaffected.
+  MKT_CAMPAIGN_CREATIVES:['creativeId','campaignId','templateId','creativeVersion','subject','preheader','htmlBody','textBody','heroUrl','logoUrl','language','approvedAt','approvedBy','approvalId','htmlChecksum','createdAt','status','contentChecksum','revokedAt','revokedBy']
 };
 // The one table in MKT_V6_CONTACT_RECIPIENT_SCHEMA that is safe to auto-create end to end
 // (tab + header row), because it is a brand-new, AURA-owned reporting table with no historical

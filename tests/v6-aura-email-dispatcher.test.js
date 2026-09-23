@@ -3,6 +3,7 @@ const root = path.resolve(__dirname, '..');
 const src = name => fs.readFileSync(path.join(root, 'backend/apps-script-v6', name), 'utf8');
 const copyEngineSource = src('MarketingV6AuraCopyEngine.gs');
 const dispatcherSource = src('MarketingV6AuraEmailDispatcher.gs');
+const creativeApprovalSource = src('MarketingV6AuraCreativeApproval.gs');
 
 function fakePropertiesService(store) {
   store = store || {};
@@ -32,7 +33,7 @@ function makeContext(opts) {
   var sentEmails = [];
   var touchCalls = [];
   var ctx = {
-    String: String, Number: Number, Object: Object, Array: Array, Error: Error, Date: Date, JSON: JSON,
+    String: String, Number: Number, Object: Object, Array: Array, Error: Error, Date: Date, JSON: JSON, RegExp: RegExp,
     PropertiesService: fakePropertiesService(props),
     ScriptApp: fakeScriptApp(scriptState),
     GmailApp: { sendEmail: function (to, subject, text, options) { sentEmails.push({ to: to, subject: subject, text: text, options: options }); } },
@@ -41,6 +42,7 @@ function makeContext(opts) {
   vm.createContext(ctx);
   vm.runInContext(copyEngineSource, ctx, { filename: 'MarketingV6AuraCopyEngine.gs' });
   vm.runInContext(dispatcherSource, ctx, { filename: 'MarketingV6AuraEmailDispatcher.gs' });
+  vm.runInContext(creativeApprovalSource, ctx, { filename: 'MarketingV6AuraCreativeApproval.gs' });
 
   ctx.v6AuraText_ = function (v) { return String(v == null ? '' : v).trim(); };
   ctx.v6AuraNow_ = function () { return new Date().toISOString(); };
@@ -52,6 +54,11 @@ function makeContext(opts) {
     return record;
   };
   ctx.v6EnsureContactRecipientSchema_ = function () { return { status: 'SCHEMA READY' }; };
+  // MarketingV6AuraCreativeApproval.gs's own ensure function opens a real SpreadsheetApp -- this
+  // test isolates queue-build/dispatch behavior against MKT_CAMPAIGN_CREATIVES via v6Rows_/
+  // v6UpsertByKey_ exactly like every other table, so the real sheet-creation call is stubbed
+  // out the same way v6EnsureContactRecipientSchema_ is above.
+  ctx.v6AuraEnsureCampaignCreativesSheet_ = function () { return { status: 'ALREADY_EXISTS' }; };
   ctx.v6AuraDeriveExecutionId_ = function (campaignId) { return 'EXEC-' + String(campaignId || '').replace(/^CMP-/, ''); };
   ctx.v6AuraPolicyApproved_ = opts.policyApproved === false ? function () { return false; } : function () { return true; };
   ctx.v6FrequencyStatus_ = opts.frequencyStatus || function () { return { eligible: true, status: 'CLEAR' }; };
@@ -85,13 +92,50 @@ function eligibleAudienceRow(over) {
   return Object.assign({ audienceRecipientId: 'AUD:CMP-RET-1:CON-1', recordType: 'RECIPIENT', campaignId: 'CMP-RET-1', scopeId: 'SCOPE-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', eligibilityStatus: 'ELIGIBLE' }, over || {});
 }
 
-// 1. Building the queue for an eligible recipient produces exactly one real, personalized
-// PENDING job (subject/htmlBody carry the real firstName/company, not the generic sample).
+// Iniciativa 2 test helpers -- a real, checksum-consistent approved creative and a real,
+// checksum-consistent queued job derived from it, built via the loaded module's OWN
+// v6AuraChecksum_ (never a duplicated/hand-rolled checksum in test code, so these fixtures can
+// never silently drift from the real algorithm).
+function makeApprovedCreative(ctx, over) {
+  var rec = Object.assign({
+    creativeId: 'CMP-RET-1:CREATIVE:1', campaignId: 'CMP-RET-1', templateId: 'editorial',
+    creativeVersion: 1, subject: '{{firstName}}, seguimos cerca de {{company}}', preheader: 'Preheader',
+    htmlBody: '<p>Hola {{firstName}} de {{company}} ({{service}})</p><a href="mailto:info@dglus.com?subject=RE">ENVIAR MOVIMIENTO</a> DGL Freight Broker',
+    textBody: 'Hola {{firstName}}', heroUrl: '', logoUrl: '', language: 'Spanish',
+    approvedAt: new Date().toISOString(), approvedBy: 'Marketing', approvalId: 'CAPR:CMP-RET-1:1',
+    createdAt: new Date().toISOString()
+  }, over || {});
+  rec.htmlChecksum = ctx.v6AuraChecksum_(rec.htmlBody);
+  return rec;
+}
+function jobFromCreative(ctx, creative, over) {
+  var job = Object.assign({
+    jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: creative.campaignId, accountId: 'ACC-1', contactId: 'CON-1',
+    email: 'contact@shipperco.com', subject: 'x', htmlBody: creative.htmlBody, replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1,
+    creativeId: creative.creativeId, creativeVersion: creative.creativeVersion, creativeApprovalId: creative.approvalId,
+    htmlChecksum: creative.htmlChecksum
+  }, over || {});
+  job.recipientRenderedChecksum = ctx.v6AuraChecksum_(job.htmlBody);
+  // PR #3 audit round 2, punto 1 -- required alongside recipientRenderedChecksum; a job built
+  // through this helper without it would be treated as failing the dispatch-time content-drift
+  // check (missing == block), which is correct for a real queue job but not what most of these
+  // tests are exercising, so every real job fixture here carries it.
+  if (job.recipientContentChecksum === undefined) job.recipientContentChecksum = ctx.v6AuraJobContentChecksum_(job.subject, job.htmlBody);
+  return job;
+}
+
+// 1. Building the queue for an eligible recipient, with a valid approved creative on file,
+// produces exactly one real, personalized PENDING job (subject/htmlBody carry the real
+// firstName/company, not the generic sample) -- sourced from the APPROVED CREATIVE, never from
+// v6AuraEmailHtml_() (Iniciativa 2 punto 3).
 (function buildsRealPersonalizedPendingJobTest() {
   var tables = { MKT_AUDIENCES: [eligibleAudienceRow()], MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }], MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria' }] };
   var ctx = makeContext({ tables: tables });
+  var creative = makeApprovedCreative(ctx, {});
+  tables.MKT_CAMPAIGN_CREATIVES = [creative];
   var result = ctx.v6AuraBuildEmailQueueForCampaign_(campaign());
   assert.equal(result.built, 1);
+  assert(!result.blockedCreative);
   var job = tables.MKT_EMAIL_QUEUE[0];
   assert.equal(job.status, 'PENDING');
   assert.equal(job.firstName, 'Maria');
@@ -100,7 +144,12 @@ function eligibleAudienceRow(over) {
   assert(job.htmlBody.indexOf('Shipper Co') >= 0, 'htmlBody must be merged with the real company name');
   assert(job.htmlBody.indexOf('{{') < 0, 'no unmerged {{token}} may reach a real job');
   assert.equal(job.stopOnResponse, true);
-  console.log('dispatcher test 1 (build produces a real personalized PENDING job): PASS');
+  assert.equal(job.creativeId, creative.creativeId, 'the job must record exactly which approved creative produced it');
+  assert.equal(job.creativeVersion, 1);
+  assert.equal(job.creativeApprovalId, creative.approvalId);
+  assert.equal(job.htmlChecksum, creative.htmlChecksum, 'the job must carry the approved template checksum');
+  assert.equal(job.recipientRenderedChecksum, ctx.v6AuraChecksum_(job.htmlBody), 'the job must carry the checksum of its own personalized htmlBody');
+  console.log('dispatcher test 1 (build produces a real personalized PENDING job from the approved creative): PASS');
 })();
 
 // 2. A non-ELIGIBLE audience row (SUPPRESSED/REVIEW-required at the recipient-resolution layer)
@@ -119,6 +168,7 @@ function eligibleAudienceRow(over) {
 (function buildIsIdempotentTest() {
   var tables = { MKT_AUDIENCES: [eligibleAudienceRow()], MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }], MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria' }] };
   var ctx = makeContext({ tables: tables });
+  tables.MKT_CAMPAIGN_CREATIVES = [makeApprovedCreative(ctx, {})];
   ctx.v6AuraBuildEmailQueueForCampaign_(campaign());
   tables.MKT_EMAIL_QUEUE[0].status = 'SENT'; // simulate the dispatcher having already sent it
   var second = ctx.v6AuraBuildEmailQueueForCampaign_(campaign());
@@ -134,6 +184,7 @@ function eligibleAudienceRow(over) {
 (function policyNotApprovedQueuesReviewRequiredTest() {
   var tables = { MKT_AUDIENCES: [eligibleAudienceRow()], MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }], MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria' }] };
   var ctx = makeContext({ tables: tables, policyApproved: false });
+  tables.MKT_CAMPAIGN_CREATIVES = [makeApprovedCreative(ctx, {})];
   ctx.v6AuraBuildEmailQueueForCampaign_(campaign());
   var job = tables.MKT_EMAIL_QUEUE[0];
   assert.equal(job.status, 'REVIEW_REQUIRED');
@@ -144,21 +195,27 @@ function eligibleAudienceRow(over) {
 // 5. DRY_RUN (the default with AURA_SEND_MODE unset) processes every gate but never calls
 // GmailApp.sendEmail -- job lands on status DRY_RUN, not SENT.
 (function dryRunNeverSendsTest() {
-  var tables = { MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'Hi Maria', htmlBody: '<p>Hi Maria</p>', replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1 }] };
+  var ctx0 = makeContext({});
+  var creative = makeApprovedCreative(ctx0, {});
+  var tables = { MKT_CAMPAIGN_CREATIVES: [creative], MKT_EMAIL_QUEUE: [jobFromCreative(ctx0, creative, {})] };
   var ctx = makeContext({ tables: tables });
   assert.equal(ctx.v6AuraSendMode_(), 'DRY_RUN', 'default send mode must be DRY_RUN when the property is unset');
   var out = ctx.auraProcessEmailQueue();
   assert.equal(out.dryRun, 1);
   assert.equal(out.sent, 0);
+  assert.equal(out.blockedCreative, 0);
   assert.equal(ctx.__sentEmails.length, 0, 'DRY_RUN must never call GmailApp.sendEmail');
   assert.equal(tables.MKT_EMAIL_QUEUE[0].status, 'DRY_RUN');
-  console.log('dispatcher test 5 (DRY_RUN validates everything but never sends): PASS');
+  console.log('dispatcher test 5 (DRY_RUN validates everything, including the creative-approval chain, but never sends): PASS');
 })();
 
 // 6. LIVE mode (only reachable via the explicit auraEnableLiveSending() switch) actually sends,
-// records the frequency-ledger touch and the MKT_TOUCHES row, and marks the job SENT.
+// records the frequency-ledger touch and the MKT_TOUCHES row, and marks the job SENT -- and the
+// exact bytes GmailApp receives are job.htmlBody verbatim (the dispatcher never re-renders).
 (function liveModeSendsAndRecordsTouchTest() {
-  var tables = { MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'Hi Maria', htmlBody: '<p>Hi Maria, Shipper Co</p>', replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1, playbookId: 'Retention' }] };
+  var ctx0 = makeContext({});
+  var creative = makeApprovedCreative(ctx0, {});
+  var tables = { MKT_CAMPAIGN_CREATIVES: [creative], MKT_EMAIL_QUEUE: [jobFromCreative(ctx0, creative, { playbookId: 'Retention' })] };
   var ctx = makeContext({ tables: tables });
   ctx.auraEnableLiveSending();
   assert.equal(ctx.v6AuraSendMode_(), 'LIVE');
@@ -167,18 +224,21 @@ function eligibleAudienceRow(over) {
   assert.equal(ctx.__sentEmails.length, 1);
   assert.equal(ctx.__sentEmails[0].to, 'contact@shipperco.com');
   assert.equal(ctx.__sentEmails[0].options.name, 'DGL');
+  assert.equal(ctx.__sentEmails[0].options.htmlBody, tables.MKT_EMAIL_QUEUE[0].htmlBody, 'the dispatcher must transport job.htmlBody exactly, never a re-render');
   assert.equal(tables.MKT_EMAIL_QUEUE[0].status, 'SENT');
   assert.equal(ctx.__touchCalls.length, 1, 'a real send must record a frequency-ledger touch');
   assert.equal((tables.MKT_TOUCHES || []).length, 1, 'a real send must log an MKT_TOUCHES row');
   ctx.auraDisableLiveSending();
   assert.equal(ctx.v6AuraSendMode_(), 'DRY_RUN', 'auraDisableLiveSending must switch back to DRY_RUN');
-  console.log('dispatcher test 6 (LIVE mode sends, records touch, and can be disabled again): PASS');
+  console.log('dispatcher test 6 (LIVE mode sends the exact queued HTML, records touch, and can be disabled again): PASS');
 })();
 
 // 7. An active MKT_EXCLUSIONS row suppresses the job at dispatch time even if it was queued
 // before the exclusion existed -- never sent.
 (function activeExclusionSuppressesAtDispatchTest() {
-  var tables = { MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1 }] };
+  var ctx0 = makeContext({});
+  var creative = makeApprovedCreative(ctx0, {});
+  var tables = { MKT_CAMPAIGN_CREATIVES: [creative], MKT_EMAIL_QUEUE: [jobFromCreative(ctx0, creative, {})] };
   var ctx = makeContext({ tables: tables, activeExclusion: function () { return { reasonCode: 'UNSUBSCRIBE' }; } });
   ctx.auraEnableLiveSending();
   var out = ctx.auraProcessEmailQueue();
@@ -192,8 +252,11 @@ function eligibleAudienceRow(over) {
 // 8. An account that already responded (MKT_ACCOUNT_PIPELINE currentStage RESPONDED) stops
 // automation for that account -- the job is marked STOPPED, never sent, regardless of mode.
 (function respondedAccountStopsAutomationTest() {
+  var ctx0 = makeContext({});
+  var creative = makeApprovedCreative(ctx0, {});
   var tables = {
-    MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1 }],
+    MKT_CAMPAIGN_CREATIVES: [creative],
+    MKT_EMAIL_QUEUE: [jobFromCreative(ctx0, creative, {})],
     MKT_ACCOUNT_PIPELINE: [{ accountId: 'ACC-1', currentStage: 'RESPONDED' }]
   };
   var ctx = makeContext({ tables: tables });
@@ -208,7 +271,9 @@ function eligibleAudienceRow(over) {
 // 9. Frequency cap blocks the send (SKIPPED), reusing v6FrequencyStatus_ verbatim -- no
 // duplicated frequency logic in this file.
 (function frequencyCapSkipsTest() {
-  var tables = { MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1 }] };
+  var ctx0 = makeContext({});
+  var creative = makeApprovedCreative(ctx0, {});
+  var tables = { MKT_CAMPAIGN_CREATIVES: [creative], MKT_EMAIL_QUEUE: [jobFromCreative(ctx0, creative, {})] };
   var ctx = makeContext({ tables: tables, frequencyStatus: function () { return { eligible: false, status: 'FREQUENCY CAP' }; } });
   ctx.auraEnableLiveSending();
   var out = ctx.auraProcessEmailQueue();
@@ -222,10 +287,13 @@ function eligibleAudienceRow(over) {
 // sequenceStep) already reached SENT, a second PENDING job for that exact combination is
 // never sent, even under LIVE mode.
 (function duplicateSentNeverDoubleSendsTest() {
+  var ctx0 = makeContext({});
+  var creative = makeApprovedCreative(ctx0, {});
   var tables = {
+    MKT_CAMPAIGN_CREATIVES: [creative],
     MKT_EMAIL_QUEUE: [
-      { jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', replyTo: 'am@dglus.com', status: 'SENT', sequenceStep: 1 },
-      { jobId: 'JOB:CMP-RET-1:CON-1:1:RETRY', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: 'x', replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1 }
+      jobFromCreative(ctx0, creative, { status: 'SENT' }),
+      jobFromCreative(ctx0, creative, { jobId: 'JOB:CMP-RET-1:CON-1:1:RETRY' })
     ]
   };
   var ctx = makeContext({ tables: tables });
@@ -251,7 +319,8 @@ function eligibleAudienceRow(over) {
 })();
 
 // 12. The pre-LIVE audit reports a clean bill of health for a genuinely well-formed job: no
-// findings, zero real sends detected, masked email in output.
+// findings, zero real sends detected, masked email in output, no internal classification label
+// visible either (Iniciativa 2 punto 8).
 (function auditCleanJobTest() {
   var tables = {
     MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-1:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'maria@shipperco.com', firstName: 'Maria', company: 'Shipper Co', service: 'FTL', subject: 'Maria, seguimos cerca de Shipper Co', htmlBody: '<p>Hola Maria de Shipper Co</p><a href="mailto:am@dglus.com?subject=RE%20Maria%2C%20seguimos%20cerca">ENVIAR MOVIMIENTO</a> DGL Freight Broker', replyTo: 'am@dglus.com', status: 'DRY_RUN', sequenceStep: 1, playbookId: 'Retention' }],
@@ -302,17 +371,17 @@ function eligibleAudienceRow(over) {
 
 // 14. With no Script Property configured, a freshly built job still resolves the canonical
 // fallback reply-to ('info@dglus.com', the same real DGL mailbox MarketingV6AuraGmailIngest.gs
-// already uses) and its CTA is a real, working mailto: link -- never empty, never href="#".
-(function buildResolvesCanonicalReplyToAndFunctionalCtaTest() {
+// already uses) -- independent of, and unaffected by, the Iniciativa 2 creative-approval gate.
+(function buildResolvesCanonicalReplyToTest() {
   var tables = { MKT_AUDIENCES: [eligibleAudienceRow()], MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }], MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria' }] };
   var ctx = makeContext({ tables: tables });
+  tables.MKT_CAMPAIGN_CREATIVES = [makeApprovedCreative(ctx, {})];
   ctx.v6AuraBuildEmailQueueForCampaign_(campaign());
   var job = tables.MKT_EMAIL_QUEUE[0];
   assert.equal(job.replyTo, 'info@dglus.com', 'with no Script Property set, the hardcoded canonical fallback must be used, never left empty');
   assert.equal(job.status, 'PENDING');
-  assert(/href="mailto:info@dglus\.com\?subject=/.test(job.htmlBody), 'the CTA must be a real mailto: link to the same canonical reply-to address');
-  assert(job.htmlBody.indexOf('href="#"') < 0, 'the CTA must never be a placeholder href="#"');
-  console.log('dispatcher test 14 (build resolves the canonical reply-to and a functional mailto CTA): PASS');
+  assert(/href="mailto:info@dglus\.com\?subject=/.test(job.htmlBody), 'the CTA in the approved creative fixture (a real mailto: link) must reach the job unchanged');
+  console.log('dispatcher test 14 (build resolves the canonical reply-to; approved-creative HTML reaches the job unchanged): PASS');
 })();
 
 // 15. If the configured reply-to Script Property is invalid (not a real email), the job is
@@ -321,6 +390,7 @@ function eligibleAudienceRow(over) {
 (function invalidConfiguredReplyToBlocksLiveTest() {
   var tables = { MKT_AUDIENCES: [eligibleAudienceRow()], MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }], MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria' }] };
   var ctx = makeContext({ tables: tables, props: { AURA_GMAIL_SOURCE_MAILBOX: 'not-an-email' } });
+  tables.MKT_CAMPAIGN_CREATIVES = [makeApprovedCreative(ctx, {})];
   ctx.v6AuraBuildEmailQueueForCampaign_(campaign());
   var job = tables.MKT_EMAIL_QUEUE[0];
   assert.equal(job.status, 'SUPPRESSED');
@@ -339,10 +409,14 @@ function eligibleAudienceRow(over) {
 
 // 16. v6AuraRepairEmailQueueContent_ fixes an existing job built BEFORE this reply-to/CTA fix
 // existed (empty replyTo, href="#") in place -- without creating a second row -- while never
-// touching a job already SENT.
+// touching a job already SENT. Content is repaired from the approved creative, never from
+// v6AuraEmailHtml_().
 (function repairFixesExistingBrokenJobsTest() {
+  var ctx0 = makeContext({});
+  var creative = makeApprovedCreative(ctx0, {});
   var tables = {
     MKT_CAMPAIGNS: [campaign()],
+    MKT_CAMPAIGN_CREATIVES: [creative],
     MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }, { accountId: 'ACC-2', accountName: 'Other Co' }],
     MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria' }, { contactId: 'CON-2', firstName: 'Ana' }],
     MKT_EMAIL_QUEUE: [
@@ -355,22 +429,27 @@ function eligibleAudienceRow(over) {
   assert.equal(result.repaired, 1, 'only the non-SENT job may be repaired');
   var fixed = tables.MKT_EMAIL_QUEUE.filter(function (r) { return r.jobId === 'JOB:CMP-RET-1:CON-1:1'; })[0];
   assert.equal(fixed.replyTo, 'info@dglus.com');
-  assert(fixed.htmlBody.indexOf('href="#"') < 0);
+  assert(fixed.htmlBody.indexOf('href="#"') < 0, 'a repaired job must carry the approved creative\'s real content, not the old placeholder CTA');
   assert(/href="mailto:info@dglus\.com\?subject=/.test(fixed.htmlBody));
   assert.equal(fixed.status, 'PENDING');
+  assert.equal(fixed.creativeId, creative.creativeId, 'a repaired job must be traceable to the approved creative it was repaired from');
+  assert.equal(fixed.recipientRenderedChecksum, ctx.v6AuraChecksum_(fixed.htmlBody));
   var untouched = tables.MKT_EMAIL_QUEUE.filter(function (r) { return r.jobId === 'JOB:CMP-RET-1:CON-2:1'; })[0];
   assert.equal(untouched.status, 'SENT', 'a job already SENT must never be modified by the repair');
   assert.equal(untouched.replyTo, '', 'send history must remain exactly as it was, including a since-fixed field');
   assert.equal(tables.MKT_EMAIL_QUEUE.length, 2, 'repair must update rows in place, never create a new one');
-  console.log('dispatcher test 16 (repair fixes existing broken jobs in place, never touches a SENT job): PASS');
+  console.log('dispatcher test 16 (repair fixes existing broken jobs from the approved creative in place, never touches a SENT job): PASS');
 })();
 
 // 17. v6AuraRegenerateRetentionDryRun_ forces/confirms DRY_RUN, runs repair -> build -> dispatch
 // -> audit in one call, and returns the flat {sendMode, queued, dryRun, clean,
 // realSendsDetected, findings} shape -- with zero real sends, even if LIVE was left on.
 (function regenerateForcesDryRunAndReturnsFlatShapeTest() {
+  var ctx0 = makeContext({});
+  var creative = makeApprovedCreative(ctx0, {});
   var tables = {
     MKT_CAMPAIGNS: [campaign()],
+    MKT_CAMPAIGN_CREATIVES: [creative],
     MKT_ACCOUNTS: [{ accountId: 'ACC-9', accountName: 'Shipper Co' }],
     MKT_CONTACTS_SECURE: [{ contactId: 'CON-9', firstName: 'Old', email: 'old@shipperco.com' }],
     MKT_EMAIL_QUEUE: [{ jobId: 'JOB:CMP-RET-1:CON-9:1', campaignId: 'CMP-RET-1', accountId: 'ACC-9', contactId: 'CON-9', email: 'old@shipperco.com', firstName: 'Old', company: 'Shipper Co', service: 'FTL', subject: 'old', htmlBody: '<p>old</p><a href="#">Click</a>', replyTo: '', status: 'PENDING', sequenceStep: 1, playbookId: 'Retention' }]
@@ -392,4 +471,71 @@ function eligibleAudienceRow(over) {
   console.log('dispatcher test 17 (regenerate runs repair+build+dispatch+audit without ever touching AURA_SEND_MODE): PASS');
 })();
 
-console.log('V6 AURA email dispatcher (queue build + DRY_RUN/LIVE dispatch + gates): ALL PASS');
+// 18. Iniciativa 2 punto 2 -- with NO approved creative on file for the campaign, the builder
+// produces ZERO jobs and reports CREATIVE_NOT_APPROVED. v6AuraEmailHtml_() is never called as a
+// production fallback.
+(function buildBlocksWhenNoApprovedCreativeTest() {
+  var tables = { MKT_AUDIENCES: [eligibleAudienceRow()], MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }], MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria' }] };
+  var ctx = makeContext({ tables: tables });
+  var result = ctx.v6AuraBuildEmailQueueForCampaign_(campaign());
+  assert.equal(result.built, 0);
+  assert.equal(result.blockedCreative, true);
+  assert.equal(result.blockedReason, 'CREATIVE_NOT_APPROVED');
+  assert.equal((tables.MKT_EMAIL_QUEUE || []).length, 0, 'no job with missing/unapproved content may ever be written');
+  console.log('dispatcher test 18 (build blocks with CREATIVE_NOT_APPROVED when no approved creative exists): PASS');
+})();
+
+// 19. Iniciativa 2 punto 2 -- a corrupted/tampered approved-creative row (its stored
+// htmlChecksum no longer matches its own htmlBody) also blocks the build, with
+// CREATIVE_VERSION_MISMATCH, never a silent fallback to the drifted content.
+(function buildBlocksWhenChecksumMismatchTest() {
+  var tables = { MKT_AUDIENCES: [eligibleAudienceRow()], MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Shipper Co' }], MKT_CONTACTS_SECURE: [{ contactId: 'CON-1', firstName: 'Maria' }] };
+  var ctx = makeContext({ tables: tables });
+  var creative = makeApprovedCreative(ctx, {});
+  creative.htmlBody = creative.htmlBody + '<script>tampered</script>'; // drift AFTER the checksum was computed
+  tables.MKT_CAMPAIGN_CREATIVES = [creative];
+  var result = ctx.v6AuraBuildEmailQueueForCampaign_(campaign());
+  assert.equal(result.built, 0);
+  assert.equal(result.blockedCreative, true);
+  assert.equal(result.blockedReason, 'CREATIVE_VERSION_MISMATCH');
+  assert.equal((tables.MKT_EMAIL_QUEUE || []).length, 0);
+  console.log('dispatcher test 19 (build blocks with CREATIVE_VERSION_MISMATCH when the stored checksum no longer matches): PASS');
+})();
+
+// 20. Iniciativa 2 punto 2/5 -- dispatch-time defense in depth: a job that reached PENDING
+// without ever carrying a creativeId/creativeApprovalId (e.g. a legacy row from before this
+// change) is blocked at send time too, never sent, even under LIVE.
+(function dispatchBlocksJobWithNoCreativeReferenceTest() {
+  var tables = { MKT_EMAIL_QUEUE: [{ jobId: 'JOB:LEGACY:1', campaignId: 'CMP-RET-1', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: '<p>legacy content, no creative reference</p>', replyTo: 'am@dglus.com', status: 'PENDING', sequenceStep: 1 }] };
+  var ctx = makeContext({ tables: tables });
+  ctx.auraEnableLiveSending();
+  var out = ctx.auraProcessEmailQueue();
+  assert.equal(out.sent, 0);
+  assert.equal(out.blockedCreative, 1);
+  assert.equal(ctx.__sentEmails.length, 0, 'a job with no creative-approval reference must never be sent, even under LIVE');
+  assert.equal(tables.MKT_EMAIL_QUEUE[0].status, 'BLOCKED');
+  assert.equal(tables.MKT_EMAIL_QUEUE[0].error, 'CREATIVE_NOT_APPROVED');
+  console.log('dispatcher test 20 (dispatch-time defense in depth blocks a job with no creative-approval reference, even under LIVE): PASS');
+})();
+
+// 21. Iniciativa 2 punto 2/5 -- dispatch-time defense in depth: a job whose htmlBody was
+// altered AFTER it was queued (its recipientRenderedChecksum no longer matches) is blocked at
+// send time, never sent -- catches tampering/drift the build-time gate could never see.
+(function dispatchBlocksJobWithDriftedHtmlTest() {
+  var ctx0 = makeContext({});
+  var creative = makeApprovedCreative(ctx0, {});
+  var job = jobFromCreative(ctx0, creative, {});
+  job.htmlBody = job.htmlBody + '<p>drifted after queueing</p>'; // never recompute recipientRenderedChecksum
+  var tables = { MKT_CAMPAIGN_CREATIVES: [creative], MKT_EMAIL_QUEUE: [job] };
+  var ctx = makeContext({ tables: tables });
+  ctx.auraEnableLiveSending();
+  var out = ctx.auraProcessEmailQueue();
+  assert.equal(out.sent, 0);
+  assert.equal(out.blockedCreative, 1);
+  assert.equal(ctx.__sentEmails.length, 0);
+  assert.equal(tables.MKT_EMAIL_QUEUE[0].status, 'BLOCKED');
+  assert.equal(tables.MKT_EMAIL_QUEUE[0].error, 'CREATIVE_VERSION_MISMATCH');
+  console.log('dispatcher test 21 (dispatch-time defense in depth blocks a job whose htmlBody drifted after queueing): PASS');
+})();
+
+console.log('V6 AURA email dispatcher (queue build + DRY_RUN/LIVE dispatch + gates + Iniciativa 2 creative approval): ALL PASS');

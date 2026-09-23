@@ -41,7 +41,7 @@ function v6AuraBootstrapAndRun_(){
     var result={
       status:'',runId:runId,
       dataHub:{dataHubReadable:true,reportSourceReadable:true},
-      schema:{runSummarySheet:null,runLogSheet:null,auditBefore:null,ensureResult:null},
+      schema:{runSummarySheet:null,runLogSheet:null,campaignCreativesSheet:null,auditBefore:null,ensureResult:null},
       canonicalIds:null,
       freshness:null,
       amContextGatePresent:false,
@@ -56,6 +56,11 @@ function v6AuraBootstrapAndRun_(){
     // never re-creating or clearing it.
     result.schema.runSummarySheet=v6AuraEnsureRunSummarySheet_();
     result.schema.runLogSheet={status:'ALREADY_EXISTS_OR_CREATED',sheetName:'MKT_AURA_RUN_LOG'};
+    // Iniciativa 2 (MarketingV6AuraCreativeApproval.gs): third AURA-owned auto-creatable table,
+    // same justification (brand-new, no historical data at risk). Created here too so a fresh
+    // deployment has it ready before the first Approve Creative action, not only lazily on that
+    // first approval (v6AuraPersistApprovedCreative_ also ensures it defensively).
+    result.schema.campaignCreativesSheet=v6AuraEnsureCampaignCreativesSheet_();
 
     // Steps 3-4 -- additive column audit/ensure across every table in
     // MKT_V6_CONTACT_RECIPIENT_SCHEMA (unchanged engine, not reimplemented here). Appends
