@@ -1,4 +1,6 @@
+var AURA_EMAIL_EVENT_HEADERS_ = ['eventId','jobId','campaignId','accountId','contactId','email','eventType','occurredAt','source','externalId','reasonCode','reasonText','createdAt'];
 var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
+  MKT_EMAIL_EVENTS:AURA_EMAIL_EVENT_HEADERS_,
   MKT_ACCOUNTS:['accountId','externalSystem','externalAccountId','salesforceAccountId','canonicalSalesforceIdStatus','accountName','amOwner','status','sourceUpdatedAt','createdAt','updatedAt'],
   MKT_CONTACTS_SECURE:['contactId','accountId','externalSystem','externalContactId','salesforceContactId','canonicalSalesforceIdStatus','email','emailStatus','doNotContact','status','sourceUpdatedAt','createdAt','updatedAt'],
   MKT_CAMPAIGN_SCOPES:['scopeId','audienceId','campaignId','campaignType','opportunityType','updatedAt'],
@@ -114,6 +116,15 @@ function v6AuditContactRecipientSchema_(){
   var tables={},missingTableCount=0,missingColumnCount=0;Object.keys(MKT_V6_CONTACT_RECIPIENT_SCHEMA).forEach(function(name){var sheet=v6Sheet_(name),headers=v6SchemaHeaders_(sheet),required=MKT_V6_CONTACT_RECIPIENT_SCHEMA[name],missing=required.filter(function(header){return headers.indexOf(header)<0;}),present=required.filter(function(header){return headers.indexOf(header)>=0;});if(!sheet)missingTableCount++;missingColumnCount+=missing.length;tables[name]={sheetPresent:!!sheet,existingColumnCount:headers.length,requiredColumnCount:required.length,presentColumns:present,missingColumns:missing};});return {status:missingTableCount||missingColumnCount?'SCHEMA MIGRATION REQUIRED':'SCHEMA READY',tableCount:Object.keys(tables).length,missingTableCount:missingTableCount,missingColumnCount:missingColumnCount,tables:tables};
 }
 function v6EnsureContactRecipientSchema_(){
+  v6AuraEnsureEmailEvents_();
   var before=v6AuditContactRecipientSchema_(),columnsAdded=0,tablesUpdated=0;Object.keys(MKT_V6_CONTACT_RECIPIENT_SCHEMA).forEach(function(name){var state=before.tables[name],sheet=v6Sheet_(name);if(!sheet)throw new Error('SCHEMA MIGRATION REQUIRED: '+name+' NOT FOUND');if(!state.missingColumns.length)return;var start=Math.max(1,Number(sheet.getLastColumn()||0)+1);sheet.getRange(1,start,1,state.missingColumns.length).setValues([state.missingColumns]);columnsAdded+=state.missingColumns.length;tablesUpdated++;});var after=v6AuditContactRecipientSchema_();return {status:after.status,tableCount:after.tableCount,tablesUpdated:tablesUpdated,columnsAdded:columnsAdded,missingTableCount:after.missingTableCount,missingColumnCount:after.missingColumnCount,tables:after.tables};
 }
 function v6RequireContactRecipientHeaders_(name,required){var sheet=v6Sheet_(name);if(!sheet)throw new Error('SCHEMA MIGRATION REQUIRED: '+name+' NOT FOUND');var headers=v6SchemaHeaders_(sheet),expected=required&&required.length?required:(MKT_V6_CONTACT_RECIPIENT_SCHEMA[name]||[]),missing=expected.filter(function(header){return headers.indexOf(header)<0;});if(missing.length)throw new Error('SCHEMA MIGRATION REQUIRED: '+name+' MISSING '+missing.join(','));return true;}
+
+function v6AuraEnsureEmailEvents_() {
+  var sheet=v6Sheet_('MKT_EMAIL_EVENTS');
+  if(!sheet) sheet=SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).insertSheet('MKT_EMAIL_EVENTS');
+  var headers=sheet.getLastRow()?sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0]:[];
+  AURA_EMAIL_EVENT_HEADERS_.forEach(function(h){if(headers.indexOf(h)<0)headers.push(h);});
+  sheet.getRange(1,1,1,headers.length).setValues([headers]);
+}

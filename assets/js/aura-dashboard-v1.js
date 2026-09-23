@@ -18,7 +18,7 @@
   function esc(v) { return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 
   const perfFilters = { metric: '', search: '', campaignId: '', campaignFamily: '', sendStatus: '', language: '', from: '', to: '' };
-  const perfColumns = ['jobId','company','contactName','email','campaignId','campaignFamily','service','language','amOwner','sendStatus','sentAt','failedAt','bounceStatus','bounceReason','replied','replyAt','opened','openAt','clicked','clickAt'];
+  const perfColumns = ['jobId','company','contactName','email','campaignId','campaignFamily','service','language','amOwner','sendStatus','sentAt','failedAt','bounceStatus','bounceReason','bounceAt','replied','replyAt','opened','openAt','clicked','clickAt'];
   function metricMatches(r, metric) {
     return !metric || ({sent:!!r.sentAt || r.sendStatus==='SENT',failed:!!r.failedAt || r.sendStatus==='FAILED',bounced:!!r.bounceStatus,replied:r.replied===true,opened:r.opened===true,clicked:r.clicked===true})[metric];
   }
@@ -27,7 +27,7 @@
       if (!metricMatches(r,filters.metric)) return false;
       if (!['company','contactName','email'].some(k=>String(r[k]||'').toLowerCase().includes(String(filters.search||'').toLowerCase()))) return false;
       if (['campaignId','campaignFamily','sendStatus','language'].some(k=>filters[k] && r[k]!==filters[k])) return false;
-      const dates=[r.sentAt,r.failedAt,r.replyAt].filter(Boolean).map(d=>String(d).slice(0,10));
+      const dates=[r.sentAt,r.failedAt,r.replyAt,r.bounceAt,r.openAt,r.clickAt].filter(Boolean).map(d=>String(d).slice(0,10));
       return (!filters.from&&!filters.to)||dates.some(d=>(!filters.from||d>=filters.from)&&(!filters.to||d<=filters.to));
     });
   }
@@ -45,7 +45,7 @@
       ${[['campaignId','Campaign'],['campaignFamily','Family'],['sendStatus','Status'],['language','Language']].map(([k,label])=>`<label>${label}<select data-perf-filter="${k}"><option value="">All</option>${opts(k)}</select></label>`).join('')}
       ${['from','to'].map(k=>`<label>${k==='from'?'From':'To'} (UTC)<input type="date" data-perf-filter="${k}" value="${perfFilters[k]}"></label>`).join('')}
       <button data-perf-reset>Clear filters</button><button data-perf-download>DOWNLOAD CSV</button></div>
-      <p>Dates match sent, failed or reply time. One row per recipient send job. SENT does not mean DELIVERED.</p>
+      <p>Dates match sent, failed, reply, bounce, open or click time. One row per recipient send job. SENT does not mean DELIVERED.</p>
       <div data-perf-detail></div></section>`;
   }
   function bindPerformance(mount) {

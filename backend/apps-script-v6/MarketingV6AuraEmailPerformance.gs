@@ -1,14 +1,17 @@
 /** Private recipient reporting. Reads never ingest Gmail or send mail.
- * DSN ingestion is a separate, manually scheduled admin operation; no trigger installed here.
+ * DSN ingestion uses a dedicated hourly trigger; reporting never invokes a dispatcher.
  */
-var AURA_EMAIL_EVENT_HEADERS_ = ['eventId','jobId','campaignId','accountId','contactId','email','eventType','occurredAt','source','externalId','reasonCode','reasonText','createdAt'];
 var AURA_EMAIL_EVENT_TYPES_ = ['SENT','FAILED','BOUNCE','SOFT_BOUNCE','DELIVERED','OPEN','CLICK','REPLY','UNSUBSCRIBE','SPAM_COMPLAINT'];
-function v6AuraEnsureEmailEvents_() {
-  var sheet=v6Sheet_('MKT_EMAIL_EVENTS');
-  if(!sheet) sheet=SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).insertSheet('MKT_EMAIL_EVENTS');
-  var headers=sheet.getLastRow()?sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0]:[];
-  AURA_EMAIL_EVENT_HEADERS_.forEach(function(h){if(headers.indexOf(h)<0)headers.push(h);});
-  sheet.getRange(1,1,1,headers.length).setValues([headers]);
+// Public name only for Apps Script's scheduler; never exposed by the HTTP router.
+function auraIngestGmailDsn() { return v6AuraIngestGmailDsn_(); }
+function v6AuraInstallDsnTrigger_() {
+  var lock=LockService.getScriptLock();lock.waitLock(30000);
+  try {
+    var matches=ScriptApp.getProjectTriggers().filter(function(t){return t.getHandlerFunction()==='auraIngestGmailDsn';});
+    if(!matches.length)matches=[ScriptApp.newTrigger('auraIngestGmailDsn').timeBased().everyHours(1).create()];
+    matches.slice(1).forEach(function(t){ScriptApp.deleteTrigger(t);});
+    return {handler:'auraIngestGmailDsn',installed:true};
+  } finally {lock.releaseLock();}
 }
 function v6AuraEmailDate_(value) {
   if(!value)return '';
@@ -49,7 +52,7 @@ function v6AuraEmailPerformance_() {
     });
     var replyAt=at('REPLY')||replies.map(function(r){return v6AuraEmailDate_(r.responseAt||r.occurredAt);}).filter(Boolean).sort()[0]||'';
     var bounce=ev.filter(function(e){return /^(BOUNCE|SOFT_BOUNCE)$/.test(e.eventType);}).sort(function(x,y){return String(y.occurredAt).localeCompare(String(x.occurredAt));})[0]||{};
-    return {jobId:q.jobId,accountId:q.accountId,contactId:q.contactId,company:q.company||a.accountName||'',contactName:q.contactName||[q.firstName||ct.firstName,ct.lastName].filter(Boolean).join(' '),email:q.email||'',campaignId:q.campaignId||'',campaignFamily:q.campaignFamily||c.campaignFamily||c.campaignType||'',service:q.service||c.service||'',language:q.preferredLanguage||q.language||'',amOwner:q.amOwner||a.amOwner||'',sendStatus:q.status||'UNKNOWN',sentAt:at('SENT')||(q.status==='SENT'?v6AuraEmailDate_(q.sentAt||q.processedAt):''),failedAt:at('FAILED')||(q.status==='FAILED'?v6AuraEmailDate_(q.failedAt||q.processedAt):''),bounceStatus:bounce.eventType||'',bounceReason:bounce.reasonCode||'',replied:!!replyAt,replyAt:replyAt,opened:tracking.opened==='NOT_TRACKED'?null:!!at('OPEN'),openAt:at('OPEN'),clicked:tracking.clicked==='NOT_TRACKED'?null:!!at('CLICK'),clickAt:at('CLICK')};
+    return {jobId:q.jobId,accountId:q.accountId,contactId:q.contactId,company:q.company||a.accountName||'',contactName:q.contactName||[q.firstName||ct.firstName,ct.lastName].filter(Boolean).join(' '),email:q.email||'',campaignId:q.campaignId||'',campaignFamily:q.campaignFamily||c.campaignFamily||c.campaignType||'',service:q.service||c.service||'',language:q.preferredLanguage||q.language||'',amOwner:q.amOwner||a.amOwner||'',sendStatus:q.status||'UNKNOWN',sentAt:at('SENT')||(q.status==='SENT'?v6AuraEmailDate_(q.sentAt||q.processedAt):''),failedAt:at('FAILED')||(q.status==='FAILED'?v6AuraEmailDate_(q.failedAt||q.processedAt):''),bounceStatus:bounce.eventType||'',bounceReason:bounce.reasonCode||'',bounceAt:v6AuraEmailDate_(bounce.occurredAt),replied:!!replyAt,replyAt:replyAt,opened:tracking.opened==='NOT_TRACKED'?null:!!at('OPEN'),openAt:at('OPEN'),clicked:tracking.clicked==='NOT_TRACKED'?null:!!at('CLICK'),clickAt:at('CLICK')};
   });
   var summary={sent:0,failed:0,bounced:0,replied:0,opened:tracking.opened==='NOT_TRACKED'?null:0,clicked:tracking.clicked==='NOT_TRACKED'?null:0};
   rows.forEach(function(r){if(r.sentAt||r.sendStatus==='SENT')summary.sent++;if(r.failedAt||r.sendStatus==='FAILED')summary.failed++;if(r.bounceStatus)summary.bounced++;if(r.replied)summary.replied++;if(r.opened)summary.opened++;if(r.clicked)summary.clicked++;});
@@ -76,12 +79,21 @@ function v6AuraIngestDsnMessage_(message) {
     var matches=queue.filter(function(q){return String(q.email||'').toLowerCase()===d.email&&q.status==='SENT'&&v6AuraEmailDate_(q.processedAt||q.sentAt)<=when;});
     if(matches.length!==1)return;
     var q=matches[0],eventId='DSN:'+id+':'+q.jobId;
-    if(v6Rows_('MKT_EMAIL_EVENTS').some(function(e){return e.eventId===eventId;}))return;
+    if(v6Rows_('MKT_EMAIL_EVENTS').some(function(e){return e.eventId===eventId;})){
+      // Upgrade previously ingested BLOCKED events once; preserve a manually cleared row.
+      if(d.reasonCode==='BLOCKED'&&q.contactId&&!v6Rows_('MKT_EXCLUSIONS').some(function(e){return e.exclusionId==='BLOCKED_DSN:'+q.contactId;}))
+        v6UpsertByKey_('MKT_EXCLUSIONS',['exclusionId'],{exclusionId:'BLOCKED_DSN:'+q.contactId,accountId:q.accountId,contactId:q.contactId,status:'ACTIVE',active:true,reasonCode:'BLOCKED',expiresAt:'',updatedAt:when});
+      return;
+    }
     var event=Object.assign({},d,{eventId:eventId,jobId:q.jobId,campaignId:q.campaignId,accountId:q.accountId,contactId:q.contactId,occurredAt:when,source:'GMAIL_DSN',externalId:id,createdAt:new Date().toISOString()});
     // Apply safety before recording completion: a retry after a partial failure is safe.
     if(d.reasonCode==='HARD_BOUNCE'&&q.contactId){
       v6ClassifyResponseEvent_(event);
       v6UpsertByKey_('MKT_EXCLUSIONS',['exclusionId'],{exclusionId:'HARD_BOUNCE:'+q.contactId,accountId:q.accountId,contactId:q.contactId,status:'ACTIVE',active:true,reasonCode:'HARD_BOUNCE',expiresAt:'',updatedAt:when});
+    }
+    else if(d.reasonCode==='BLOCKED'){
+      if(!q.contactId)throw new Error('BLOCKED_DSN_CONTACT_ID_REQUIRED');
+      v6UpsertByKey_('MKT_EXCLUSIONS',['exclusionId'],{exclusionId:'BLOCKED_DSN:'+q.contactId,accountId:q.accountId,contactId:q.contactId,status:'ACTIVE',active:true,reasonCode:'BLOCKED',expiresAt:'',updatedAt:when});
     }
     else if(d.eventType==='SOFT_BOUNCE')v6ClassifyResponseEvent_(event);
     v6UpsertByKey_('MKT_EMAIL_EVENTS',['eventId'],event);count++;
@@ -92,9 +104,15 @@ function v6AuraIngestGmailDsn_(options) {
   try {
     v6AuraEnsureEmailEvents_();
     v6AuraReconcileEmailEvents_();
-    var start=Math.max(0,Math.floor(Number((options||{}).start)||0)),count=0;
-    var threads=GmailApp.search('in:anywhere newer_than:90d {subject:"Delivery Status Notification" subject:"Undelivered Mail" from:mailer-daemon}',start,50);
+    var props=PropertiesService.getScriptProperties(),saved=props.getProperty('AURA_DSN_PROGRESS'),progress=saved?JSON.parse(saved):null;
+    if(!progress){var end=Math.floor(Date.now()/1000);progress={start:0,end:end,begin:end-90*86400};props.setProperty('AURA_DSN_PROGRESS',JSON.stringify(progress));}
+    var start=progress.start,count=0;
+    var query='in:anywhere after:'+progress.begin+' before:'+progress.end+' {subject:"Delivery Status Notification" subject:"Undelivered Mail" from:mailer-daemon}';
+    var threads=GmailApp.search(query,start,50);
     threads.forEach(function(t){t.getMessages().forEach(function(m){count+=v6AuraIngestDsnMessage_(m);});});
-    return {ingested:count,nextStart:threads.length===50?start+50:null};
+    var next=threads.length===50?start+50:null;
+    if(next===null)props.deleteProperty('AURA_DSN_PROGRESS');
+    else {progress.start=next;props.setProperty('AURA_DSN_PROGRESS',JSON.stringify(progress));}
+    return {ingested:count,nextStart:next};
   } finally {lock.releaseLock();}
 }

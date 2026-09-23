@@ -1,7 +1,7 @@
 const assert=require('assert'),fs=require('fs'),vm=require('vm');
 const tables={MKT_EMAIL_QUEUE:[],MKT_EMAIL_EVENTS:[],MKT_RESPONSES:[],MKT_EXCLUSIONS:[]};
 const ctx={console,Date,Math,Number,String,Object,Array,isFinite,v6Rows_:n=>tables[n]||[],v6UpsertByKey_:(n,keys,r)=>{const list=tables[n]||(tables[n]=[]),i=list.findIndex(x=>keys.every(k=>x[k]===r[k]));if(i<0)list.push(r);else list[i]=r;},v6MarkContactEmailInvalid_:p=>{ctx.invalid=p;}};
-vm.createContext(ctx);for(const f of ['MarketingV6ResponseEvents.gs','MarketingV6AuraEmailPerformance.gs'])vm.runInContext(fs.readFileSync('backend/apps-script-v6/'+f,'utf8'),ctx);
+vm.createContext(ctx);for(const f of ['MarketingV6SchemaMigration.gs','MarketingV6ResponseEvents.gs','MarketingV6AuraEmailPerformance.gs'])vm.runInContext(fs.readFileSync('backend/apps-script-v6/'+f,'utf8'),ctx);
 ctx.v6MarkContactEmailInvalid_=p=>{ctx.invalid=p;};
 let checks=0;function test(name,fn){fn();checks++;console.log('PASS '+name);}
 const q={jobId:'j1',campaignId:'c1',accountId:'a1',contactId:'p1',email:'person@example.com',company:'Ácme',status:'SENT',processedAt:'2026-09-20T10:00:00Z'};
