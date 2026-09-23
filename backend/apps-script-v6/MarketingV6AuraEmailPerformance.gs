@@ -56,7 +56,30 @@ function v6AuraEmailPerformance_() {
   });
   var summary={sent:0,failed:0,bounced:0,replied:0,opened:tracking.opened==='NOT_TRACKED'?null:0,clicked:tracking.clicked==='NOT_TRACKED'?null:0};
   rows.forEach(function(r){if(r.sentAt||r.sendStatus==='SENT')summary.sent++;if(r.failedAt||r.sendStatus==='FAILED')summary.failed++;if(r.bounceStatus)summary.bounced++;if(r.replied)summary.replied++;if(r.opened)summary.opened++;if(r.clicked)summary.clicked++;});
+  rows.forEach(function(r,i){Object.assign(r,v6AuraJobEvidence_(queue[i],find(campaigns,'campaignId',r.campaignId)));});
+  var sentRows=rows.filter(function(r){return r.sendStatus==='SENT';});
+  summary.sentRecipientJobs=sentRows.length;
+  summary.sentUniqueEmails=new Set(sentRows.map(function(r){return String(r.email||'').trim().toLowerCase();}).filter(Boolean)).size;
+  summary.sentUniqueAccounts=new Set(sentRows.map(function(r){return r.accountId;}).filter(Boolean)).size;
   return {summary:summary,rows:rows,tracking:tracking};
+}
+function v6AuraJobEvidence_(job,campaign) {
+  var family=job.playbookId||job.campaignFamily||'',checksum=job.recipientContentChecksum,hasChecksum=checksum!==null&&checksum!==undefined&&checksum!=='';
+  return {subject:job.subject||'',playbookId:job.playbookId||'',sentFamily:family,campaignFamily:family,
+    currentCampaignFamily:campaign.campaignType||campaign.objective||'',
+    creativeProvenance:job.creativeId&&job.creativeApprovalId&&hasChecksum?'CAMPAIGN_STUDIO_APPROVED':job.status==='SENT'&&!job.creativeId&&!job.creativeApprovalId&&!hasChecksum?'LEGACY_PRE_CANONICAL':'UNVERIFIED',
+    integrityStatus:!hasChecksum?'LEGACY_CHECKSUM_NOT_AVAILABLE':String(v6AuraJobContentChecksum_(job.subject,job.htmlBody))===String(checksum)?'VERIFIED':'MISMATCH'};
+}
+function v6AuraEmailPerformanceJob_(payload) {
+  var id=String((payload||{}).jobId||'');
+  if(!id.trim())return {status:'INVALID_REQUEST',error:'jobId REQUIRED'};
+  var jobs=v6Rows_('MKT_EMAIL_QUEUE').filter(function(q){return q.jobId===id;});
+  if(!jobs.length)return {status:'NOT_FOUND',jobId:id};
+  if(jobs.length!==1)return {status:'AMBIGUOUS_JOB_ID',jobId:id};
+  var job=jobs[0],row=v6AuraEmailPerformance_().rows.filter(function(r){return r.jobId===id;})[0];
+  // Explicit fields only: no reconstructed content, invented IDs or historical writes.
+  ['firstName','status','processedAt','createdAt','sequenceStep','subject','htmlBody','replyTo','creativeId','creativeVersion','creativeApprovalId','htmlChecksum','recipientRenderedChecksum','recipientContentChecksum'].forEach(function(k){row[k]=job[k]==null?'':job[k];});
+  return row;
 }
 // Parse each RFC 3464 recipient block independently. Unattributed/ambiguous DSNs are
 // skipped rather than assigned to the latest campaign for an email address.

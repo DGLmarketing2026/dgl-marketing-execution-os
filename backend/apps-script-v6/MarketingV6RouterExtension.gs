@@ -8,6 +8,7 @@ function routeMarketingV6_(action, payload) {
   var a = String(action || '');
 
   switch (a) {
+    case 'v6AuraEmailPerformanceJob': return v6AuraEmailPerformanceJob_(p);
     case 'v6AuraEmailPerformance': return v6AuraEmailPerformance_();
     case 'v6Opportunities':
       return typeof v6Opportunities_ === 'function' ? v6Opportunities_(p) : v6RouteMissing_(a, 'v6Opportunities_');

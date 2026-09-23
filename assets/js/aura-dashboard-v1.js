@@ -18,9 +18,11 @@
   function esc(v) { return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 
   const perfFilters = { metric: '', search: '', campaignId: '', campaignFamily: '', sendStatus: '', language: '', from: '', to: '' };
-  const perfColumns = ['jobId','company','contactName','email','campaignId','campaignFamily','service','language','amOwner','sendStatus','sentAt','failedAt','bounceStatus','bounceReason','bounceAt','replied','replyAt','opened','openAt','clicked','clickAt'];
+  const perfColumns = ['jobId','company','contactName','email','campaignId','campaignFamily','subject','sentFamily','currentCampaignFamily','playbookId','creativeProvenance','integrityStatus','service','language','amOwner','sendStatus','sentAt','failedAt','bounceStatus','bounceReason','bounceAt','replied','replyAt','opened','openAt','clicked','clickAt'];
+  let performancePage = 0;
+  function pageRows(rows, page) { return rows.slice().sort((a,b)=>String(b.sentAt||'').localeCompare(String(a.sentAt||''))).slice(page*25,(page+1)*25); }
   function metricMatches(r, metric) {
-    return !metric || ({sent:!!r.sentAt || r.sendStatus==='SENT',failed:!!r.failedAt || r.sendStatus==='FAILED',bounced:!!r.bounceStatus,replied:r.replied===true,opened:r.opened===true,clicked:r.clicked===true})[metric];
+    return !metric || ({sent:r.sendStatus==='SENT',failed:!!r.failedAt || r.sendStatus==='FAILED',bounced:!!r.bounceStatus,replied:r.replied===true,opened:r.opened===true,clicked:r.clicked===true})[metric];
   }
   function filterPerformance(rows, filters) {
     return rows.filter(r => {
@@ -40,7 +42,7 @@
     if(!data)return `<section class="card card-pad"><h3>Email Performance</h3><p>${esc(state.performanceError||'Loading recipient report…')}</p></section>`;
     const opts = k => [...new Set(data.rows.map(r=>r[k]).filter(Boolean))].sort().map(v=>`<option ${perfFilters[k]===v?'selected':''} value="${esc(v).replace(/"/g,'&quot;')}">${esc(v)}</option>`).join('');
     return `<section class="aura-performance card card-pad"><h3>Email Performance</h3>
-      <div class="aura-performance-kpis">${['sent','failed','bounced','replied','opened','clicked'].map(k=>`<button type="button" data-perf-kpi="${k}" aria-pressed="${perfFilters.metric===k}"><span>${k.toUpperCase()}</span><strong>${fmt(data.summary[k])}</strong><small>${data.summary[k]==null?'NOT TRACKED':'MEASURED'}</small></button>`).join('')}</div>
+      <div class="aura-performance-kpis">${['sent','failed','bounced','replied','opened','clicked'].map(k=>`<button type="button" data-perf-kpi="${k}" aria-pressed="${perfFilters.metric===k}"><span>${k.toUpperCase()}</span><strong>${fmt(data.summary[k])}</strong><small>${data.summary[k]==null?'NOT TRACKED':'MEASURED'}</small>${k==='sent'?`<small>${fmt(data.summary.sentUniqueEmails)} recipient emails · ${fmt(data.summary.sentUniqueAccounts)} accounts</small>`:''}</button>`).join('')}</div>
       <div class="aura-performance-filters"><label>Search company/contact/email<input data-perf-filter="search" type="search" value="${esc(perfFilters.search).replace(/"/g,'&quot;')}"></label>
       ${[['campaignId','Campaign'],['campaignFamily','Family'],['sendStatus','Status'],['language','Language']].map(([k,label])=>`<label>${label}<select data-perf-filter="${k}"><option value="">All</option>${opts(k)}</select></label>`).join('')}
       ${['from','to'].map(k=>`<label>${k==='from'?'From':'To'} (UTC)<input type="date" data-perf-filter="${k}" value="${perfFilters[k]}"></label>`).join('')}
@@ -53,18 +55,59 @@
     const host=mount.querySelector&&mount.querySelector('.aura-performance');if(!host)return;
     function update(){
       const rows=filterPerformance(state.performance.rows,perfFilters);
-      host.querySelector('[data-perf-detail]').innerHTML=`<p aria-live="polite">${rows.length} recipient rows</p><div class="aura-performance-scroll"><table class="data-table"><thead><tr>${perfColumns.map(k=>`<th>${esc(k)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${perfColumns.map(k=>`<td>${r[k]==null?'N/A / NOT TRACKED':esc(r[k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+      const pages=Math.max(1,Math.ceil(rows.length/25));performancePage=Math.min(performancePage,pages-1);
+      const columns=[['company','Company'],['contactName','Contact'],['email','Email'],['subject','Subject'],['sentFamily','Sent Family'],['sendStatus','Status'],['sentAt','Sent At'],['bounceReason','Bounce'],['replied','Reply'],['creativeProvenance','Creative Source']];
+      host.querySelector('[data-perf-detail]').innerHTML=`<p aria-live="polite">${rows.length} recipient rows · Page ${performancePage+1} / ${pages}</p><div class="aura-performance-scroll"><table class="data-table"><thead><tr>${columns.map(([k,label])=>`<th>${label}</th>`).join('')}<th>Action</th></tr></thead><tbody>${pageRows(rows,performancePage).map(r=>`<tr>${columns.map(([k])=>`<td>${esc(r[k]==null?'N/A':r[k])}</td>`).join('')}<td><button data-perf-view="${esc(r.jobId).replace(/"/g,'&quot;')}">VIEW EMAIL</button></td></tr>`).join('')}</tbody></table></div><button data-perf-prev ${performancePage===0?'disabled':''}>Previous</button><button data-perf-next ${performancePage>=pages-1?'disabled':''}>Next</button>`;
       host.querySelectorAll('[data-perf-kpi]').forEach(b=>b.setAttribute('aria-pressed',String(perfFilters.metric===b.dataset.perfKpi)));
     }
-    host.querySelectorAll('[data-perf-kpi]').forEach(b=>b.onclick=()=>{perfFilters.metric=perfFilters.metric===b.dataset.perfKpi?'':b.dataset.perfKpi;update();});
-    host.querySelectorAll('[data-perf-filter]').forEach(input=>input.oninput=()=>{perfFilters[input.dataset.perfFilter]=input.value;update();});
-    host.querySelector('[data-perf-reset]').onclick=()=>{Object.keys(perfFilters).forEach(k=>perfFilters[k]='');paint(mount);};
+    host.querySelectorAll('[data-perf-kpi]').forEach(b=>b.onclick=()=>{perfFilters.metric=perfFilters.metric===b.dataset.perfKpi?'':b.dataset.perfKpi;performancePage=0;update();});
+    host.querySelectorAll('[data-perf-filter]').forEach(input=>input.oninput=()=>{perfFilters[input.dataset.perfFilter]=input.value;performancePage=0;update();});
+    host.querySelector('[data-perf-reset]').onclick=()=>{Object.keys(perfFilters).forEach(k=>perfFilters[k]='');performancePage=0;paint(mount);};
     host.querySelector('[data-perf-download]').onclick=()=>{
       const blob=new Blob([performanceCsv(filterPerformance(state.performance.rows,perfFilters))],{type:'text/csv;charset=utf-8'});
       const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='aura-email-performance.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    };
+    host.onclick=event=>{
+      const view=event.target.closest('[data-perf-view]');if(view){openEmail(view.dataset.perfView);return;}
+      if(event.target.closest('[data-perf-prev]')&&performancePage>0){performancePage--;update();}
+      if(event.target.closest('[data-perf-next]')&&(performancePage+1)*25<filterPerformance(state.performance.rows,perfFilters).length){performancePage++;update();}
     };update();
   }
-  global.DGL_AURA_PERFORMANCE = {filter:filterPerformance,csv:performanceCsv};
+  function downloadExactHtml(detail) {
+    const url=URL.createObjectURL(new Blob([detail.htmlBody],{type:'text/html;charset=utf-8'}));
+    const a=document.createElement('a');a.href=url;a.download=String(detail.jobId).replace(/[^a-z0-9_-]/gi,'_')+'.html';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+  async function openEmail(jobId) {
+    const dialog=document.createElement('dialog');dialog.className='aura-email-audit';
+    dialog.setAttribute('aria-label','Historical sent email audit');
+    dialog.innerHTML='<button data-email-close>CLOSE</button><p>Loading persisted email evidence…</p>';
+    document.body.appendChild(dialog);dialog.showModal();
+    dialog.addEventListener('close',()=>dialog.remove());
+    dialog.querySelector('[data-email-close]').onclick=()=>dialog.close();
+    try {
+      const detail=await adapter().v6AuraEmailPerformanceJob(jobId);
+      if(!dialog.open)return;
+      if(!detail||!detail.jobId||['NOT_FOUND','INVALID_REQUEST','AMBIGUOUS_JOB_ID'].includes(detail.status))throw new Error('Persisted job not available');
+      const fields=[['Company',detail.company],['Contact',detail.contactName||detail.firstName],['Recipient',detail.email],['Campaign ID',detail.campaignId],['Job ID',detail.jobId],['Service',detail.service],['Language',detail.language],['AM Owner',detail.amOwner],['Sent At',detail.sentAt],['Status',detail.status],['SENT FAMILY',detail.sentFamily],['CURRENT CAMPAIGN FAMILY',detail.currentCampaignFamily],['CREATIVE SOURCE',detail.creativeProvenance==='LEGACY_PRE_CANONICAL'?'LEGACY / PRE-CANONICAL SEND':detail.creativeProvenance==='CAMPAIGN_STUDIO_APPROVED'?'CAMPAIGN STUDIO APPROVED':'UNVERIFIED'],['INTEGRITY',String(detail.integrityStatus||'').replace(/_/g,' ')]];
+      dialog.innerHTML=`<button data-email-close>CLOSE</button><h2>Historical email · read-only</h2><dl>${fields.map(([label,value])=>`<div><dt>${label}</dt><dd>${esc(value||'N/A')}</dd></div>`).join('')}</dl>
+        ${detail.sentFamily&&detail.currentCampaignFamily&&detail.sentFamily!==detail.currentCampaignFamily?'<p class="aura-audit-badge">HISTORICAL SEND FAMILY DIFFERS FROM CURRENT CAMPAIGN DEFINITION</p>':''}
+        <h3>SUBJECT</h3><p>${esc(detail.subject)}</p><button data-email-copy>COPY SUBJECT</button><button data-email-download>DOWNLOAD HTML</button><p data-email-feedback role="status"></p>
+        <h3>Delivery evidence</h3><p>SEND: ${esc(detail.status)} · ${esc(detail.sentAt||detail.failedAt||detail.processedAt)}</p><p>BOUNCE: ${esc(detail.bounceStatus==='SOFT_BOUNCE'?'SOFT_BOUNCE':detail.bounceReason||'NONE')} · ${esc(detail.bounceAt)} · ${esc(detail.bounceReason)}</p><p>REPLY: ${detail.replied?'YES':'NO'} · ${esc(detail.replyAt)}</p><p>OPEN: ${detail.opened===null?'N/A — NOT TRACKED':detail.opened?'YES':'NO'} · ${esc(detail.openAt)}</p><p>CLICK: ${detail.clicked===null?'N/A — NOT TRACKED':detail.clicked?'YES':'NO'} · ${esc(detail.clickAt)}</p>
+        <details><summary>Additional persisted evidence</summary><pre>${esc(JSON.stringify(Object.fromEntries(Object.entries(detail).filter(([key])=>key!=='htmlBody')),null,2))}</pre></details>
+        <h3>EXACT SENT EMAIL PREVIEW</h3><div data-email-preview></div>`;
+      dialog.querySelector('[data-email-close]').onclick=()=>dialog.close();
+      dialog.querySelector('[data-email-copy]').onclick=async()=>{try{await navigator.clipboard.writeText(detail.subject);dialog.querySelector('[data-email-feedback]').textContent='Subject copied';}catch(_){dialog.querySelector('[data-email-feedback]').textContent='Clipboard unavailable';}};
+      dialog.querySelector('[data-email-download]').onclick=()=>downloadExactHtml(detail);
+      const preview=dialog.querySelector('[data-email-preview]');
+      if(!detail.htmlBody)preview.textContent='EMAIL BODY NOT AVAILABLE — NO CONTENT WILL BE RECONSTRUCTED';
+      else {
+        const frame=document.createElement('iframe');frame.setAttribute('sandbox','');frame.setAttribute('referrerpolicy','no-referrer');frame.setAttribute('tabindex','-1');frame.setAttribute('inert','');frame.setAttribute('title','Exact persisted sent email');frame.style.pointerEvents='none';frame.srcdoc=detail.htmlBody;preview.appendChild(frame);
+      }
+    } catch(error) {
+      if(dialog.open){dialog.innerHTML='<button data-email-close>CLOSE</button><p role="alert">Unable to load persisted email evidence.</p>';dialog.querySelector('[data-email-close]').onclick=()=>dialog.close();}
+    }
+  }
+  global.DGL_AURA_PERFORMANCE = {filter:filterPerformance,csv:performanceCsv,page:pageRows,openEmail:openEmail};
 
   function statusBadge(status) {
     const s = String(status || "").toUpperCase();
@@ -250,6 +293,7 @@
     </div>
 
     <h3 class="aura-subhead">Campaña A · HA Prioritaria</h3>
+    <p>CURRENT CANONICAL FAMILY: ${esc(c.currentCanonicalFamily||"UNKNOWN")} · HISTORICAL SENT FAMILY: ${esc((c.historicalSentFamilies||[]).join(", ")||"UNKNOWN")} · Historical sent recipient jobs: ${fmt(c.historicalSentRecipientJobs)} · Historical unique accounts: ${fmt(c.historicalUniqueAccounts)}</p>
     <div class="kpi-grid">
       ${kpi("building-2", "Source accounts", c.sourceAccountCount)}
       ${kpi("users", "Jobs (Campaña A)", c.jobsForCampaignA)}
