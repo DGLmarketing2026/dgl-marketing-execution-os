@@ -157,6 +157,7 @@ function makeContext(opts) {
         approvalId: 'CAPR:CMP-CAMPANA-A-HA-PRIORITARIA:' + (i + 1), createdAt: new Date().toISOString()
       };
       rec.htmlChecksum = ctx.v6AuraChecksum_(rec.htmlBody);
+  rec.contentChecksum = ctx.v6AuraCanonicalContentChecksum_(rec.subject, rec.htmlBody, rec.textBody, rec.templateId, rec.creativeVersion);
       return rec;
     });
   }

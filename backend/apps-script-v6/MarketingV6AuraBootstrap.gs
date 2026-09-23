@@ -67,6 +67,7 @@ function v6AuraBootstrapAndRun_(){
     // missing headers only; never removes/reorders/clears existing columns or data.
     result.schema.auditBefore=v6AuditContactRecipientSchema_();
     result.schema.ensureResult=v6EnsureContactRecipientSchema_();
+    if(typeof v6AuraInstallDsnTrigger_==='function') result.dsnTrigger=v6AuraInstallDsnTrigger_();
 
     // Step 5 -- MKT_ACCOUNTS/MKT_CONTACTS_SECURE are real, pre-populated commercial tables in
     // this deployment; this only records their current row counts for observability. An empty

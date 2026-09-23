@@ -326,6 +326,7 @@ function v6AuraArchiveReports_(rows) {
 // every step below is an idempotent upsert keyed on a deterministic id, so
 // re-running never duplicates scopes, campaigns, executions or report rows.
 function v6AuraAutomationTick_() {
+  if(typeof v6AuraInstallDsnTrigger_==='function') v6AuraInstallDsnTrigger_();
   v6AuraEnsureSheet_('MKT_CAMPAIGNS'); v6AuraEnsureSheet_('MKT_AURA_EXECUTION_REPORT');
   var refresh = v6RefreshOpportunitiesFromReports_();
   var invalidCountsByAccount = v6AuraInvalidContactCountsByAccount_();

@@ -75,3 +75,15 @@
 .aura-reason-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; }
 .aura-reason-list li { padding: 6px 0; border-bottom: 1px solid rgba(107,114,128,.10); font-size: 12.5px; }
 .aura-empty, .aura-more { font-size: 12.5px; color: #6B7280; padding: 6px 0; }
+/* Recipient performance stays separate from the existing diagnostic cards. */
+.aura-performance { margin-bottom:24px; }
+.aura-performance-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:12px; }
+.aura-performance-kpis button { display:grid; gap:8px; padding:16px; background:#f5f8fc; color:#16324f; border:1px solid #cad5e2; border-radius:10px; cursor:pointer; text-align:left; }
+.aura-performance-kpis strong { font-size:26px; }
+.aura-performance-kpis button[aria-pressed="true"] { background:#16324f; color:white; }
+.aura-performance-filters { display:flex; flex-wrap:wrap; gap:12px; margin:20px 0; align-items:end; }
+.aura-performance-filters label { display:grid; gap:6px; font-size:12px; }
+.aura-performance-filters input,.aura-performance-filters select,.aura-performance-filters button { min-height:38px; padding:8px; border:1px solid #cad5e2; border-radius:6px; }
+.aura-performance-scroll { overflow:auto; max-height:650px; }
+.aura-performance-scroll th { position:sticky; top:0; background:#edf3fa; }
+.aura-performance button:focus-visible { outline:3px solid #2285df; outline-offset:2px; }

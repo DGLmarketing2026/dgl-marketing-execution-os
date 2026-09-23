@@ -12,10 +12,59 @@
   "use strict";
 
   const adapter = () => global.DGL_MARKETING_BACKEND_ADAPTER_V55;
-  let state = { loading: false, error: "", retention: null, campanaA: null, matchReport: null, stoppedBreakdown: null, execReport: null, runSummary: null };
+  let state = { loading: false, error: "", retention: null, campanaA: null, matchReport: null, stoppedBreakdown: null, execReport: null, runSummary: null, performance: null, performanceError: "" };
 
-  function fmt(n) { return Number(n || 0).toLocaleString("en-US"); }
+  function fmt(n) { return n == null || !Number.isFinite(Number(n)) ? "N/A" : Number(n).toLocaleString("en-US"); }
   function esc(v) { return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+  const perfFilters = { metric: '', search: '', campaignId: '', campaignFamily: '', sendStatus: '', language: '', from: '', to: '' };
+  const perfColumns = ['jobId','company','contactName','email','campaignId','campaignFamily','service','language','amOwner','sendStatus','sentAt','failedAt','bounceStatus','bounceReason','bounceAt','replied','replyAt','opened','openAt','clicked','clickAt'];
+  function metricMatches(r, metric) {
+    return !metric || ({sent:!!r.sentAt || r.sendStatus==='SENT',failed:!!r.failedAt || r.sendStatus==='FAILED',bounced:!!r.bounceStatus,replied:r.replied===true,opened:r.opened===true,clicked:r.clicked===true})[metric];
+  }
+  function filterPerformance(rows, filters) {
+    return rows.filter(r => {
+      if (!metricMatches(r,filters.metric)) return false;
+      if (!['company','contactName','email'].some(k=>String(r[k]||'').toLowerCase().includes(String(filters.search||'').toLowerCase()))) return false;
+      if (['campaignId','campaignFamily','sendStatus','language'].some(k=>filters[k] && r[k]!==filters[k])) return false;
+      const dates=[r.sentAt,r.failedAt,r.replyAt,r.bounceAt,r.openAt,r.clickAt].filter(Boolean).map(d=>String(d).slice(0,10));
+      return (!filters.from&&!filters.to)||dates.some(d=>(!filters.from||d>=filters.from)&&(!filters.to||d<=filters.to));
+    });
+  }
+  function performanceCsv(rows) {
+    const cell = v => { let s=v==null?'NOT_TRACKED':String(v); if(/^[=+@\-\t\r]/.test(s))s="'"+s; return '"'+s.replace(/"/g,'""')+'"'; };
+    return '\uFEFF'+[perfColumns.map(cell).join(','),...rows.map(r=>perfColumns.map(k=>cell(r[k])).join(','))].join('\r\n');
+  }
+  function performanceSection() {
+    const data=state.performance;
+    if(!data)return `<section class="card card-pad"><h3>Email Performance</h3><p>${esc(state.performanceError||'Loading recipient report…')}</p></section>`;
+    const opts = k => [...new Set(data.rows.map(r=>r[k]).filter(Boolean))].sort().map(v=>`<option ${perfFilters[k]===v?'selected':''} value="${esc(v).replace(/"/g,'&quot;')}">${esc(v)}</option>`).join('');
+    return `<section class="aura-performance card card-pad"><h3>Email Performance</h3>
+      <div class="aura-performance-kpis">${['sent','failed','bounced','replied','opened','clicked'].map(k=>`<button type="button" data-perf-kpi="${k}" aria-pressed="${perfFilters.metric===k}"><span>${k.toUpperCase()}</span><strong>${fmt(data.summary[k])}</strong><small>${data.summary[k]==null?'NOT TRACKED':'MEASURED'}</small></button>`).join('')}</div>
+      <div class="aura-performance-filters"><label>Search company/contact/email<input data-perf-filter="search" type="search" value="${esc(perfFilters.search).replace(/"/g,'&quot;')}"></label>
+      ${[['campaignId','Campaign'],['campaignFamily','Family'],['sendStatus','Status'],['language','Language']].map(([k,label])=>`<label>${label}<select data-perf-filter="${k}"><option value="">All</option>${opts(k)}</select></label>`).join('')}
+      ${['from','to'].map(k=>`<label>${k==='from'?'From':'To'} (UTC)<input type="date" data-perf-filter="${k}" value="${perfFilters[k]}"></label>`).join('')}
+      <button data-perf-reset>Clear filters</button><button data-perf-download>DOWNLOAD CSV</button></div>
+      <p>Dates match sent, failed, reply, bounce, open or click time. One row per recipient send job. SENT does not mean DELIVERED.</p>
+      <div data-perf-detail></div></section>`;
+  }
+  function bindPerformance(mount) {
+    if(!state.performance)return;
+    const host=mount.querySelector&&mount.querySelector('.aura-performance');if(!host)return;
+    function update(){
+      const rows=filterPerformance(state.performance.rows,perfFilters);
+      host.querySelector('[data-perf-detail]').innerHTML=`<p aria-live="polite">${rows.length} recipient rows</p><div class="aura-performance-scroll"><table class="data-table"><thead><tr>${perfColumns.map(k=>`<th>${esc(k)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${perfColumns.map(k=>`<td>${r[k]==null?'N/A / NOT TRACKED':esc(r[k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+      host.querySelectorAll('[data-perf-kpi]').forEach(b=>b.setAttribute('aria-pressed',String(perfFilters.metric===b.dataset.perfKpi)));
+    }
+    host.querySelectorAll('[data-perf-kpi]').forEach(b=>b.onclick=()=>{perfFilters.metric=perfFilters.metric===b.dataset.perfKpi?'':b.dataset.perfKpi;update();});
+    host.querySelectorAll('[data-perf-filter]').forEach(input=>input.oninput=()=>{perfFilters[input.dataset.perfFilter]=input.value;update();});
+    host.querySelector('[data-perf-reset]').onclick=()=>{Object.keys(perfFilters).forEach(k=>perfFilters[k]='');paint(mount);};
+    host.querySelector('[data-perf-download]').onclick=()=>{
+      const blob=new Blob([performanceCsv(filterPerformance(state.performance.rows,perfFilters))],{type:'text/csv;charset=utf-8'});
+      const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='aura-email-performance.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    };update();
+  }
+  global.DGL_AURA_PERFORMANCE = {filter:filterPerformance,csv:performanceCsv};
 
   function statusBadge(status) {
     const s = String(status || "").toUpperCase();
@@ -24,6 +73,7 @@
   }
 
   function kpi(icon, label, value, foot) {
+    if(value == null || (typeof value === "number" && !Number.isFinite(value))) value = "N/A";
     return global.DGL_UI && global.DGL_UI.kpiCard
       ? global.DGL_UI.kpiCard({ icon, label, value, foot })
       : `<div class="card kpi-card"><div class="kpi-value">${esc(value)}</div><div class="kpi-label">${esc(label)}</div></div>`;
@@ -31,8 +81,9 @@
 
   function languageRow(byLanguage) {
     const bl = byLanguage || {};
-    const total = (Number(bl.ES) || 0) + (Number(bl.EN) || 0) + (Number(bl.PT) || 0);
-    const pct = (n) => (total ? Math.round((Number(n || 0) / total) * 100) : 0);
+    const finite = n => Number.isFinite(Number(n)) ? Number(n) : 0;
+    const total = finite(bl.ES) + finite(bl.EN) + finite(bl.PT);
+    const pct = (n) => (total && Number.isFinite(total) ? Math.round((finite(n) / total) * 100) : 0);
     return `
     <div class="aura-lang-bar" role="img" aria-label="Language distribution">
       <div class="aura-lang-seg aura-lang-es" style="width:${pct(bl.ES)}%" title="ES ${fmt(bl.ES)}"></div>
@@ -187,6 +238,7 @@
 
     ${!connected ? `<div class="card card-pad"><strong>${state.loading ? "Cargando…" : state.error || "Conecta el backend privado para ver datos reales de AURA."}</strong></div>` : `
 
+    ${performanceSection()}
     <div class="kpi-grid">
       ${kpi("git-branch", "Run ID (última corrida Retention)", r.runId || "—")}
       ${kpi("calendar-clock", "Última ejecución", (r.lastRun || "—").slice(0, 16).replace("T", " "))}
@@ -224,12 +276,15 @@
     </div>
     `}`;
 
+    bindPerformance(mount);
     global.lucide && global.lucide.createIcons && global.lucide.createIcons();
   }
 
   async function refresh(mount) {
     if (state.loading || !adapter() || !adapter().isConnected()) return;
-    state.loading = true; state.error = ""; paint(mount);
+    state.loading = true; state.error = ""; state.performance = null; paint(mount);
+    try { state.performance = await adapter().v6AuraEmailPerformance(); state.performanceError = ""; }
+    catch(error) { state.performanceError = "Email Performance unavailable"; }
     try {
       const [retention, campanaA, matchReport, stoppedBreakdown, execReport, runSummary] = await Promise.all([
         adapter().v6AuraRetentionDashboard ? adapter().v6AuraRetentionDashboard() : null,

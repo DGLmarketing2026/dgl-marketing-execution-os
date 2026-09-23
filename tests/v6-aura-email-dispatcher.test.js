@@ -106,6 +106,7 @@ function makeApprovedCreative(ctx, over) {
     createdAt: new Date().toISOString()
   }, over || {});
   rec.htmlChecksum = ctx.v6AuraChecksum_(rec.htmlBody);
+  rec.contentChecksum = ctx.v6AuraCanonicalContentChecksum_(rec.subject, rec.htmlBody, rec.textBody, rec.templateId, rec.creativeVersion);
   return rec;
 }
 function jobFromCreative(ctx, creative, over) {
