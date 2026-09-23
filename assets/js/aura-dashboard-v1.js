@@ -73,7 +73,8 @@
   }
 
   function kpi(icon, label, value, foot) {
-    if(value == null || (typeof value === "number" && !Number.isFinite(value))) value = "N/A";
+    if(value == null || (typeof value === "number" && !Number.isFinite(value)) ||
+      (typeof value === "string" && /^(?:NaN|[+-]?Infinity|undefined|null)?$/i.test(value.trim()))) value = "N/A";
     return global.DGL_UI && global.DGL_UI.kpiCard
       ? global.DGL_UI.kpiCard({ icon, label, value, foot })
       : `<div class="card kpi-card"><div class="kpi-value">${esc(value)}</div><div class="kpi-label">${esc(label)}</div></div>`;
