@@ -6,6 +6,13 @@
   "use strict";
 
   function formatValue(v, format) {
+    if (v == null || (typeof v === "string" && /^(?:NaN|[+-]?Infinity|undefined|null|N\/A)?$/i.test(v.trim()))) return "N/A";
+    if (typeof v !== "number" && typeof v !== "string") return "N/A";
+    const numericFormat = ["currency", "currency-compact", "percent", "multiplier"].includes(format);
+    const numeric = Number(v);
+    if (!Number.isFinite(numeric)) {
+      return typeof v === "string" && Number.isNaN(numeric) && !numericFormat ? v : "N/A";
+    }
     if (format === "currency") return "$" + Number(v).toLocaleString("en-US");
     if (format === "currency-compact") {
       const n = Number(v);
@@ -24,7 +31,7 @@
   function kpiCard(config) {
     const deltaDir = config.delta > 0 ? "up" : config.delta < 0 ? "down" : "up";
     const deltaIcon = deltaDir === "up" ? "trending-up" : "trending-down";
-    const deltaHtml = (config.delta !== undefined && config.delta !== null)
+    const deltaHtml = (config.delta !== undefined && config.delta !== null && String(config.delta).trim() !== "" && Number.isFinite(Number(config.delta)))
       ? `<span class="kpi-delta ${deltaDir}"><i data-lucide="${deltaIcon}" style="width:12px;height:12px"></i>${Math.abs(config.delta)}${config.deltaSuffix || "%"}</span>`
       : "";
 
@@ -36,7 +43,7 @@
         </div>
         ${deltaHtml}
       </div>
-      <div class="kpi-value">${formatValue(config.value, config.format)}</div>
+      <div class="kpi-value">${String(formatValue(config.value, config.format)).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
       <div class="kpi-label">${config.label}</div>
       ${config.foot ? `<div class="kpi-foot">${config.foot}</div>` : ""}
     </div>`;
