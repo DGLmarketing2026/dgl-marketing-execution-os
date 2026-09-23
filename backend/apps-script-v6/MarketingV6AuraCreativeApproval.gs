@@ -325,7 +325,7 @@ function v6AuraResolveApprovedCreativeForSend_(campaignId, vars) {
   // drifted out of sync with the stored row (direct cell edit, corruption) would pass the
   // check above. contentChecksum covers subject too, so subject drift blocks here.
   var currentContentChecksum = v6AuraCanonicalContentChecksum_(creative.subject, creative.htmlBody, creative.textBody, creative.templateId, creative.creativeVersion);
-  if (creative.contentChecksum && String(currentContentChecksum) !== String(creative.contentChecksum)) {
+  if (!creative.contentChecksum || String(currentContentChecksum) !== String(creative.contentChecksum)) {
     return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
   }
   // PR #3 audit punto 6 -- hard gate at resolve time too (defense in depth alongside the
@@ -397,7 +397,7 @@ function v6AuraValidateQueuedCreative_(job) {
   // Same independent-recompute defense for the canonical contentChecksum (subject+htmlBody+
   // textBody+templateId+creativeVersion) -- catches the stored row's own contentChecksum column
   // going stale relative to its content, not just drift between the job and the creative.
-  if (creative.contentChecksum && String(v6AuraCanonicalContentChecksum_(creative.subject, creative.htmlBody, creative.textBody, creative.templateId, creative.creativeVersion)) !== String(creative.contentChecksum)) {
+ if (!creative.contentChecksum || String(v6AuraCanonicalContentChecksum_(creative.subject, creative.htmlBody, creative.textBody, creative.templateId, creative.creativeVersion)) !== String(creative.contentChecksum)) {
     return { blocked: true, error: 'CREATIVE_VERSION_MISMATCH' };
   }
   if (v6AuraEmailText_(creative.approvalId) !== v6AuraEmailText_(j.creativeApprovalId)) {
