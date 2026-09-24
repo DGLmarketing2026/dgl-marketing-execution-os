@@ -1,199 +1,123 @@
-(function(global){
+(function(g){
 "use strict";
-
 const KEY="dgl_v5_campaign_context";
-const OWNER_KEY="dgl_v6_owner_filter";
-const read=()=>{try{return JSON.parse(sessionStorage.getItem(KEY)||"{}")}catch(_){return{}}};
-const write=x=>sessionStorage.setItem(KEY,JSON.stringify(x||{}));
-const clean=v=>String(v==null?"":v).trim(),upper=v=>clean(v).toUpperCase();
-const automatic=x=>!!(x&&(x.scopeId||(x.audienceId&&String(x.audienceId).startsWith("SCOPE-")&&!String(x.audienceId).startsWith("SCOPE-AMR-"))));
-const providerStatus=()=>global.DGL_CAMPAIGN_EXECUTION_V6?.providerStatus||"BULK PROVIDER NOT CONFIGURED";
-const providerReady=()=>!upper(providerStatus()).includes("NOT CONFIGURED")&&!upper(providerStatus()).includes("BLOCKED");
-const policy=()=>global.DGL_MARKETING_PLAYBOOKS;
-const adapter=()=>global.DGL_MARKETING_BACKEND_ADAPTER_V55;
+const LOGO="https://dglmarketing2026.github.io/dgl-marketing-execution-os/assets/brand/dgl-logo-white.png";
+const LANGUAGES=["ES","EN","PT"],FIELDS=["subjectA","subjectB","preheader","headline","body","body2","cta"];
+const E=v=>String(v==null?"":v).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+const api=()=>g.DGL_MARKETING_BACKEND_ADAPTER_V55;
+let model=null,mount=null,epoch=0;
+function navigationId(){
+  const q=new URLSearchParams((g.location.hash||"").split("?")[1]||"");
+  if(q.has("campaignId"))return q.get("campaignId")||"";
+  return "";
+}
+function createModel(context){
+  const m={context:Object.freeze({...context}),language:(context.requiredLanguages||[])[0]||"ES",layout:"editorial",variants:{},brand:null,busy:false,error:"",pendingRevokes:new Set()};
+  LANGUAGES.forEach(language=>{
+    const approved=context.approvedCreativeVariants?.[language];
+    m.variants[language]={copy:g.DGL_COPY_ENGINE_V5.generate({objective:context.objective,service:context.service,angle:context.messageAngle,language,ctaIntent:"Send Requirement"}),dirty:!approved,testDraftStatus:"NOT CREATED",approved:!!approved,...(approved||{})};
+  });return m;
+}
+function selectLanguage(m,language){if(!LANGUAGES.includes(language))throw Error("Unsupported language");m.language=language;}
+async function revoke(m,languages){
+  const ids=[];
+  // Resolve latest backend approvals too: another tab may have approved since this view loaded.
 
-function tone(v){
-  const x=upper(v);
-  if(x.includes("READY")||x.includes("CLEAR")||x.includes("LIVE")||x.includes("AUTO BY POLICY")||x.includes("AVAILABLE")||x.includes("REPORT-DERIVED"))return"is-good";
-  if(x.includes("BLOCK")||x.includes("REQUIRED")||x.includes("NOT CONFIGURED")||x.includes("FAILED"))return"is-blocked";
-  if(x.includes("PENDING")||x.includes("WAIT")||x.includes("PARTIAL")||x.includes("FALLBACK")||x.includes("REVIEW")||x.includes("LOADING"))return"is-warn";
-  return"";
-}
-function policyState(x){
-  const d=policy()?.policyDecision?.(x);
-  return d||{status:x.requiresHumanReview?"HUMAN EXCEPTION REVIEW":"AUTO BY POLICY",autoApproved:!x.requiresHumanReview};
-}
-function gates(x){
-  const detected=Number(x.detectedAccounts||x.accountCount||0),
-        eligible=Number(x.eligibleAccounts||x.accountCount||0),
-        suppressed=Number(x.suppressedAccounts||Math.max(0,detected-eligible)||0),
-        contacts=Number(x.eligibleContactCount||x.recipientCount||0),
-        p=policyState(x);
-  return[
-    {n:"Automatic scope",v:automatic(x)?(x.scopeId||x.audienceId||"AUTOMATIC SCOPE"):"AUTOMATIC SCOPE REQUIRED"},
-    {n:"Detected accounts",v:detected,num:true},
-    {n:"Eligible accounts",v:eligible,num:true},
-    {n:"Suppressed accounts",v:suppressed,num:true},
-    {n:"Owner source",v:x.amOwner?"REPORT-DERIVED":"OWNER SOURCE PENDING"},
-    {n:"Message strategy",v:x.messageStrategy||"PLAYBOOK DEFAULT"},
-    {n:"Data quality",v:x.dataQualityStatus||"SOURCE SIGNAL AVAILABLE"},
-    {n:"AM activity coordination",v:x.coordinationStatus||"NOT REQUIRED / EVENT NOT JOINED"},
-    {n:"Frequency guard",v:x.frequencyStatus||"PENDING BACKEND EVALUATION"},
-    {n:"Exclusions",v:x.exclusionStatus||x.exclusionsStatus||"PENDING BACKEND EVALUATION"},
-    {n:"Policy decision",v:p.status},
-    {n:"Eligible contacts",v:contacts,num:true},
-    {n:"Bulk provider",v:providerStatus()},
-    {n:"Drive archive",v:x.csvArchiveReady?"ARCHIVE READY":"ARCHIVE PENDING"}
-  ];
-}
-function blockers(x){
-  const out=[],p=policyState(x),contacts=Number(x.eligibleContactCount||x.recipientCount||0),frequency=upper(x.frequencyStatus||"PENDING BACKEND EVALUATION");
-  if(!automatic(x))out.push("Automatic report-derived scope is required.");
-  if(automatic(x)&&contacts<1)out.push("Authoritative contact source is required before recipient resolution.");
-  if(frequency.includes("BLOCK"))out.push("Frequency / cooldown policy is blocking this scope.");
-  if(!p.autoApproved)out.push("This campaign is an exception and requires human review.");
-  if(!providerReady())out.push("Production bulk provider is not configured. Gmail remains QA-only.");
-  if(!x.csvArchiveReady)out.push("Execution archive is not ready; live runs must archive CSV / HTML / copy / creative.");
-  return out;
-}
-function overall(x){
-  if(x.__autoLoading)return{label:"AUTO-SELECTING SCOPE",tone:"warn",detail:"Opportunity Engine is selecting the highest-priority eligible scope automatically."};
-  if(!automatic(x))return{label:"SCOPE REQUIRED",tone:"blocked",detail:"No eligible report-derived scope could be loaded automatically."};
-  if(Number(x.eligibleContactCount||x.recipientCount||0)<1)return{label:"CONTACTS BLOCKED",tone:"blocked",detail:"Automatic strategy is prepared; recipient resolution is the next gate."};
-  if(!policyState(x).autoApproved)return{label:"EXCEPTION REVIEW",tone:"warn",detail:"Normal campaigns are automatic; this scope triggered an exception policy."};
-  if(!providerReady())return{label:"EXECUTION BLOCKED",tone:"blocked",detail:"Policy may be clear, but the production provider is not configured."};
-  return{label:"AUTO-READY FOR ACTIVATION",tone:"good",detail:"Automatic scope, policy and production gates are clear."};
-}
-function polishHeader(x){
-  const top=document.querySelector(".v5-topbar");if(!top)return;
-  const kicker=top.querySelector(".v5-kicker"),title=top.querySelector("h1"),desc=top.querySelector("p"),actions=top.querySelector(".v5-top-actions");
-  if(kicker)kicker.textContent="AUTOMATED CAMPAIGN EXECUTION";
-  if(title)title.innerHTML=`Campaign Studio <span class="v6-version">V6.6</span>`;
-  if(desc)desc.textContent="Studio auto-selects the highest-priority eligible report scope. Strategy, cadence, pressure, exclusions and policy are rule-driven; humans review exceptions only.";
-  if(actions)actions.innerHTML=`<span class="v5-badge ${automatic(x)?"green":""}">${x.__autoLoading?"AUTO-SELECTING":automatic(x)?"AUTOMATIC SCOPE":"NO ELIGIBLE SCOPE"}</span><a class="v5-btn" href="#/campaign-opportunities">← Opportunities</a>`;
-}
-function polishBrief(x){
-  const bar=document.querySelector(".v5-briefbar");if(!bar)return;
-  const map={"SOURCE":"OPPORTUNITY SOURCE","PORTFOLIO":"AUTOMATIC SCOPE","ACCOUNTS":"DETECTED ACCOUNTS","CAMPAIGN AUDIENCE":"RECIPIENT STATUS","OBJECTIVE":"CAMPAIGN FAMILY"};
-  [...bar.querySelectorAll(".v5-briefcell")].forEach(cell=>{
-    const l=cell.querySelector("span"),v=cell.querySelector("strong");if(!l)return;const key=upper(l.textContent);
-    if(map[key])l.textContent=map[key];
-    if(v&&key==="SOURCE"){
-      if(x.__autoLoading)v.textContent="Selecting highest-priority scope…";
-      else if(!automatic(x))v.textContent="No eligible automatic scope";
-      else v.textContent="REPORT / DATA HUB";
-    }
-    if(v&&key==="PORTFOLIO"){
-      if(x.__autoLoading)v.textContent="Auto-selecting…";
-      else if(!automatic(x))v.textContent="Unavailable";
-      else v.textContent=x.scopeId||x.audienceId||"AUTOMATIC SCOPE";
-    }
-    if(v&&key==="CAMPAIGN AUDIENCE"&&Number(x.eligibleContactCount||0)<1)v.textContent="Contacts pending";
+  languages.forEach(l=>{
+    const v=m.variants[l];if(v.creativeId)m.pendingRevokes.add(v.creativeId);
+    v.dirty=true;v.approved=false;v.storedHtml=null;
+    if(v.testDraftStatus==="CREATED")v.testDraftStatus="STALE AFTER EDIT";
+    ["creativeId","creativeVersion","approvalId","htmlChecksum","contentChecksum"].forEach(k=>delete v[k]);
   });
-  const audience=document.getElementById("v5Audience");
-  if(audience){audience.disabled=true;audience.title="Audience is governed by the automatic scope and private recipient resolver.";}
+  m.context=Object.freeze({...m.context,creativeSetStatus:"PENDING",approvalStatus:"PENDING"});
+  if(api().campaignStudioContext){const current=await api().campaignStudioContext(m.context.campaignId);languages.forEach(l=>{const id=current.approvedCreativeVariants?.[l]?.creativeId;if(id)m.pendingRevokes.add(id);});}
+  for(const id of m.pendingRevokes)ids.push(id);
+  for(const id of ids){await api().revokeApprovedCreative(id,"Marketing");m.pendingRevokes.delete(id);}
 }
-function inject(xOverride){
-  const x=xOverride||read();polishHeader(x);polishBrief(x);
-  document.querySelectorAll("[data-v6-studio-gates]").forEach(n=>n.remove());
-  const anchor=document.querySelector(".v5-briefbar")||document.querySelector(".v5-stepper");if(!anchor)return;
-  const state=overall(x),issues=x.__autoLoading?[]:blockers(x),panel=document.createElement("section");
-  panel.className="v6-studio-gates";panel.dataset.v6StudioGates="true";
-  panel.innerHTML=`<div class="v6-gates-head"><div><div class="eyebrow-line">AUTOMATION READINESS</div><h2>Production readiness</h2><p>Automatic signal → scope → strategy → policy → contacts → execution → response stop → attribution.</p></div><span class="v6-qa-chip">TEST DRAFT · QA AVAILABLE</span></div>
-  <div class="v6-readiness-banner ${state.tone}"><div><span>CAMPAIGN STATE</span><strong>${state.label}</strong></div><p>${state.detail}</p></div>
-  <div class="v6-status-grid">${gates(x).map(g=>`<div class="v6-status-card ${tone(g.v)}"><span class="label">${g.n}</span><span class="value ${g.num?"numeric":""}">${g.v}</span></div>`).join("")}</div>
-  <div class="v6-blocker-bar"><div class="v6-blocker-icon">!</div><div><strong>${x.__autoLoading?"Selecting automatic scope…":issues.length?`${issues.length} production gate${issues.length===1?"":"s"} remaining`:"Automatic production gates clear"}</strong><p>${x.__autoLoading?"No manual selection is required.":issues.length?issues.join(" · "):"Campaign can progress automatically under policy."}</p></div></div>`;
-  anchor.parentNode.insertBefore(panel,anchor.nextSibling);
+async function editCopy(m,field,value){if(!FIELDS.includes(field))return;const language=m.language;m.variants[language].copy[field]=value;const pending=revoke(m,[language]),current=Promise.all([m.revoking?m.revoking.catch(()=>{}):Promise.resolve(),pending]);m.revoking=current;try{await current;}finally{if(m.revoking===current)m.revoking=null;}}
+async function changeLayout(m,value){m.layout=value;await revoke(m,LANGUAGES);}
+function emailHtml(m,language=m.language){
+  const v=m.variants[language];if(v.storedHtml&&!v.dirty)return v.storedHtml;
+  const c=v.copy,space=m.layout==="executive"?44:36;
+  return '<!doctype html><html lang="'+language.toLowerCase()+'"><body style="margin:0;background:#F3F5F7"><div style="display:none;max-height:0;overflow:hidden">'+E(c.preheader)+'</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:32px 12px"><table role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:white"><tr><td style="background:#05035C;padding:24px 36px;border-bottom:4px solid #77B82A"><img src="'+LOGO+'" alt="DGL" width="184" style="display:block;width:184px;height:auto;border:0"></td></tr><tr><td style="padding:'+space+'px;font-family:Arial,sans-serif"><h1 style="font-size:34px;line-height:1.12;color:#05035C;margin:0 0 28px">'+E(c.headline)+'</h1><p style="font-size:16px;line-height:1.7;color:#475467">'+E(c.body)+'</p><p style="font-size:16px;line-height:1.7;color:#475467;margin-bottom:30px">'+E(c.body2)+'</p><table role="presentation" cellspacing="0" cellpadding="0"><tr><td style="background:#77B82A;padding:16px 24px"><a href="mailto:info@dglus.com?subject='+encodeURIComponent(language==="ES"?"Requerimiento terrestre":language==="PT"?"Requerimento terrestre":"Ground freight requirement")+'" style="font-weight:bold;font-size:13px;color:#05035C;text-decoration:none">'+E(c.cta)+'</a></td></tr></table></td></tr><tr><td style="padding:24px 36px;border-top:1px solid #EAECF0;color:#667085;font:11px Arial">Dedicated Ground Logistics · Your inland freight partner.</td></tr></table></td></tr></table></body></html>';
 }
-
-function priorityOf(x){return Number(x.priority||x.priorityRank||99);}
-function eligibleOf(x){return Number(x.eligibleAccounts||0);}
-function selectedOwner(){return sessionStorage.getItem(OWNER_KEY)||"ALL";}
-
-async function chooseAutomaticScope(){
-  const current=read();
-  if(automatic(current))return current;
-  const a=adapter();
-  if(!a?.isConnected?.())return current;
-
-  let groups=[];
+function validateBrand(){
+  return new Promise((resolve,reject)=>{
+    const img=new Image(),timer=setTimeout(()=>reject(Error("Logo load timed out")),15000);
+    img.onload=()=>{clearTimeout(timer);if(img.src!==LOGO||!img.complete||img.naturalWidth<=0)return reject(Error("Canonical logo failed validation"));resolve({url:img.src,naturalWidth:img.naturalWidth});};
+    img.onerror=()=>{clearTimeout(timer);reject(Error("Canonical logo did not load"));};img.src=LOGO;
+  });
+}
+function payload(m){
+  const c=m.variants[m.language].copy;
+  return {language:m.language,subject:c.subjectA,preheader:c.preheader,htmlBody:emailHtml(m),textBody:[c.headline,c.body,c.body2,c.cta].join("\n\n"),templateId:m.layout,logoUrl:LOGO,heroUrl:"",approvedBy:"Marketing",creativeCopy:c,brandValidation:m.brand};
+}
+async function run(action){
+  const m=model;if(!m||m.busy)return;m.busy=true;m.error="";draw();
   try{
-    const life=global.DGL_LIFECYCLE_MODULES_V6;
-    if(life?.loadLive){
-      const data=await life.loadLive(true);
-      groups=Array.isArray(data?.groups)?data.groups:[];
-    }else if(a.v6Opportunities){
-      const data=await a.v6Opportunities();
-      groups=Array.isArray(data?.groups)?data.groups:[];
+    await (m.revoking||Promise.resolve());
+    for(const id of [...m.pendingRevokes]){await api().revokeApprovedCreative(id,"Marketing");m.pendingRevokes.delete(id);}
+    m.brand=await validateBrand();
+    const c=await api().campaignStudioContext(m.context.campaignId);
+    if(!c.audienceResolved)throw Error("Audience unresolved: approval and test drafts blocked.");
+    m.context=Object.freeze({...c});
+    if(action==="variant"){
+      const record=await api().approveCreative(c.campaignId,payload(m));
+      if(!record?.creativeId||!record.approvalId||!record.contentChecksum||!record.htmlChecksum||!(record.creativeVersion>0))throw Error("Incomplete approval record");
+      Object.assign(m.variants[m.language],record,{approved:true,dirty:false});
+      m.context=Object.freeze(await api().campaignStudioContext(c.campaignId));
+    }else if(action==="set"){
+      m.context=Object.freeze(await api().approveCreativeSet(c.campaignId));
+    }else if(action==="draft"){
+      await api().campaignStudioTestDraft(c.campaignId,payload(m));
+      m.variants[m.language].testDraftStatus="CREATED";
     }
-  }catch(error){
-    console.error("Campaign Studio automatic scope load failed",error);
-    return current;
-  }
-
-  groups=groups.filter(x=>eligibleOf(x)>0);
-  const owner=selectedOwner();
-  if(owner!=="ALL"){
-    const owned=groups.filter(x=>clean(x.amOwner)===owner);
-    if(owned.length)groups=owned;
-  }
-  groups.sort((a,b)=>priorityOf(a)-priorityOf(b)||eligibleOf(b)-eligibleOf(a)||Number(b.detectedAccounts||0)-Number(a.detectedAccounts||0));
-  const candidate=groups[0];
-  if(!candidate)return current;
-
-  let ctx;
-  const life=global.DGL_LIFECYCLE_MODULES_V6;
-  if(life?.contextFor)ctx=life.contextFor(candidate);
-  else{
-    const fam=upper(candidate.opportunityType).includes("QUOTE")?"QNB":upper(candidate.opportunityType);
-    ctx={
-      source:"REPORT / DATA HUB",opportunitySource:"REPORT / DATA HUB",
-      scopeId:candidate.groupId||`AUTO-${Date.now()}`,audienceId:candidate.groupId||`AUTO-${Date.now()}`,
-      amOwner:candidate.amOwner||"Unassigned",campaignFamily:fam,
-      service:candidate.service||"Multiservicio",window:candidate.window||"",
-      detectedAccounts:Number(candidate.detectedAccounts||0),eligibleAccounts:Number(candidate.eligibleAccounts||0),
-      suppressedAccounts:Number(candidate.suppressedAccounts||0),eligibleContactCount:0,
-      contactsStatus:"CONTACTS PENDING",frequencyStatus:"PENDING BACKEND EVALUATION",
-      exclusionStatus:"PENDING BACKEND EVALUATION",automationPolicy:"AUTOMATION-FIRST"
-    };
-  }
-  ctx.autoSelectedByStudio=true;
-  ctx.autoSelectionReason=owner!=="ALL"?`Highest-priority eligible scope for ${owner}`:"Highest-priority eligible scope globally";
-  ctx.autoSelectedAt=new Date().toISOString();
-  write(ctx);
-  return ctx;
+  }catch(e){m.error=e.message||String(e);}finally{m.busy=false;if(model===m)draw();}
 }
-
-const baseRenderer=global.DGL_MODULE_RENDERERS?.["campaign-studio"];
-if(baseRenderer){
-  global.DGL_MODULE_RENDERERS["campaign-studio"]=c=>{
-    baseRenderer(c);
-    const current=read();
-    if(automatic(current)){inject(current);return;}
-    const loading={...current,__autoLoading:true};
-    inject(loading);
-    chooseAutomaticScope().then(ctx=>{
-      if(!c?.isConnected||!global.location?.hash.includes("campaign-studio"))return;
-      baseRenderer(c);
-      inject(ctx);
-    }).catch(error=>{
-      console.error("Campaign Studio auto-selection failed",error);
-      inject(read());
-    });
-  };
+function preview(){
+  if(!mount||!model)return;
+  const frame=mount.querySelector("[data-preview]");if(frame)frame.srcdoc=emailHtml(model);
+  const status=mount.querySelector("[data-variant-status]");
+  if(status){const v=model.variants[model.language];status.textContent=model.language+" · "+(v.approved?"APPROVED":"UNAPPROVED")+" · "+v.testDraftStatus;}
 }
-
-global.addEventListener?.("dgl:v55-backend-change",event=>{
-  if(!global.location?.hash.includes("campaign-studio"))return;
-  const detail=event.detail||{};
-  if(detail.state!=="PRIVATE_BACKEND")return;
-  const mount=document.getElementById("mainContent");
-  if(mount&&global.DGL_MODULE_RENDERERS?.["campaign-studio"])global.DGL_MODULE_RENDERERS["campaign-studio"](mount);
-});
-
-global.DGL_CAMPAIGN_STUDIO_V6={
-  version:"6.6-auto-scope",
-  gateData:gates,blockers,overallState:overall,inject,
-  chooseAutomaticScope
-};
+function draw(){
+  const m=model;if(!mount||!m)return;const c=m.context,v=m.variants[m.language];
+  mount.innerHTML='<div class="page-head"><div><div class="eyebrow">GOVERNED CAMPAIGN STUDIO</div><h2>'+E(c.campaignName)+'</h2><p>Private backend strategy · Creative fields only</p></div><button class="btn" data-picker>SELECT CAMPAIGN</button></div>'+
+    '<section class="card card-pad"><dl style="display:flex;flex-wrap:wrap;gap:24px">'+["objective","service","scopeId","playbookId","messageAngle","language"].map(k=>'<div><dt>'+E(k)+'</dt><dd style="margin:8px 0;font-weight:bold">'+E(c[k])+'</dd></div>').join("")+'</dl><p>'+E(c.eligibleContacts)+' eligible contacts · '+E(c.eligibleAccounts)+' unique accounts · '+E(c.excludedContacts)+' excluded contacts</p><p>Creative set: '+E(c.creativeSetStatus)+' · Required: '+E((c.requiredLanguages||[]).join(" / "))+'</p></section>'+
+    '<section class="card card-pad" style="margin-top:20px"><h3>Creative System</h3><div style="display:flex;gap:12px">'+["editorial","executive"].map(l=>'<button class="btn" data-layout="'+l+'" '+(m.busy?'disabled':'')+'>'+E(l)+'<br><small>'+E([c.objective,c.service,c.messageAngle,m.language].join(" · "))+'</small></button>').join("")+'</div></section>'+
+    '<div role="tablist" aria-label="Creative language" style="display:flex;gap:12px;margin:24px 0">'+LANGUAGES.map(l=>'<button class="btn '+(m.language===l?'btn-primary':'')+'" role="tab" aria-selected="'+(m.language===l)+'" data-language="'+l+'" '+(m.busy?'disabled':'')+'>'+l+'</button>').join("")+'</div>'+
+    '<p data-variant-status></p><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:24px"><fieldset style="border:0;padding:0" '+(m.busy?'disabled':'')+'>'+FIELDS.map(k=>'<label style="display:block;margin-bottom:14px">'+E(k)+'<textarea data-copy="'+k+'" style="display:block;width:100%;min-height:65px;padding:12px;box-sizing:border-box">'+E(v.copy[k])+'</textarea></label>').join("")+'</fieldset><iframe data-preview title="'+m.language+' email preview" sandbox="" style="width:100%;height:820px;border:1px solid #ddd;background:white"></iframe></div>'+
+    '<p role="alert">'+E(m.error)+'</p><div style="display:flex;gap:12px;flex-wrap:wrap">'+[["draft","CREATE TEST DRAFT"],["variant","APPROVE VARIANT"],["set","APPROVE CREATIVE SET"]].map(([a,label])=>'<button class="btn btn-primary" data-action="'+a+'" '+(m.busy||!c.audienceResolved?'disabled':'')+'>'+label+'</button>').join("")+'</div><p>Test Draft creates an unsent Gmail draft. Logo validation runs before approval.</p>';
+  mount.querySelector("[data-picker]").onclick=()=>{g.location.hash="#/campaign-studio";render(mount,"");};
+  mount.querySelectorAll("[data-language]").forEach(b=>b.onclick=()=>{selectLanguage(m,b.dataset.language);draw();});
+  mount.querySelectorAll("[data-layout]").forEach(b=>b.onclick=async()=>{m.busy=true;draw();try{await changeLayout(m,b.dataset.layout);}catch(e){m.error=e.message;}finally{m.busy=false;draw();}});
+  mount.querySelectorAll("[data-copy]").forEach(e=>e.oninput=()=>{editCopy(m,e.dataset.copy,e.value).catch(err=>{m.error=err.message;const a=mount.querySelector('[role="alert"]');if(a)a.textContent=m.error;});preview();});
+  mount.querySelectorAll("[data-action]").forEach(b=>b.onclick=()=>run(b.dataset.action));preview();
+}
+async function render(container,explicitId){
+  mount=container;const ticket=++epoch,id=explicitId===undefined?navigationId():explicitId;model=null;
+  container.innerHTML='<h2>'+(id?'LOADING GOVERNED CAMPAIGN':'SELECT A CAMPAIGN TO OPEN IN STUDIO')+'</h2><p>Loading private backend…</p>';
+  try{
+    if(!api()?.isConnected?.())throw Error("Connect the private backend to open Campaign Studio.");
+    if(!id){
+      const result=await api().campaignStudioList();if(ticket!==epoch)return;
+      container.innerHTML='<h2>SELECT A CAMPAIGN TO OPEN IN STUDIO</h2><div class="card card-pad">'+(result.campaigns||[]).map(c=>'<button class="btn" data-campaign="'+E(c.campaignId)+'">'+E(c.campaignName)+'</button>').join("")+'</div>';
+      container.querySelectorAll("[data-campaign]").forEach(b=>b.onclick=()=>{g.location.hash="#/campaign-studio?campaignId="+encodeURIComponent(b.dataset.campaign);});return;
+    }
+    const context=await api().campaignStudioContext(id);if(ticket!==epoch)return;
+    if(context.campaignId!==id)throw Error("Campaign context mismatch");
+    sessionStorage.setItem(KEY,"{}");
+    model=createModel(context);
+    for(const l of LANGUAGES){
+      const v=model.variants[l];if(!v.approved)continue;
+      const record=await api().getLatestApprovedCreative(id,l);if(ticket!==epoch)return;
+      if(record?.creativeId===v.creativeId){model.layout=record.templateId||model.layout;v.storedHtml=record.htmlBody;v.copy.subjectA=record.subject;v.copy.preheader=record.preheader;if(record.creativeCopy){try{v.copy=JSON.parse(record.creativeCopy);}catch(_){}}}
+      else{v.approved=false;v.dirty=true;}
+    }
+    draw();
+  }catch(e){if(ticket===epoch)container.innerHTML='<h2>SELECT A CAMPAIGN TO OPEN IN STUDIO</h2><p role="alert">'+E(e.message)+'</p>';}
+}
+g.DGL_CAMPAIGN_STUDIO_V6={version:"governed-activation-v2",render,createModel,selectLanguage,editCopy,changeLayout,emailHtml,validateBrand,navigationId,getState:()=>model};
+g.DGL_MODULE_RENDERERS=g.DGL_MODULE_RENDERERS||{};g.DGL_MODULE_RENDERERS["campaign-studio"]=render;
+g.addEventListener?.("dgl:v55-backend-change",()=>{if(g.location?.hash.includes("campaign-studio")&&!model&&mount)render(mount);});
 })(window);

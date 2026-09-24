@@ -46,7 +46,7 @@
     "Activation":{
       recommendedSystem:"editorial-white",
       angles:["Current Movement"],
-      defaultAngle:"Current Movement",defaultCta:"Generate Quote"
+      defaultAngle:"Current Movement",defaultCta:"Send Requirement"
     },
     "Reactivation":{
       recommendedSystem:"editorial-white",
@@ -191,6 +191,7 @@
   }
 
   const CTA={
+    "Send Requirement":{en:"SEND A REQUIREMENT",es:"ENVIAR REQUERIMIENTO",pt:"ENVIAR REQUERIMENTO"},
     "Generate Quote":{es:"ENVIAR MOVIMIENTO",en:"SEND A SHIPMENT",pt:"ENVIAR EMBARQUE"},
     "Recover Quote":{es:"ACTUALIZAR COTIZACIÓN",en:"UPDATE QUOTE",pt:"ATUALIZAR COTAÇÃO"},
     "Reply":{es:"RESPONDER A DGL",en:"REPLY TO DGL",pt:"RESPONDER À DGL"},

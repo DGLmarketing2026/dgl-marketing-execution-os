@@ -1,6 +1,7 @@
 var AURA_EMAIL_EVENT_HEADERS_ = ['eventId','jobId','campaignId','accountId','contactId','email','eventType','occurredAt','source','externalId','reasonCode','reasonText','createdAt'];
 var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
   MKT_EMAIL_EVENTS:AURA_EMAIL_EVENT_HEADERS_,
+  MKT_CAMPAIGNS:['campaignId','campaignName','campaignType','objective','service','scopeId','audienceId','playbookId','messageAngle','language','status','createdAt'],
   MKT_ACCOUNTS:['accountId','externalSystem','externalAccountId','salesforceAccountId','canonicalSalesforceIdStatus','accountName','amOwner','status','sourceUpdatedAt','createdAt','updatedAt'],
   MKT_CONTACTS_SECURE:['contactId','accountId','externalSystem','externalContactId','salesforceContactId','canonicalSalesforceIdStatus','email','emailStatus','doNotContact','status','sourceUpdatedAt','createdAt','updatedAt'],
   MKT_CAMPAIGN_SCOPES:['scopeId','audienceId','campaignId','campaignType','opportunityType','updatedAt'],
@@ -76,7 +77,7 @@ var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
   // canonical checksum over subject+htmlBody+textBody+templateId+creativeVersion (catches
   // subject-only drift, which htmlChecksum alone -- htmlBody only -- cannot). Additive only,
   // every existing reader of this table is unaffected.
-  MKT_CAMPAIGN_CREATIVES:['creativeId','campaignId','templateId','creativeVersion','subject','preheader','htmlBody','textBody','heroUrl','logoUrl','language','approvedAt','approvedBy','approvalId','htmlChecksum','createdAt','status','contentChecksum','revokedAt','revokedBy']
+  MKT_CAMPAIGN_CREATIVES:['creativeId','campaignId','templateId','creativeVersion','subject','preheader','htmlBody','textBody','heroUrl','logoUrl','language','approvedAt','approvedBy','approvalId','htmlChecksum','createdAt','status','contentChecksum','revokedAt','revokedBy','creativeCopy']
 };
 // The one table in MKT_V6_CONTACT_RECIPIENT_SCHEMA that is safe to auto-create end to end
 // (tab + header row), because it is a brand-new, AURA-owned reporting table with no historical

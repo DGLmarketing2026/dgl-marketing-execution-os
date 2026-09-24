@@ -17,6 +17,7 @@ const OWNER_KEY="dgl_v6_owner_filter";
 const ORDER={QNB:1,RETENTION:2,REACTIVATION:3,"CROSS-SELL":4,NURTURE:5};
 const FAMILY_LABEL={
   QNB:"Quoted Not Booked",
+  ACTIVATION:"Activation",
   RETENTION:"Retention",
   REACTIVATION:"Reactivation",
   "CROSS-SELL":"Cross-Sell",
@@ -28,6 +29,7 @@ function family(v){
   if(x.includes("QUOTE")||x.includes("QNB"))return"QNB";
   if(x.includes("RETENTION"))return"RETENTION";
   if(x.includes("REACTIVATION"))return"REACTIVATION";
+  if(x==="ACTIVATION")return"ACTIVATION";
   if(x.includes("CROSS"))return"CROSS-SELL";
   if(x.includes("NURTURE")||x.includes("RENEWAL"))return"NURTURE";
   return x||"UNKNOWN";
@@ -58,6 +60,7 @@ function scopeId(x){
 }
 function objective(x){
   const f=family(x.opportunityType);
+  if(f==="ACTIVATION")return"Activation";
   if(f==="QNB")return"Quoted Not Booked";
   if(f==="CROSS-SELL")return"Cross-Sell";
   if(f==="RETENTION"||f==="NURTURE")return"Retention";
@@ -118,8 +121,8 @@ function context(x){
   };
 }
 function openStudio(x){
-  sessionStorage.setItem("dgl_v5_campaign_context",JSON.stringify(context(x)));
-  location.hash="#/campaign-studio";
+  sessionStorage.setItem("dgl_v5_campaign_context",JSON.stringify({campaignId:x.campaignId||""}));
+  location.hash="#/campaign-studio"+(x.campaignId?"?campaignId="+encodeURIComponent(x.campaignId):"");
 }
 
 let cache={groups:null,summary:null,pipe:null,ts:0};
