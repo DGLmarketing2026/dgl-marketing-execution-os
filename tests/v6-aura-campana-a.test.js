@@ -66,7 +66,9 @@ function makeContext(opts) {
     DGL_CONFIG: { DEFAULT_SENDER_NAME: 'DGL' },
     Utilities: { getUuid: (function () { var n = 0; return function () { n++; return String(n).padStart(8, '0') + '-0000-0000-0000-000000000000'; }; })() }
   };
+  ctx.LockService={getScriptLock:()=>({waitLock(){},releaseLock(){}})};
   vm.createContext(ctx);
+  vm.runInContext(src('MarketingV6CampaignStudio.gs'),ctx);
   vm.runInContext(gmailIngestSource, ctx, { filename: 'MarketingV6AuraGmailIngest.gs' });
   vm.runInContext(copyEngineSource, ctx, { filename: 'MarketingV6AuraCopyEngine.gs' });
   vm.runInContext(dispatcherSource, ctx, { filename: 'MarketingV6AuraEmailDispatcher.gs' });
@@ -144,15 +146,15 @@ function makeContext(opts) {
   // to exercise the CREATIVE_NOT_APPROVED/CREATIVE_VERSION_MISMATCH blocking path itself.
   if (!opts.noDefaultCreative && !tables.MKT_CAMPAIGN_CREATIVES) {
     var creativeTemplates = [
-      { language: 'Spanish', subject: '{{firstName}}, ¿tiene un movimiento en puerta?', htmlBody: '<p>Hola {{firstName}} de {{company}}, servicio {{service}}.</p><a href="mailto:info@dglus.com?subject=RE%20Movimiento">ENVIAR MOVIMIENTO</a> DGL Freight Broker' },
-      { language: 'English', subject: '{{firstName}}, do you have a shipment moving?', htmlBody: '<p>Hi {{firstName}} from {{company}}, service {{service}}.</p><a href="mailto:info@dglus.com?subject=RE%20Movement">SEND MOVEMENT</a> DGL Freight Broker' },
-      { language: 'Português (Brasil)', subject: '{{firstName}}, tem um embarque em andamento?', htmlBody: '<p>Ola {{firstName}} de {{company}}, servico {{service}}.</p><a href="mailto:info@dglus.com?subject=RE%20Embarque">ENVIAR EMBARQUE</a> DGL Freight Broker' }
+      { language: 'Spanish', subject: '{{firstName}}, ¿tiene un movimiento en puerta?', htmlBody: '<p>Hola {{firstName}} de {{company}}, movimiento terrestre.</p><a href="mailto:info@dglus.com?subject=RE%20Movimiento">ENVIAR MOVIMIENTO</a> DGL Freight Broker' },
+      { language: 'English', subject: '{{firstName}}, do you have a shipment moving?', htmlBody: '<p>Hi {{firstName}} from {{company}}, ground movement.</p><a href="mailto:info@dglus.com?subject=RE%20Movement">SEND MOVEMENT</a> DGL Freight Broker' },
+      { language: 'Português (Brasil)', subject: '{{firstName}}, tem um embarque em andamento?', htmlBody: '<p>Ola {{firstName}} de {{company}}, embarque terrestre.</p><a href="mailto:info@dglus.com?subject=RE%20Embarque">ENVIAR EMBARQUE</a> DGL Freight Broker' }
     ];
     tables.MKT_CAMPAIGN_CREATIVES = creativeTemplates.map(function (t, i) {
       var rec = {
         creativeId: 'CMP-CAMPANA-A-HA-PRIORITARIA:CREATIVE:' + (i + 1), campaignId: 'CMP-CAMPANA-A-HA-PRIORITARIA',
         templateId: 'editorial', creativeVersion: i + 1, subject: t.subject, preheader: 'Preheader',
-        htmlBody: t.htmlBody, textBody: 'Text body', heroUrl: '', logoUrl: '', language: t.language,
+        htmlBody: '<img src="'+ctx.V6_STUDIO_LOGO_+'">'+t.htmlBody, textBody: 'Text body', heroUrl: '', logoUrl: ctx.V6_STUDIO_LOGO_, language: t.language,
         approvedAt: new Date().toISOString(), approvedBy: 'Marketing',
         approvalId: 'CAPR:CMP-CAMPANA-A-HA-PRIORITARIA:' + (i + 1), createdAt: new Date().toISOString()
       };
@@ -161,6 +163,11 @@ function makeContext(opts) {
       return rec;
     });
   }
+  // These legacy mechanics tests isolate the complete-set gate. Its real implementation
+  // is exercised with real approval/revocation/context functions in campaign-studio-governed.test.js.
+  ctx.v6CampaignStudioSetGate_=()=>({blocked:false,context:{approvedCreativeVariants:Object.fromEntries(["ES","EN","PT"].map(l=>[l,ctx.v6AuraLatestApprovedCreativeForLanguage_("CMP-CAMPANA-A-HA-PRIORITARIA",l)]))}});
+  // Cell storage adapter: retain all foreign properties, matching the real sheet adapter.
+  ctx.v6CampaignStudioPatchCampaign_=(id,p)=>{const rows=tables.MKT_CAMPAIGNS||(tables.MKT_CAMPAIGNS=[]);let row=rows.find(r=>r.campaignId===id);if(!row){row={createdAt:new Date().toISOString()};rows.push(row);}Object.assign(row,p);};
   ctx.__tables = tables; ctx.__sentEmails = sentEmails; ctx.__loggedLines = loggedLines; ctx.__callCounts = callCounts;
   return ctx;
 }
@@ -178,7 +185,7 @@ function gmailOpp(accountId, accountName, amOwner, sheetName) {
   var headers = ['Cuenta', 'Account Owner', 'Motivo campana', 'Prioridad'];
   var values = [headers, ['Progeral Corp', 'Luis Simoes', 'HA priority', 'High']];
   var parsedA = ctx.v6AuraGmailParseTable_('Campana A - HA prioritaria', values, {});
-  assert.equal(parsedA.family, 'Retention');
+  assert.equal(parsedA.family, 'Activation');
   assert.equal(parsedA.accepted.length, 1);
   assert.equal(parsedA.accepted[0].sheetName, 'Campana A - HA prioritaria');
   var parsedB = ctx.v6AuraGmailParseTable_('Campana B', values, {});
@@ -283,21 +290,24 @@ function gmailOpp(accountId, accountName, amOwner, sheetName) {
   // one real variant non-deterministically and this test needs one specific, known template.
   var realTemplateCreative = {
     creativeId: 'CMP-CAMPANA-A-HA-PRIORITARIA:CREATIVE:TEST6', campaignId: 'CMP-CAMPANA-A-HA-PRIORITARIA',
-    templateId: 'editorial', creativeVersion: 99, subject: '{{firstName}}, ¿tiene un movimiento {{service}} en puerta?', preheader: 'Preheader',
-    htmlBody: '<p>{{firstName}} {{company}} {{service}}</p><a href="mailto:info@dglus.com?subject=RE">ENVIAR MOVIMIENTO</a> DGL Freight Broker',
+    templateId: 'editorial', creativeVersion: 99, subject: '{{firstName}}, ¿tiene algún movimiento para estos días?', preheader: 'Preheader',
+    htmlBody: '<p>{{firstName}} {{company}}</p><a href="mailto:info@dglus.com?subject=RE">ENVIAR MOVIMIENTO</a> DGL Freight Broker',
     textBody: 'Text body', heroUrl: '', logoUrl: '', language: 'Spanish',
     approvedAt: new Date().toISOString(), approvedBy: 'Marketing', approvalId: 'CAPR:TEST6', createdAt: new Date().toISOString()
   };
+  realTemplateCreative.logoUrl=ctx.V6_STUDIO_LOGO_;
+  realTemplateCreative.htmlBody='<img src="'+ctx.V6_STUDIO_LOGO_+'">'+realTemplateCreative.htmlBody;
+  realTemplateCreative.contentChecksum=ctx.v6AuraCanonicalContentChecksum_(realTemplateCreative.subject,realTemplateCreative.htmlBody,realTemplateCreative.textBody,realTemplateCreative.templateId,realTemplateCreative.creativeVersion);
   realTemplateCreative.htmlChecksum = ctx.v6AuraChecksum_(realTemplateCreative.htmlBody);
   tables.MKT_CAMPAIGN_CREATIVES = [realTemplateCreative];
   ctx.v6AuraCampanaABuildQueue_();
   var genericJob = tables.MKT_EMAIL_QUEUE.filter(function (j) { return j.contactId === 'CON-GENERIC'; })[0];
   assert.equal(genericJob.firstName, '', 'a generic role/mailbox name must never be used, and never fall back to a fabricated "Team"');
-  assert.equal(genericJob.subject, '¿tiene un movimiento Multiservicio en puerta?', 'the no-name subject must drop the leading "{{firstName}}, " clause from the real Activation subjectA template, with no fabricated "Team,"');
+  assert.equal(genericJob.subject, '¿tiene algún movimiento para estos días?', 'the no-name subject must drop the leading "{{firstName}}, " clause from the real Activation subjectA template, with no fabricated "Team,"');
   assert(genericJob.subject.indexOf('Team') < 0);
   var realJob = tables.MKT_EMAIL_QUEUE.filter(function (j) { return j.contactId === 'CON-REAL'; })[0];
   assert.equal(realJob.firstName, 'Sofia');
-  assert.equal(realJob.subject, 'Sofia, ¿tiene un movimiento Multiservicio en puerta?');
+  assert.equal(realJob.subject, 'Sofia, ¿tiene algún movimiento para estos días?');
   console.log('campana-a test 6 (generic names never used; real names personalize; no-name subject uses the real Activation template, no fallback to Retention): PASS');
 })();
 

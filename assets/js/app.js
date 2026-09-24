@@ -107,7 +107,7 @@
     return ALL_MODULES.find((m) => m.id === id) || ALL_MODULES.find((m) => m.id === DEFAULT_MODULE);
   }
   function currentRouteId() {
-    const hash = window.location.hash.replace("#/", "").trim();
+    const hash = window.location.hash.replace("#/", "").split("?")[0].trim();
     return ALL_MODULES.some((m) => m.id === hash) ? hash : DEFAULT_MODULE;
   }
   function renderShellOnce() {
