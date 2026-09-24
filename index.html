@@ -2,12 +2,12 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; connect-src 'self' https://script.google.com https://script.googleusercontent.com; img-src 'self' https: data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self' https://script.google.com" />
+<meta name="referrer" content="no-referrer" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>DGL Marketing OS · Acquisition Automation V2</title>
 <meta name="description" content="DGL Marketing OS: Existing Account Growth + automated New Business Acquisition, governed execution and closed-loop attribution." />
-<script>
-(function(){"use strict";var ready=false,p=[];function f(){var b=document.getElementById("bootError"),r=document.getElementById("bootReload");if(!b||!p.length)return;b.style.display="block";b.textContent=p.join("\n");if(r)r.style.display="inline-block"}function x(m){if(p.indexOf(m)<0)p.push(m);f()}window.__dglMarkReady=function(){ready=true;p=[];f()};window.__dglBootFail=x;window.addEventListener("error",function(e){if(e&&e.target&&(e.target.tagName==="SCRIPT"||e.target.tagName==="LINK"))x("No se pudo cargar: "+(e.target.src||e.target.href||"recurso desconocido"));else if(e&&e.message&&!ready)x("Error de JavaScript: "+e.message)},true);document.addEventListener("DOMContentLoaded",f);document.addEventListener("click",function(e){if(e.target&&e.target.id==="bootReload")location.reload()});setTimeout(function(){if(!ready)x("La plataforma tarda más de lo esperado en iniciar.")},8000)})();
-</script>
+<script src="assets/js/boot.js?v=20260924-security"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="assets/css/styles.css?v=20260901-66" />
@@ -18,7 +18,7 @@
 <link rel="stylesheet" href="assets/css/acquisition-automation-v2.css?v=20260908-acq2" />
 <link rel="stylesheet" href="assets/css/acquisition-visual-v3.css?v=20260908-acq3" />
 <link rel="stylesheet" href="assets/css/aura-dashboard-v1.css?v=20260923-8" />
-<script src="https://unpkg.com/lucide@0.294.0/dist/umd/lucide.js" crossorigin="anonymous"></script>
+<script src="assets/vendor/lucide-0.294.0.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
 <div id="app"><div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;color:#6B7280;font-family:Inter,-apple-system,sans-serif;font-size:13px;text-align:center;padding:24px;background:#060816"><div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#77B82A,#5a9420);display:flex;align-items:center;justify-content:center;font-weight:800;color:#06210a;font-size:15px">DG</div><div>Cargando DGL Marketing OS…</div><div id="bootError" style="display:none"></div><button id="bootReload" style="display:none">Reintentar</button></div></div>
@@ -37,6 +37,7 @@
 <script src="assets/js/campaign-sequences-v4.js?v=20260901-66"></script>
 <script src="assets/js/marketing-playbooks-v55.js?v=20260901-66"></script>
 
+<script src="assets/js/security-client.js?v=20260924-security"></script>
 <script src="assets/js/marketing-backend-adapter-v55.js?v=20260923-8"></script>
 <script src="assets/js/aura-dashboard-v1.js?v=20260923-8"></script>
 <script src="assets/js/acquisition-backend-adapter-v1.js?v=20260908-acq2"></script>

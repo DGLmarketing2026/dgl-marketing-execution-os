@@ -106,8 +106,9 @@ function v6AuraEmailPipelineStage_(accountId) {
 // Reuses v6PipelineAdvanced_ (MarketingV6Pipeline.gs) verbatim -- an account that already
 // replied, RFQ'd, quoted, loaded, retained/expanded or entered cooldown/nurture is never a
 // fresh send target, and CLOSED / SUPPRESSED (the account-stop terminal stage) never is either.
-function v6AuraEmailAccountStopped_(accountId) {
+function v6AuraEmailAccountStopped_(accountId,contactId,email) {
   var stage = v6AuraEmailPipelineStage_(accountId);
+  if(contactId)return v6RecipientPipelineStopped_(stage,{accountId:accountId,contactId:contactId,email:email});
   if (!stage) return false;
   return stage === 'CLOSED / SUPPRESSED' || (typeof v6PipelineAdvanced_ === 'function' && v6PipelineAdvanced_(stage));
 }
@@ -291,7 +292,7 @@ function v6AuraRepairEmailQueueContent_() {
       lane: v6AuraEmailText_(campaign.lane) || '',
       replyTo: replyTo
     };
-    var stopped = v6AuraEmailAccountStopped_(job.accountId);
+    var stopped = v6AuraEmailAccountStopped_(job.accountId,job.contactId,job.email);
     var policyApproved = (typeof v6AuraPolicyApproved_ === 'function') ? v6AuraPolicyApproved_(campaign.objective || campaign.campaignType) : true;
     var personalizedHtml = v6AuraCreativePersonalize_(creative.htmlBody, vars);
     job.replyTo = replyTo;
@@ -405,6 +406,7 @@ function auraProcessEmailQueue(limit) {
 
       var options = { htmlBody: job.htmlBody, name: senderName };
       if (job.replyTo) options.replyTo = job.replyTo;
+      if(v6RecipientSecurityCheck_(job)!=="CLEAR")throw new Error("RECIPIENT_GOVERNANCE_BLOCKED");
       GmailApp.sendEmail(job.email, job.subject, v6AuraEmailStripHtml_(job.htmlBody), options);
       job.status = 'SENT'; job.processedAt = now; job.error = '';
       v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);

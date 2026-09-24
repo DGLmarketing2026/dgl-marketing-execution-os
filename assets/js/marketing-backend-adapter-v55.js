@@ -1,14 +1,7 @@
 (function(global){
   "use strict";
   const ENDPOINT="https://script.google.com/macros/s/AKfycbw1lzTl7iwqYNp_sp_y2So7rtTt-yUsTmb9DEtRy3tsrF9tUGxHy-exI6Vo8Qmy66GH/exec";
-  // Persistent (not session-only) storage: a one-time manual token entry
-  // survives browser/tab restarts so Cristian never has to re-paste it on
-  // every reopen. The token itself never leaves this device — it lives only
-  // in the browser's own localStorage, is never written to GitHub source,
-  // never appears in a URL, and is redacted from every logged/thrown error
-  // (see classifyError/activityError below).
   const TOKEN_KEY="dgl_mkt_v55_token_session";
-  const LEGACY_TOKEN_KEY="dgl_mkt_v55_token_session"; // pre-persistence sessionStorage key (same name, different store)
   // V6/AURA is the connection authority. AUTH_ERROR means the backend
   // explicitly rejected the token (it is cleared). BACKEND_ERROR means V6
   // itself could not be reached/parsed for any other reason (network,
@@ -27,17 +20,11 @@
     try{global.DGL_BACKEND_DIAGNOSTIC=Object.freeze({...diag});}catch(_){global.DGL_BACKEND_DIAGNOSTIC={...diag};}
   }
   publishDiagnostic();
-  function migrateLegacySessionToken(){
-    try{
-      const legacy=sessionStorage.getItem(LEGACY_TOKEN_KEY);
-      if(legacy&&!localStorage.getItem(TOKEN_KEY))localStorage.setItem(TOKEN_KEY,legacy);
-      sessionStorage.removeItem(LEGACY_TOKEN_KEY);
-    }catch(_){/* storage unavailable — falls back to re-prompting */}
-  }
-  migrateLegacySessionToken();
-  const token=()=>{try{return localStorage.getItem(TOKEN_KEY)||"";}catch(_){return "";}};
-  const setToken=value=>{try{localStorage.setItem(TOKEN_KEY,value);}catch(_){/* storage unavailable */}};
-  const clearToken=()=>{try{localStorage.removeItem(TOKEN_KEY);}catch(_){/* storage unavailable */}};
+  let credential="";
+  try{localStorage.removeItem(TOKEN_KEY);localStorage.removeItem("dgl_mkt_v55_token");credential=sessionStorage.getItem(TOKEN_KEY)||"";}catch(_){}
+  const token=()=>credential;
+  const setToken=value=>{credential=value;try{sessionStorage.setItem(TOKEN_KEY,value);}catch(_){}};
+  const clearToken=()=>{credential="";try{sessionStorage.removeItem(TOKEN_KEY);}catch(_){}};
   const clone=v=>JSON.parse(JSON.stringify(v==null?null:v));
 
   function rerenderCurrentModule(){
@@ -51,7 +38,7 @@
         const mount=document.getElementById("mainContent");
         const renderer=global.DGL_MODULE_RENDERERS&&global.DGL_MODULE_RENDERERS[id];
         if(mount&&renderer)renderer(mount);
-      }catch(error){lastError="Lifecycle rerender failed: "+(error&&error.message||error);}
+      }catch(error){lastError="RENDER_FAILED";}
     },0);
   }
 
@@ -65,13 +52,10 @@
   // timeout, malformed response, a route that is temporarily missing). Only
   // AUTH ever clears the stored token.
   function classifyError(error,code){
-    const raw=String(error&&error.message||error||"Backend request failed");
-    const secret=token(),safe=secret?raw.replaceAll(secret,"[redacted]"):raw;
-    if(/unauthoriz|forbidden|invalid token|token required/i.test(raw))
-      return {kind:"AUTH",code:code||"AUTH_REJECTED",text:"PRIVATE BACKEND AUTHENTICATION FAILED"};
-    if(/timeout/i.test(raw))
-      return {kind:"BACKEND",code:code||"TIMEOUT",text:"AURA BACKEND TEMPORARILY UNAVAILABLE"};
-    return {kind:"BACKEND",code:code||"UNREACHABLE",text:"AURA BACKEND TEMPORARILY UNAVAILABLE",detail:safe.slice(0,200)};
+    const raw=String(error?.message||error||"");
+    const auth=/unauthoriz|forbidden|invalid token|token required|AUTH_REJECTED/i.test(raw);
+    const safeCode=auth?"AUTH_REJECTED":/timeout|AbortError/i.test(raw)?"TIMEOUT":/METHOD_NOT_ALLOWED|REPLAY_REJECTED|STALE_REQUEST|IDEMPOTENCY_CONFLICT|ALREADY_APPLIED/.exec(raw)?.[0]||"BACKEND_UNAVAILABLE";
+    return {kind:auth?"AUTH":"BACKEND",code:safeCode,text:auth?"PRIVATE BACKEND AUTHENTICATION FAILED":safeCode==="TIMEOUT"?"AURA BACKEND TEMPORARILY UNAVAILABLE":safeCode};
   }
   function unwrap(result){
     if(result&&result.ok===false)throw new Error(result.error||result.message||"Backend request failed");
@@ -79,34 +63,29 @@
     if(result&&Object.prototype.hasOwnProperty.call(result,"result"))return result.result;
     return result;
   }
-  function jsonp(action,payload,requiresToken=true){
-    return new Promise((resolve,reject)=>{
-      if(requiresToken&&!token()){reject(new Error("Private backend token required"));return;}
-      const callback=`__dglV55Jsonp_${Date.now()}_${++requestSequence}`,script=document.createElement("script");
-      let done=false;
-      const timer=setTimeout(()=>finish(new Error("Private backend timeout")),20000);
-      function finish(error,value){
-        if(done)return;done=true;clearTimeout(timer);
-        try{delete global[callback]}catch(_){global[callback]=undefined}
-        script.remove();error?reject(error):resolve(value);
-      }
-      global[callback]=result=>{try{finish(null,unwrap(result))}catch(error){finish(error)}};
-      script.onerror=()=>finish(new Error("Private backend unavailable"));
-      const params=new URLSearchParams({action,callback});
-      if(requiresToken)params.set("token",token());
-      if(payload!==undefined)params.set("payload",JSON.stringify(payload));
-      script.src=`${ENDPOINT}?${params.toString()}`;script.async=true;document.head.appendChild(script);
-    });
+  const requestDiagnostics=[];
+  const id=()=>global.crypto.randomUUID();
+  async function request(action,payload,requiresToken=true){
+    if(requiresToken&&!token())throw new Error("Private backend token required");
+    const correlationId=id(),startedAt=new Date().toISOString(),started=Date.now();
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),25000);
+    const envelope={action,payload:JSON.stringify(payload||{}),token:requiresToken?token():undefined,correlationId,idempotencyKey:id(),timestamp:Date.now(),operation:action};
+    const diagnostic={action,correlationId,startedAt,duration:0,success:false,errorCode:""};
+    try{
+      const response=await global.fetch(ENDPOINT,{method:"POST",mode:"cors",credentials:"omit",referrerPolicy:"no-referrer",headers:{"Content-Type":"text/plain;charset=UTF-8"},body:JSON.stringify(envelope),signal:controller.signal});
+      if(!response.ok)throw new Error("BACKEND_UNAVAILABLE");
+      const result=unwrap(await response.json());diagnostic.success=true;return result;
+    }catch(error){const safe=classifyError(error);diagnostic.errorCode=safe.code;const failure=new Error(safe.text);failure.code=safe.code;failure.correlationId=correlationId;throw failure;}
+    finally{clearTimeout(timer);diagnostic.duration=Date.now()-started;requestDiagnostics.push(diagnostic);if(requestDiagnostics.length>100)requestDiagnostics.shift();}
   }
-
   function normalizeRequest(row){const r={...(row||{})};r.id=r.requestId||r.id;r.requestId=r.id;r.marketingStatus=r.marketingStatus||r.status||r.automationStatus||"READY FOR MARKETING";r.automationStatus=r.automationStatus||r.marketingStatus;r.status=r.status||r.marketingStatus;return r;}
   function normalizeCampaign(row){const c={...(row||{})};c.id=c.campaignId||c.id;c.campaignId=c.id;c.name=c.campaignName||c.name;c.campaignName=c.name;c.objective=c.campaignType||c.objective;c.lastActivity=c.updatedAt||c.createdAt||c.lastActivity;c.marketingStatus=c.marketingStatus||c.status;c.accounts=Number(c.accounts||c.accountCount||c.audienceCount||0);return c;}
   const arrayFrom=(value,keys)=>{if(Array.isArray(value))return value;for(const key of keys)if(Array.isArray(value&&value[key]))return value[key];return [];};
 
-  async function health(){return jsonp("v55Health",undefined,false);}
+  async function health(){return request("v55Health",undefined,false);}
 
   async function probe(action,payload,requiresToken=true){
-    try{const value=await jsonp(action,payload,requiresToken);return {ok:true,value};}
+    try{const value=await request(action,payload,requiresToken);return {ok:true,value};}
     catch(error){
       const msg=String(error&&error.message||error||"");
       return {ok:false,error,reached:!/unavailable|timeout/i.test(msg)};
@@ -134,10 +113,10 @@
     diag.lastErrorCode="";diag.lastErrorMessage="";
 
     const [r,c,a,report]=await Promise.allSettled([
-      jsonp("v55Requests",{}),
-      jsonp("v55Campaigns",{}),
-      jsonp("v55Activity",{}),
-      jsonp("v6AuraExecutionReport",{})
+      request("v55Requests",{}),
+      request("v55Campaigns",{}),
+      request("v55Activity",{}),
+      request("v6AuraExecutionReport",{})
     ]);
     requests=r.status==="fulfilled"?arrayFrom(r.value,["requests","records"]).map(normalizeRequest):[];
     campaigns=c.status==="fulfilled"?arrayFrom(c.value,["campaigns","records"]).map(normalizeCampaign):[];
@@ -153,7 +132,7 @@
   async function connect(){
     let value=token();
     if(!value){
-      value=(global.prompt("Pega el token privado de DGL Marketing OS. Se guardará en este navegador (no en esta pestaña únicamente) y nunca en GitHub. Solo se pide una vez por navegador.")||"").trim();
+      value=(global.prompt("Pega el token privado de DGL Marketing OS. Se guardará solo durante esta sesión de pestaña; Desconectar elimina la credencial.")||"").trim();
       if(!value){setState(STATES.DISCONNECTED);return getConnectionState();}
       setToken(value);
     }
@@ -173,7 +152,7 @@
   function getConnectionState(){return {state,mode:state===STATES.PRIVATE_BACKEND?"PRIVATE_BACKEND":"LOCAL_DEMO",connected:state===STATES.PRIVATE_BACKEND,error:lastError,requestCount:requests.length,campaignCount:campaigns.length,activityCount:activity.length};}
 
   async function mutate(action,payload,refreshAfter=true){
-    try{const result=await jsonp(action,payload);if(refreshAfter)await refresh();return result;}
+    try{const result=await request(action,payload);if(refreshAfter)await refresh();return result;}
     catch(error){
       const c=classifyError(error);
       if(c.kind==="AUTH"){clearToken();setState(STATES.AUTH_ERROR,c.text);}
@@ -186,40 +165,16 @@
   async function createCampaign(payload){const result=await mutate("v55CreateCampaign",{requestId:payload.requestId,strategy:payload.strategy||payload.context||payload},false),row=normalizeCampaign(result&&result.campaign||result);campaigns=[row,...campaigns.filter(x=>x.id!==row.id)];emit();return row;}
   function updateCampaign(id,patch){const current=campaigns.find(x=>x.id===id);if(!current)return null;Object.assign(current,patch);emit();return clone(current);}
   const campaignAction=(action,id,data)=>mutate(action,{campaignId:id,...(data||{})});
-  const activityKey=row=>String(row&&((row.id||row.activityId)||`${row.timestamp||row.createdAt||""}|${row.actionType||row.action||""}|${row.campaignId||""}`));
-  const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-  function activityError(row){const value=row&&((row.error||row.message||row.result)||"Test draft creation failed."),raw=typeof value==="object"?JSON.stringify(value):String(value),secret=token();return secret?raw.replaceAll(secret,"[redacted]"):raw;}
-
-  function postTestDraft(campaignId,draft){
-    if(!token())return Promise.reject(new Error("Private backend token required"));
-    return new Promise((resolve,reject)=>{
-      const suffix=`${Date.now()}_${++requestSequence}`,frame=document.createElement("iframe"),form=document.createElement("form");
-      frame.name=`dglV55DraftFrame_${suffix}`;frame.hidden=true;form.hidden=true;form.method="POST";form.action=ENDPOINT;form.target=frame.name;
-      const fields={action:"v55CreateTestDraft",token:token(),payload:JSON.stringify({campaignId,draft})};
-      Object.entries(fields).forEach(([name,value])=>{const input=document.createElement("input");input.type="hidden";input.name=name;input.value=value;form.appendChild(input);});
-      document.body.append(frame,form);
-      try{form.submit();form.remove();resolve(frame);}catch(error){form.remove();frame.remove();reject(error);}
-    });
-  }
-
   async function createTestDraft(campaignId,draft){
     if(state!==STATES.PRIVATE_BACKEND)throw new Error("Connect the private backend before creating a test draft.");
     if(!campaignId)throw new Error("A backend campaignId is required.");
-    const baseline=new Set(activity.map(activityKey)),frame=await postTestDraft(campaignId,draft);
-    try{
-      for(let attempt=0;attempt<20;attempt++){
-        await wait(attempt===0?900:1500);await refresh();
-        const rows=activity.filter(row=>String(row.campaignId||row.entityId||"")===String(campaignId)&&!baseline.has(activityKey(row)));
-        const failure=rows.find(row=>[row.actionType,row.action,row.status].some(value=>String(value||"").toUpperCase()==="API_ERROR"));
-        if(failure)throw new Error(activityError(failure));
-        const success=rows.find(row=>String(row.actionType||row.action||"").toUpperCase()==="TEST_DRAFT_CREATED");
-        if(success)return {campaignId,status:"TEST DRAFT CREATED",activity:clone(success)};
-      }
-      throw new Error("Test draft confirmation timed out.");
-    }finally{frame.remove();}
+    return mutate("v55CreateTestDraft",{campaignId,draft},false);
   }
-
+  const sharedActions=new Set(["v6AcqStatus","v6AcqRun","v6AcqSetup","v6AcqLandingPages","v6AcqSignals","v6AcqRouteLeads","v6AcqInstallTrigger"]);
   const adapter={
+    authenticatedRequest:(action,payload)=>{if(!sharedActions.has(action))return Promise.reject(new Error("ACTION_NOT_ALLOWED"));return mutate(action,payload||{},false);},
+    sanitizeError:error=>classifyError(error).text,
+    getRequestDiagnostics:()=>clone(requestDiagnostics),
     version:"5.5",mode:"LOCAL_DEMO",endpoint:ENDPOINT,health,connect,disconnect,refresh,
     isConnected:()=>state===STATES.PRIVATE_BACKEND,getConnectionState,
     getRequests:()=>clone(requests),createRequest,updateRequest,
@@ -263,7 +218,8 @@
     // AURA dashboard bridge -- read-only reporting only (see MarketingV55Backend.gs's allowlist
     // comment): never a way to build a queue, dispatch, or send a real email from this page.
     v6AuraEmailPerformanceJob:jobId=>mutate("v6AuraEmailPerformanceJob",{jobId},false),
-    v6AuraEmailPerformance:()=>mutate("v6AuraEmailPerformance",{},false),
+    v6AuraEmailPerformance:filters=>mutate("v6AuraEmailPerformance",{page:1,pageSize:25,...(filters||{})},false),
+    v6AuraEmailPerformanceExport:filters=>mutate("v6AuraEmailPerformanceExport",filters||{},false),
     v6AuraRetentionDashboard:()=>mutate("v6AuraRetentionDashboard",{},false),
     v6AuraCampanaAAudit:()=>mutate("v6AuraCampanaAAudit",{},false),
     v6AuraCampanaAMatchReport:()=>mutate("v6AuraCampanaAMatchReport",{},false),

@@ -28,7 +28,7 @@ function handleMarketingV55Api_(e, method) {
   }
   var req = Object.assign({}, params, body);
   if (req.payload && typeof req.payload === 'string') {
-    try { req = Object.assign(req, JSON.parse(req.payload)); } catch (ignored) {}
+    try { var data=JSON.parse(req.payload); ['action','token','apiKey','callback','operation','timestamp','idempotencyKey','correlationId'].forEach(function(k){delete data[k];});req=Object.assign({},req,data); } catch (ignored) {}
   }
 
   var action = String(req.action || '');
@@ -54,7 +54,8 @@ function handleMarketingV55Api_(e, method) {
 // (v6AuraCampanaARegenerateDryRun_, auraProcessEmailQueue, auraEnableLiveSending): this
 // GitHub Pages frontend is presentation-only, per this project's own stated architecture,
 // and must never be a second way to trigger a real send.
-'v6AuraEmailPerformanceJob', 'v6AuraEmailPerformance', 'v6AuraRetentionDashboard', 'v6AuraCampanaAAudit', 'v6AuraCampanaAMatchReport',
+'v6AcqStatus','v6AcqRun','v6AcqSetup','v6AcqLandingPages','v6AcqSignals','v6AcqRouteLeads','v6AcqInstallTrigger',
+'v6AuraEmailPerformanceExport','v6AuraEmailPerformanceJob', 'v6AuraEmailPerformance', 'v6AuraRetentionDashboard', 'v6AuraCampanaAAudit', 'v6AuraCampanaAMatchReport',
 'v6AuraCampanaAStoppedBreakdown', 'v6AuraExecutionReport', 'v6AuraAutomaticReportStatus',
 'v6AuraCampanaALatestRunSummary',
 // Iniciativa 2 -- Campaign Studio's own Approve Creative action (MarketingV6AuraCreativeApproval.gs).
@@ -72,10 +73,24 @@ function handleMarketingV55Api_(e, method) {
   
   if (allowed.indexOf(action) === -1) return null;
 
+  var mutation=null;
   try {
-    if (action !== 'v55Health') mktV55AssertToken_(req.token || req.apiKey || '');
+    var policy=mktV55ActionPolicy_(action);
+    if(action!=='v55Health'&&String(method).toUpperCase()!=='POST')throw new Error('METHOD_NOT_ALLOWED');
+    if(action!=='v55Health'&&(params.token||params.apiKey||req.callback))throw new Error('CREDENTIAL_TRANSPORT_REJECTED');
+    if (action !== 'v55Health') mktV55AssertToken_(body.token || '');
+    if(policy.access==='ADMIN'&&PropertiesService.getScriptProperties().getProperty('DGL_MKT_WEB_ADMIN_ENABLED')!=='true')throw new Error('ADMIN_DISABLED');
+    if(policy.access!=='READ'){mutation=mktV55BeginMutation_(req);if(mutation.replayed)return mktV55Json_('',{ok:true,result:{status:'ALREADY_APPLIED',replayed:true,correlationId:req.correlationId}});}
     var result;
     switch (action) {
+    case 'v6AcqStatus':
+case 'v6AcqRun':
+case 'v6AcqSetup':
+case 'v6AcqLandingPages':
+case 'v6AcqSignals':
+case 'v6AcqRouteLeads':
+case 'v6AcqInstallTrigger':
+case 'v6AuraEmailPerformanceExport':
     case 'v6Opportunities':
 case 'v6RunOpportunityEngine':
 case 'v6OpportunitySummary':
@@ -128,7 +143,7 @@ case 'v6AuraRevokeCreativeApproval':
   mktV55Audit_('TEST_DRAFT_CREATED', req, 'COMPLETED', result);
   break;
       case 'v55Health':
-        result = {ok:true,service:'DGL Marketing OS V5.5 Private Backend',version:'5.5',mode:'PRIVATE_BACKEND',claudeConnected:false,hubId:MKT_V55.HUB_ID};
+        result = {ok:true,service:'DGL Marketing OS V5.5 Private Backend',version:'5.5',mode:'PRIVATE_BACKEND',claudeConnected:false};
         break;
       case 'v55Setup': result = setupMarketingV55Backend(); break;
       case 'v55Requests': result = mktV55ReadAll_(MKT_V55.SHEETS.REQUESTS); break;
@@ -146,16 +161,16 @@ case 'v6AuraRevokeCreativeApproval':
       case 'v55RecordOutcome': result = recordMarketingV55Outcome_(req); break;
       case 'v55Activity': result = mktV55ReadAll_(MKT_V55.SHEETS.ACTIVITY); break;
     }
-    return mktV55Json_(req.callback || '', {
+    if(mutation)mktV55FinishMutation_(mutation,'COMPLETED');
+    return mktV55Json_(action==='v55Health'?(req.callback||''):'', {
   ok: true,
   result: result
 });
   } catch (err) {
-    try { mktV55Audit_('API_ERROR', req, 'BLOCKED', String(err && err.message || err)); } catch (ignored2) {}
-  return mktV55Json_(req.callback || '', {
-  ok: false,
-  error: String(err && err.message || err)
-});
+    if(mutation)mktV55FinishMutation_(mutation,'FAILED');
+    var code=mktV55SafeError_(err);
+    try { mktV55Audit_('API_ERROR',{correlationId:req.correlationId||''},'BLOCKED',code); } catch (_) {}
+    return mktV55Json_('',{ok:false,error:code,correlationId:req.correlationId||''});
   }
 }
 
@@ -502,3 +517,35 @@ function testMarketingV55ResponseStopHandoff(){
   var out=recordMarketingV55Response_({campaignId:c.campaignId,requestId:c.requestId,accountId:'TEST-ACCOUNT-001',responseType:'CUSTOMER_REPLIED',channel:'EMAIL',summary:'SAFE TEST RESPONSE',amOwner:c.amOwner||'AM TEST',nextAction:'AM to review test response'});
   console.log(JSON.stringify(out,null,2));return out;
 }
+
+// Shared-token authorization is NOT user RBAC. Unknown actions are denied.
+function mktV55ActionPolicy_(action){
+  var read=['v55Health','v55Requests','v55Campaigns','v55Activity','v55AudienceStatus','v6Opportunities','v6OpportunitySummary','v6FrequencyStatus','v6EvaluateCampaignPressure','v6AccountPipeline','v6PipelineSummary','v6ExecutionStatus','v6ExecutionArchiveStatus','v6CopyUsage','v6CreativeUsage','v6AuraEmailPerformanceJob','v6AuraEmailPerformance','v6AuraRetentionDashboard','v6AuraCampanaAAudit','v6AuraCampanaAMatchReport','v6AuraCampanaAStoppedBreakdown','v6AuraExecutionReport','v6AuraAutomaticReportStatus','v6AuraCampanaALatestRunSummary','v6AuraLatestApprovedCreative','v6AcqStatus','v6AcqLandingPages','v6AcqSignals'];
+  var admin=['v55Setup','v6RunOpportunityEngine','v6AcqRun','v6AcqSetup','v6AcqInstallTrigger','v6AcqRouteLeads'];
+  var write=['v55CreateTestDraft','v55ResolveRecipients','v55CreateRequest','v55UpdateRequest','v55CreateCampaign','v55RequestApproval','v55RecordApproval','v55ActivateCampaign','v55PauseCampaign','v55RecordResponse','v55StopAccount','v55Handoff','v55RecordOutcome','v6PipelineTransition','v6PipelineSyncSignals','v6CreateExecution','v6QueueExecution','v6StartExecution','v6RecordCopyUsage','v6RecordCreativeUsage','v6AuraApproveCreative','v6AuraRevokeCreativeApproval','v6AuraEmailPerformanceExport'];
+  var access=read.indexOf(action)>=0?'READ':admin.indexOf(action)>=0?'ADMIN':write.indexOf(action)>=0?'WRITE':'';
+  if(!access)throw new Error('ACTION_NOT_ALLOWED');
+  return {action:action,access:access,requiredPermission:access==='READ'?'private:read':access==='ADMIN'?'platform:admin':'private:write',objectType:/Performance/.test(action)?'email-evidence':/Acq/.test(action)?'acquisition':/Campaign|Approval|Creative/.test(action)?'campaign':'marketing-record'};
+}
+function mktV55SafeError_(err){
+  var text=String(err&&err.message||err||'');
+  if(/Unauthorized|private token/i.test(text))return 'AUTH_REJECTED';
+  var known=['METHOD_NOT_ALLOWED','CREDENTIAL_TRANSPORT_REJECTED','ADMIN_DISABLED','ACTION_NOT_ALLOWED','MUTATION_METADATA_REQUIRED','STALE_REQUEST','IDEMPOTENCY_CONFLICT','REPLAY_REJECTED','EXPORT_LIMIT_EXCEEDED','INVALID_FILTER'];
+  return known.indexOf(text)>=0?text:'BACKEND_ERROR';
+}
+function mktV55Canonical_(v){if(v===null||typeof v!=='object')return JSON.stringify(v);if(Array.isArray(v))return '['+v.map(mktV55Canonical_).join(',')+']';return '{'+Object.keys(v).sort().map(function(k){return JSON.stringify(k)+':'+mktV55Canonical_(v[k]);}).join(',')+'}';}
+function mktV55Digest_(s){return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,s,Utilities.Charset.UTF_8).map(function(b){return ('0'+((b+256)%256).toString(16)).slice(-2);}).join('');}
+function mktV55BeginMutation_(req){
+  if(!/^[a-zA-Z0-9_-]{16,100}$/.test(String(req.idempotencyKey||''))||req.operation!==req.action||!Number(req.timestamp))throw new Error('MUTATION_METADATA_REQUIRED');
+  if(Math.abs(Date.now()-Number(req.timestamp))>300000)throw new Error('STALE_REQUEST');
+  var data=Object.assign({},req);['token','apiKey','callback','timestamp','correlationId','idempotencyKey','payload'].forEach(function(k){delete data[k];});
+  var digest=mktV55Digest_(mktV55Canonical_(data)),key='MKT_REPLAY:'+mktV55Digest_(req.action+':'+req.idempotencyKey),lock=LockService.getScriptLock();lock.waitLock(30000);
+  try{
+    var props=PropertiesService.getScriptProperties(),old=props.getProperty(key);
+    if(old){var entry=JSON.parse(old);if(entry.digest!==digest)throw new Error('IDEMPOTENCY_CONFLICT');if(entry.status!=='COMPLETED')throw new Error('REPLAY_REJECTED');return {replayed:true};}
+    // Durable reservation precedes effects. Failed/uncertain operations cannot auto-replay.
+    var all=props.getProperties();Object.keys(all).filter(function(k){return k.indexOf('MKT_REPLAY:')===0;}).forEach(function(k){try{if(Date.now()-JSON.parse(all[k]).at>86400000)props.deleteProperty(k);}catch(_){}});
+    props.setProperty(key,JSON.stringify({digest:digest,status:'RUNNING',at:Date.now()}));return {key:key,digest:digest};
+  }finally{lock.releaseLock();}
+}
+function mktV55FinishMutation_(entry,status){if(entry&&entry.key)PropertiesService.getScriptProperties().setProperty(entry.key,JSON.stringify({digest:entry.digest,status:status,at:Date.now()}));}

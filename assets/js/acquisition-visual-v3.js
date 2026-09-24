@@ -28,7 +28,7 @@ function flow(steps){
 }
 async function statusData(force=false){
   if(!V2())return {status:{},pages:[],error:"AUTOMATION V2 NOT LOADED"};
-  try{return await V2().refresh(force);}catch(e){return {status:{},pages:[],error:String(e&&e.message||e)};}
+  try{return await V2().refresh(force);}catch(e){return {status:{},pages:[],error:"BACKEND_UNAVAILABLE"};}
 }
 
 /* ---------- Acquisition Command Center ---------- */
@@ -143,8 +143,8 @@ function creativesSection(){
   <p class="acq-note">The visual template and copy are real and generated automatically per signal. No server-side PNG export or social publish connector exists yet — DGL does not claim a post was published until that connector is built and configured.</p>
   <div class="acq-creative-grid">${designMeta().map(creativeCard).join("")}</div></section>`;
 }
-function landingCard(p){
-  return `<article class="acq-page-card"><div class="acq-page-top"><div><span>${esc(p.objective||"Lead Generation")} · ${esc(p.service||"Multiservice")}</span><h3>${esc(p.market||"Market")} · ${esc(p.language||"en")}</h3></div>${badge(p.status,p.status==="LIVE"?"good":"muted")}</div><div class="acq-page-meta"><span>${esc(p.channel||"Channel")}</span><span>/${esc(p.slug||"")}</span><span>${esc(p.utmCampaign||"")}</span></div><p>${esc(p.headline||"")}</p><div class="acq-actions">${p.publishedUrl?`<a class="btn btn-secondary btn-sm" href="${esc(p.publishedUrl)}" target="_blank" rel="noopener">OPEN LIVE PAGE</a>`:""}</div></article>`;
+function landingCard(p){const liveUrl=g.DGL_SECURITY?.publishedUrl(p.publishedUrl)||"";
+  return `<article class="acq-page-card"><div class="acq-page-top"><div><span>${esc(p.objective||"Lead Generation")} · ${esc(p.service||"Multiservice")}</span><h3>${esc(p.market||"Market")} · ${esc(p.language||"en")}</h3></div>${badge(p.status,p.status==="LIVE"?"good":"muted")}</div><div class="acq-page-meta"><span>${esc(p.channel||"Channel")}</span><span>/${esc(p.slug||"")}</span><span>${esc(p.utmCampaign||"")}</span></div><p>${esc(p.headline||"")}</p><div class="acq-actions">${liveUrl?`<a class="btn btn-secondary btn-sm" href="${esc(liveUrl)}" target="_blank" rel="noopener">OPEN LIVE PAGE</a>`:""}</div></article>`;
 }
 async function landingPages(c){
   renderLanding(c,{status:{},pages:[]},true);

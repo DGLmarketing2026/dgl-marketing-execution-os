@@ -19,7 +19,7 @@
 
   const perfFilters = { metric: '', search: '', campaignId: '', campaignFamily: '', sendStatus: '', language: '', from: '', to: '' };
   const perfColumns = ['jobId','company','contactName','email','campaignId','campaignFamily','subject','sentFamily','currentCampaignFamily','playbookId','creativeProvenance','integrityStatus','service','language','amOwner','sendStatus','sentAt','failedAt','bounceStatus','bounceReason','bounceAt','replied','replyAt','opened','openAt','clicked','clickAt'];
-  let performancePage = 0;
+  let performancePage = 0,filterTimer;
   function pageRows(rows, page) { return rows.slice().sort((a,b)=>String(b.sentAt||'').localeCompare(String(a.sentAt||''))).slice(page*25,(page+1)*25); }
   function metricMatches(r, metric) {
     return !metric || ({sent:r.sendStatus==='SENT',failed:!!r.failedAt || r.sendStatus==='FAILED',bounced:!!r.bounceStatus,replied:r.replied===true,opened:r.opened===true,clicked:r.clicked===true})[metric];
@@ -33,16 +33,16 @@
       return (!filters.from&&!filters.to)||dates.some(d=>(!filters.from||d>=filters.from)&&(!filters.to||d<=filters.to));
     });
   }
-  function performanceCsv(rows) {
+  function performanceCsv(rows,columns=perfColumns) {
     const cell = v => { let s=v==null?'NOT_TRACKED':String(v); if(/^[=+@\-\t\r]/.test(s))s="'"+s; return '"'+s.replace(/"/g,'""')+'"'; };
-    return '\uFEFF'+[perfColumns.map(cell).join(','),...rows.map(r=>perfColumns.map(k=>cell(r[k])).join(','))].join('\r\n');
+    return '\uFEFF'+[columns.map(cell).join(','),...rows.map(r=>columns.map(k=>cell(r[k])).join(','))].join('\r\n');
   }
   function performanceSection() {
     const data=state.performance;
     if(!data)return `<section class="card card-pad"><h3>Email Performance</h3><p>${esc(state.performanceError||'Loading recipient report…')}</p></section>`;
-    const opts = k => [...new Set(data.rows.map(r=>r[k]).filter(Boolean))].sort().map(v=>`<option ${perfFilters[k]===v?'selected':''} value="${esc(v).replace(/"/g,'&quot;')}">${esc(v)}</option>`).join('');
-    return `<section class="aura-performance card card-pad"><h3>Email Performance</h3>
-      <div class="aura-performance-kpis">${['sent','failed','bounced','replied','opened','clicked'].map(k=>`<button type="button" data-perf-kpi="${k}" aria-pressed="${perfFilters.metric===k}"><span>${k.toUpperCase()}</span><strong>${fmt(data.summary[k])}</strong><small>${data.summary[k]==null?'NOT TRACKED':'MEASURED'}</small>${k==='sent'?`<small>${fmt(data.summary.sentUniqueEmails)} recipient emails · ${fmt(data.summary.sentUniqueAccounts)} accounts</small>`:''}</button>`).join('')}</div>
+    const opts = k => (data.facets?.[k]||[...new Set(data.rows.map(r=>r[k]).filter(Boolean))].sort()).map(v=>`<option ${perfFilters[k]===v?'selected':''} value="${esc(v).replace(/"/g,'&quot;')}">${esc(v)}</option>`).join('');
+    return `<section class="aura-performance card card-pad"><h3>Email Performance · FILTERED COHORT</h3><p>GLOBAL: ${fmt((data.summaryGlobal||data.summary).sent)} sent · ${fmt((data.summaryGlobal||data.summary).failed)} failed · ${fmt((data.summaryGlobal||data.summary).bounced)} bounced</p>
+      <div class="aura-performance-kpis">${['sent','failed','bounced','replied','opened','clicked'].map(k=>`<button type="button" data-perf-kpi="${k}" aria-pressed="${perfFilters.metric===k}"><span>${k.toUpperCase()}</span><strong>${fmt((data.summaryFiltered||data.summary)[k])}</strong><small>${(data.summaryFiltered||data.summary)[k]==null?'NOT TRACKED':'MEASURED'}</small>${k==='sent'?`<small>${fmt((data.summaryFiltered||data.summary).sentUniqueEmails)} recipient emails · ${fmt((data.summaryFiltered||data.summary).sentUniqueAccounts)} accounts</small>`:''}</button>`).join('')}</div>
       <div class="aura-performance-filters"><label>Search company/contact/email<input data-perf-filter="search" type="search" value="${esc(perfFilters.search).replace(/"/g,'&quot;')}"></label>
       ${[['campaignId','Campaign'],['campaignFamily','Family'],['sendStatus','Status'],['language','Language']].map(([k,label])=>`<label>${label}<select data-perf-filter="${k}"><option value="">All</option>${opts(k)}</select></label>`).join('')}
       ${['from','to'].map(k=>`<label>${k==='from'?'From':'To'} (UTC)<input type="date" data-perf-filter="${k}" value="${perfFilters[k]}"></label>`).join('')}
@@ -50,28 +50,30 @@
       <p>Dates match sent, failed, reply, bounce, open or click time. One row per recipient send job. SENT does not mean DELIVERED.</p>
       <div data-perf-detail></div></section>`;
   }
+
   function bindPerformance(mount) {
     if(!state.performance)return;
     const host=mount.querySelector&&mount.querySelector('.aura-performance');if(!host)return;
-    function update(){
-      const rows=filterPerformance(state.performance.rows,perfFilters);
-      const pages=Math.max(1,Math.ceil(rows.length/25));performancePage=Math.min(performancePage,pages-1);
-      const columns=[['company','Company'],['contactName','Contact'],['email','Email'],['subject','Subject'],['sentFamily','Sent Family'],['sendStatus','Status'],['sentAt','Sent At'],['bounceReason','Bounce'],['replied','Reply'],['creativeProvenance','Creative Source']];
-      host.querySelector('[data-perf-detail]').innerHTML=`<p aria-live="polite">${rows.length} recipient rows · Page ${performancePage+1} / ${pages}</p><div class="aura-performance-scroll"><table class="data-table"><thead><tr>${columns.map(([k,label])=>`<th>${label}</th>`).join('')}<th>Action</th></tr></thead><tbody>${pageRows(rows,performancePage).map(r=>`<tr>${columns.map(([k])=>`<td>${esc(r[k]==null?'N/A':r[k])}</td>`).join('')}<td><button data-perf-view="${esc(r.jobId).replace(/"/g,'&quot;')}">VIEW EMAIL</button></td></tr>`).join('')}</tbody></table></div><button data-perf-prev ${performancePage===0?'disabled':''}>Previous</button><button data-perf-next ${performancePage>=pages-1?'disabled':''}>Next</button>`;
-      host.querySelectorAll('[data-perf-kpi]').forEach(b=>b.setAttribute('aria-pressed',String(perfFilters.metric===b.dataset.perfKpi)));
-    }
-    host.querySelectorAll('[data-perf-kpi]').forEach(b=>b.onclick=()=>{perfFilters.metric=perfFilters.metric===b.dataset.perfKpi?'':b.dataset.perfKpi;performancePage=0;update();});
-    host.querySelectorAll('[data-perf-filter]').forEach(input=>input.oninput=()=>{perfFilters[input.dataset.perfFilter]=input.value;performancePage=0;update();});
-    host.querySelector('[data-perf-reset]').onclick=()=>{Object.keys(perfFilters).forEach(k=>perfFilters[k]='');performancePage=0;paint(mount);};
-    host.querySelector('[data-perf-download]').onclick=()=>{
-      const blob=new Blob([performanceCsv(filterPerformance(state.performance.rows,perfFilters))],{type:'text/csv;charset=utf-8'});
-      const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='aura-email-performance.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    const data=state.performance,rows=data.rows||[],page=data.page||1,pages=data.totalPages||1;
+    const columns=[['company','Company'],['contactName','Contact'],['email','Email'],['subject','Subject'],['sentFamily','Sent Family'],['sendStatus','Status'],['sentAt','Sent At'],['bounceReason','Bounce'],['replied','Reply'],['creativeProvenance','Creative Source']];
+    host.querySelector('[data-perf-detail]').innerHTML='<p aria-live="polite">FILTERED: '+data.totalRows+' of '+data.totalGlobalRows+' recipient rows · Page '+page+' / '+pages+'</p><div class="aura-performance-scroll"><table class="data-table"><thead><tr>'+columns.map(([k,label])=>'<th>'+label+'</th>').join('')+'<th>Action</th></tr></thead><tbody>'+rows.map(r=>'<tr>'+columns.map(([k])=>'<td>'+esc(r[k]==null?'N/A':r[k])+'</td>').join('')+'<td><button data-perf-view="'+esc(r.jobId).replace(/"/g,'&quot;')+'">VIEW EMAIL</button></td></tr>').join('')+'</tbody></table></div><button data-perf-prev '+(page<=1?'disabled':'')+'>Previous</button><button data-perf-next '+(page>=pages?'disabled':'')+'>Next</button>';
+    const reload=()=>refreshPerformance(mount);
+    host.querySelectorAll('[data-perf-kpi]').forEach(b=>b.onclick=()=>{perfFilters.metric=perfFilters.metric===b.dataset.perfKpi?'':b.dataset.perfKpi;performancePage=0;reload();});
+    host.querySelectorAll('[data-perf-filter]').forEach(input=>input.oninput=()=>{perfFilters[input.dataset.perfFilter]=input.value;performancePage=0;clearTimeout(filterTimer);filterTimer=setTimeout(reload,300);});
+    host.querySelector('[data-perf-reset]').onclick=()=>{Object.keys(perfFilters).forEach(k=>perfFilters[k]='');performancePage=0;reload();};
+    host.querySelector('[data-perf-download]').onclick=async()=>{
+      try{
+        const exported=await adapter().v6AuraEmailPerformanceExport({...perfFilters});
+        if(!Array.isArray(exported.rows))throw Error("EXPORT_UNAVAILABLE");
+        const blob=new Blob([performanceCsv(exported.rows,exported.columns)],{type:'text/csv;charset=utf-8'});
+        const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='aura-email-performance.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+      }catch(e){host.querySelector('[data-perf-detail]').textContent='Export unavailable. Narrow the filters and retry.';}
     };
     host.onclick=event=>{
       const view=event.target.closest('[data-perf-view]');if(view){openEmail(view.dataset.perfView);return;}
-      if(event.target.closest('[data-perf-prev]')&&performancePage>0){performancePage--;update();}
-      if(event.target.closest('[data-perf-next]')&&(performancePage+1)*25<filterPerformance(state.performance.rows,perfFilters).length){performancePage++;update();}
-    };update();
+      if(event.target.closest('[data-perf-prev]')&&page>1){performancePage=page-2;reload();}
+      if(event.target.closest('[data-perf-next]')&&page<pages){performancePage=page;reload();}
+    };
   }
   function downloadExactHtml(detail) {
     const url=URL.createObjectURL(new Blob([detail.htmlBody],{type:'text/html;charset=utf-8'}));
@@ -273,7 +275,7 @@
         <p class="lede">NOVA/Salesforce → AM Intelligence → AURA → Marketing OS. Datos reales del Data Hub — sin cifras de muestra.</p>
       </div>
       <div class="page-head-actions">
-        <span class="sample-flag">${connected ? "PRIVATE BACKEND / LIVE" : connectionState.state === "CONNECTING" ? "CONNECTING" : "PRIVATE BACKEND REQUIRED"}</span>
+        <span class="sample-flag">${connected ? platformHealth() : connectionState.state === "CONNECTING" ? "CONNECTING" : "PRIVATE BACKEND REQUIRED"}</span>
         ${connected
         ? '<button class="btn btn-secondary" data-aura-refresh>REFRESH</button>'
         : `<button class="btn btn-primary" data-aura-connect ${connectionState.state === "CONNECTING" ? "disabled" : ""}>${connectionState.state === "CONNECTING" ? "CONNECTING" : "CONNECT PRIVATE BACKEND"}</button>`}
@@ -282,6 +284,7 @@
 
     ${!connected ? `<div class="card card-pad"><strong>${state.loading ? "Cargando…" : state.error || "Conecta el backend privado para ver datos reales de AURA."}</strong></div>` : `
 
+    ${healthPanel()}
     ${performanceSection()}
     <div class="kpi-grid">
       ${kpi("git-branch", "Run ID (última corrida Retention)", r.runId || "—")}
@@ -325,31 +328,48 @@
     global.lucide && global.lucide.createIcons && global.lucide.createIcons();
   }
 
-  async function refresh(mount) {
-    if (state.loading || !adapter() || !adapter().isConnected()) return;
-    state.loading = true; state.error = ""; state.performance = null; paint(mount);
-    try { state.performance = await adapter().v6AuraEmailPerformance(); state.performanceError = ""; }
-    catch(error) { state.performanceError = "Email Performance unavailable"; }
-    try {
-      const [retention, campanaA, matchReport, stoppedBreakdown, execReport, runSummary] = await Promise.all([
-        adapter().v6AuraRetentionDashboard ? adapter().v6AuraRetentionDashboard() : null,
-        adapter().v6AuraCampanaAAudit ? adapter().v6AuraCampanaAAudit() : null,
-        adapter().v6AuraCampanaAMatchReport ? adapter().v6AuraCampanaAMatchReport() : null,
-        adapter().v6AuraCampanaAStoppedBreakdown ? adapter().v6AuraCampanaAStoppedBreakdown() : null,
-        adapter().v6AuraExecutionReport ? adapter().v6AuraExecutionReport() : null,
-        adapter().v6AuraCampanaALatestRunSummary ? adapter().v6AuraCampanaALatestRunSummary() : null
-      ]);
-      state.retention = retention || {};
-      state.campanaA = Object.assign({}, campanaA || {}, { matchReport: matchReport || null, stoppedBreakdown: stoppedBreakdown || null });
-      state.execReport = execReport || {};
-      state.runSummary = runSummary || null;
-    } catch (error) {
-      state.error = "No se pudo cargar AURA: " + (error && error.message || error);
-    } finally {
-      state.loading = false; paint(mount);
-    }
-  }
 
+  const reportSpecs={performance:"v6AuraEmailPerformance",retention:"v6AuraRetentionDashboard",campanaA:"v6AuraCampanaAAudit",matchReport:"v6AuraCampanaAMatchReport",stoppedBreakdown:"v6AuraCampanaAStoppedBreakdown",execReport:"v6AuraExecutionReport",runSummary:"v6AuraCampanaALatestRunSummary"};
+  const reportHealth={};let refreshPromise=null,performanceSequence=0;
+  const performancePayload=()=>({...perfFilters,page:performancePage+1,pageSize:25});
+  function healthOf(key){
+    const h=reportHealth[key]||{status:"NOT_AVAILABLE",fetchedAt:null,error:"",source:reportSpecs[key]};
+    return {...h,status:h.status==="FRESH"&&Date.now()-Date.parse(h.fetchedAt)>120000?"STALE":h.status};
+  }
+  function platformHealth(){
+    const statuses=Object.keys(reportSpecs).map(k=>healthOf(k).status);
+    return statuses.every(s=>s==="FRESH")?"PRIVATE BACKEND / LIVE":statuses.includes("ERROR")||statuses.includes("NOT_AVAILABLE")||statuses.includes("LOADING")?"PRIVATE BACKEND / DEGRADED":"PRIVATE BACKEND / STALE";
+  }
+  function healthPanel(){
+    return '<section class="card card-pad"><h3>Report health</h3>'+Object.keys(reportSpecs).map(k=>{const h=healthOf(k);return '<p><strong>'+esc(k)+' · '+h.status+'</strong> · Latest successful fetch: '+esc(h.fetchedAt||'Never')+(h.error?' · '+esc(h.error):'')+'</p>';}).join('')+'</section>';
+  }
+  function settleReport(key,result){
+    const previous=reportHealth[key]||{};
+    if(result.status==="fulfilled"&&result.value!=null){state[key]=result.value;reportHealth[key]={status:"FRESH",fetchedAt:new Date().toISOString(),error:"",source:reportSpecs[key]};}
+    else{reportHealth[key]={status:state[key]!=null?"STALE":result.status==="fulfilled"?"NOT_AVAILABLE":"ERROR",fetchedAt:previous.fetchedAt||null,error:result.status==="rejected"?"REPORT_UNAVAILABLE":"REPORT_NOT_AVAILABLE",source:reportSpecs[key]};}
+  }
+  function refresh(mount){
+    if(refreshPromise)return refreshPromise;
+    if(!adapter()?.isConnected())return Promise.resolve();
+    state.loading=true;state.error="";
+    const keys=Object.keys(reportSpecs);
+    keys.forEach(k=>{reportHealth[k]={...(reportHealth[k]||{}),status:"LOADING",source:reportSpecs[k]};});
+    paint(mount);
+    refreshPromise=(async()=>{
+      const results=await Promise.allSettled(keys.map(k=>Promise.resolve().then(()=>adapter()[reportSpecs[k]]?adapter()[reportSpecs[k]](k==="performance"?performancePayload():undefined):null)));
+      keys.forEach((k,i)=>settleReport(k,results[i]));
+      if(state.campanaA)state.campanaA={...state.campanaA,matchReport:state.matchReport,stoppedBreakdown:state.stoppedBreakdown};
+      state.performanceError=healthOf("performance").error;
+    })().finally(()=>{state.loading=false;refreshPromise=null;paint(mount);});
+    return refreshPromise;
+  }
+  async function refreshPerformance(mount){
+    const sequence=++performanceSequence,filters=performancePayload();
+    reportHealth.performance={...(reportHealth.performance||{}),status:"LOADING",source:reportSpecs.performance};
+    try{const value=await adapter().v6AuraEmailPerformance(filters);if(sequence===performanceSequence)settleReport("performance",{status:"fulfilled",value});}
+    catch(e){if(sequence===performanceSequence)settleReport("performance",{status:"rejected"});}
+    if(sequence===performanceSequence)paint(mount);
+  }
   let currentMount = null;
   async function render(mount) {
     currentMount = mount;
@@ -359,7 +379,7 @@
 
   global.document && global.document.addEventListener("click", async (event) => {
     if (event.target.closest("[data-aura-connect]")) {
-      try { await adapter().connect(); if (adapter().isConnected()) await refresh(currentMount); } catch (error) { state.error = error.message; paint(currentMount); }
+      try { await adapter().connect(); if (adapter().isConnected()) await refresh(currentMount); } catch (error) { state.error = "BACKEND_UNAVAILABLE"; paint(currentMount); }
     } else if (event.target.closest("[data-aura-refresh]")) {
       await refresh(currentMount);
     }
@@ -369,6 +389,7 @@
     if ((event.detail || {}).state === "PRIVATE_BACKEND") refresh(currentMount); else paint(currentMount);
   });
 
+  global.DGL_AURA_HEALTH={refresh,healthOf,platformHealth,getState:()=>state};
   global.DGL_MODULE_RENDERERS = global.DGL_MODULE_RENDERERS || {};
   global.DGL_MODULE_RENDERERS["aura-overview"] = render;
 })(window);

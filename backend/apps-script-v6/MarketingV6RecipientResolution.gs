@@ -2,7 +2,7 @@ function v6RecipientText_(value){return String(value==null?'':value).trim();}
 function v6RecipientUpper_(value){return v6RecipientText_(value).toUpperCase();}
 function v6RecipientBool_(value){var x=v6RecipientUpper_(value);return value===true||x==='TRUE'||x==='YES'||x==='SI'||x==='SÍ'||x==='1'||x==='Y';}
 function v6RecipientEmailValid_(value){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v6RecipientText_(value).toLowerCase());}
-function v6RecipientRows_(name){try{return v6Rows_(name);}catch(_){return [];}}
+function v6RecipientRows_(name){return v6Rows_(name);}
 function v6RecipientExclusionReason_(row){return v6RecipientUpper_((row||{}).reasonCode||(row||{}).reason||'ACTIVE_EXCLUSION').replace(/[^A-Z0-9_ -]/g,'').substring(0,80)||'ACTIVE_EXCLUSION';}
 function v6RecipientActiveExclusion_(rows,accountId,contactId,now){return (rows||[]).filter(function(row){
   var active=row.active===''||row.active==null?!['INACTIVE','EXPIRED','CLEARED'].includes(v6RecipientUpper_(row.status)):v6RecipientBool_(row.active),end=row.expiresAt||row.endDate,expires=end?new Date(end):null,notExpired=!expires||isNaN(expires.getTime())||expires>now,accountMatch=!v6RecipientText_(row.accountId)||v6RecipientText_(row.accountId)===accountId,contactMatch=!v6RecipientText_(row.contactId)||v6RecipientText_(row.contactId)===contactId;
@@ -42,9 +42,13 @@ function v6ResolveRecipients_(payload){
   // the other O(n) write this function otherwise performs. See MarketingV6AuraCampanaA.gs, the
   // pipeline this was added for.
   var batchWrite=!!p.batchWrite,pendingAudienceRecords=[];
+  var security=v6RecipientSecurityEvidence_();
+  contacts=v6RecipientUniqueCandidates_(contacts);
   contacts.forEach(function(contact){
     var accountId=v6RecipientText_(contact.accountId),contactId=v6RecipientText_(contact.contactId),email=v6RecipientText_(contact.email).toLowerCase(),reason='CLEAR',exclusion=null,frequency={status:'CLEAR',eligible:true};
-    if(v6RecipientBool_(contact.doNotContact||contact.dnc)){reason='DO_NOT_CONTACT';exclusionBlocked++;}
+    var securityReason=contact.securityReason||v6RecipientSecurityCheck_(contact,security);
+    if(securityReason!=='CLEAR'){reason=securityReason;exclusionBlocked++;}
+    else if(v6RecipientBool_(contact.doNotContact||contact.dnc)){reason='DO_NOT_CONTACT';exclusionBlocked++;}
     else if(!email){reason='EMAIL_MISSING';exclusionBlocked++;}
     else if(!v6RecipientEmailValid_(email)||v6RecipientUpper_(contact.emailStatus)==='INVALID'){reason='EMAIL_INVALID';exclusionBlocked++;}
     else if((exclusion=v6RecipientActiveExclusion_(exclusions,accountId,contactId,now))){reason='EXCLUSION_'+v6RecipientExclusionReason_(exclusion).replace(/[^A-Z0-9]+/g,'_');exclusionBlocked++;}
@@ -59,4 +63,51 @@ function v6ResolveRecipients_(payload){
 function v6AudienceStatus_(payload){
   var campaignId=v6RecipientText_((payload||{}).campaignId);if(!campaignId)throw new Error('campaignId REQUIRED');var row=v6RecipientRows_('MKT_AUDIENCES').filter(function(x){return v6RecipientText_(x.audienceRecipientId)==='STATUS:'+campaignId;})[0];
   if(!row)return v6RecipientSafeStatus_('RECIPIENT RESOLUTION PENDING',0,0,'NOT_RESOLVED','PENDING BACKEND EVALUATION','PENDING BACKEND EVALUATION');return v6RecipientSafeStatus_(v6RecipientUpper_(row.audienceStatus),Number(row.eligibleContactCount||0),Number(row.excludedContactCount||0),row.reasonCode,row.frequencyStatus,row.exclusionStatus);
+}
+
+// Deterministic sending evidence. Missing NOVA match alone is never a suppression.
+function v6RecipientSecurityEvidence_(){
+  return {contacts:v6Rows_('MKT_CONTACTS_SECURE'),exclusions:v6Rows_('MKT_EXCLUSIONS'),events:v6Rows_('MKT_EMAIL_EVENTS'),responses:v6Rows_('MKT_RESPONSES'),stops:v6Rows_('MKT_ACCOUNT_STOPS')};
+}
+function v6RecipientSecurityCheck_(r,evidence){
+  var e=evidence||v6RecipientSecurityEvidence_(),email=String(r.email||'').trim().toLowerCase(),id=String(r.contactId||''),account=String(r.accountId||'');
+  var matching=e.contacts.filter(function(c){return String(c.email||'').trim().toLowerCase()===email;});
+  var identities={};matching.forEach(function(c){identities[String(c.accountId)+'|'+String(c.contactId)]=true;});
+  if(Object.keys(identities).length>1)return 'IDENTITY_AMBIGUOUS';
+  if(matching.some(function(c){return c.accountId&&String(c.accountId)!==account;}))return 'IDENTITY_AMBIGUOUS';
+  if(matching.some(function(c){return v6RecipientBool_(c.doNotContact)||v6RecipientBool_(c.dnc);}))return 'DO_NOT_CONTACT';
+  if(matching.some(function(c){return /^(INVALID|HARD_BOUNCE|BLOCKED)$/.test(String(c.emailStatus||'').toUpperCase());}))return 'EMAIL_INVALID';
+  function contactMatch(x){return !!((x.contactId&&String(x.contactId)===id)||(x.email&&String(x.email).trim().toLowerCase()===email));}
+  if(e.events.some(function(x){return contactMatch(x)&&x.eventType==='BOUNCE'&&/^(HARD_BOUNCE|BLOCKED)$/.test(x.reasonCode);}))return 'DELIVERY_SUPPRESSED';
+  if(e.exclusions.some(function(x){return x.email&&String(x.email).trim().toLowerCase()===email&&v6RecipientActiveExclusion_([Object.assign({},x,{accountId:'',contactId:''})],account,id,new Date());}))return 'EXCLUSION_ACTIVE';
+  var stops=e.stops.concat(e.responses.filter(function(x){return /^(REPLY|CUSTOMER_REPLIED|RFQ|QUOTE|LOAD|UNSUBSCRIBE|SPAM_COMPLAINT)$/.test(String(x.eventType||x.responseType).toUpperCase());}));
+  if(stops.some(function(x){
+    if(/^(INACTIVE|CLEARED|EXPIRED)$/.test(String(x.status||'').toUpperCase()))return false;
+    if(x.accountId&&String(x.accountId)!==account)return false;
+    if(/^(ACCOUNT|ACCOUNT_ONLY|ACCOUNT_WIDE)$/.test(String(x.scope||'').toUpperCase()))return String(x.accountId||'')===account;
+    if(x.contactId||x.email)return contactMatch(x);
+    return String(x.accountId||'')===account; // ambiguous scope fails closed
+  }))return 'RESPONSE_STOP';
+  return 'CLEAR';
+}
+function v6RecipientUniqueCandidates_(rows){
+  var byEmail={};
+  rows.forEach(function(r){var email=String(r.email||'').trim().toLowerCase(),key=email||('missing:'+r.contactId);(byEmail[key]||(byEmail[key]=[])).push(r);});
+  return Object.keys(byEmail).sort().map(function(k){
+    var group=byEmail[k],ids={};group.forEach(function(r){ids[String(r.accountId)+'|'+String(r.contactId)]=true;});
+    var r=Object.assign({},group[0]);
+    if(Object.keys(ids).length>1)r.securityReason='IDENTITY_AMBIGUOUS';
+    if(group.some(function(x){return v6RecipientBool_(x.doNotContact)||v6RecipientBool_(x.dnc);}))r.doNotContact=true;
+    return r;
+  });
+}
+// A pipeline response stage is not evidence that every sibling contact replied.
+// Unknown scope remains blocked; explicit account stops always win.
+function v6RecipientPipelineStopped_(stage,r,evidence){
+  if(!stage)return false;
+  if(stage==='CLOSED / SUPPRESSED')return true;
+  if(stage!=='RESPONDED'&&stage!=='RFQ RECEIVED')return typeof v6PipelineAdvanced_==='function'&&v6PipelineAdvanced_(stage);
+  var e=evidence||v6RecipientSecurityEvidence_(),scoped=e.responses.concat(e.stops).filter(function(x){return String(x.accountId||'')===String(r.accountId||'');});
+  if(!scoped.length||scoped.some(function(x){return !x.contactId&&!x.email||/^(ACCOUNT|ACCOUNT_ONLY|ACCOUNT_WIDE)$/.test(String(x.scope||'').toUpperCase());}))return true;
+  return v6RecipientSecurityCheck_(r,e)!=='CLEAR';
 }

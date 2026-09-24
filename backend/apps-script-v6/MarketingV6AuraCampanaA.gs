@@ -660,17 +660,21 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
   var exclusions = v6Rows_('MKT_EXCLUSIONS');
   var ledgerRows = v6Rows_('MKT_FREQUENCY_LEDGER');
   var now = new Date();
+  var security=v6RecipientSecurityEvidence_();
+  candidates=v6RecipientUniqueCandidates_(candidates);
   var eligible = [], excluded = [];
   candidates.forEach(function (cand) {
     var reason = 'CLEAR';
-    if (cand.doNotContact) reason = 'DO_NOT_CONTACT';
+    var securityReason=cand.securityReason||v6RecipientSecurityCheck_(cand,security);
+    if(securityReason!=='CLEAR')reason=securityReason;
+    else if (cand.doNotContact) reason = 'DO_NOT_CONTACT';
     else if (!cand.email) reason = 'EMAIL_MISSING';
     else if (!v6AuraEmailValid_(cand.email) || v6AuraEmailText_(cand.emailStatus).toUpperCase() === 'INVALID') reason = 'EMAIL_INVALID';
     else {
-      var exclusion = (typeof v6RecipientActiveExclusion_ === 'function') ? v6RecipientActiveExclusion_(exclusions, cand.accountId, cand.contactId, now) : null;
+      var exclusion = (typeof v6RecipientActiveExclusion_ === 'function') ? v6RecipientActiveExclusion_(exclusions, cand.accountId, cand.contactId, now) : {reasonCode:'GOVERNANCE_UNAVAILABLE'};
       if (exclusion) reason = 'EXCLUSION_' + v6AuraCampanaAExclusionReasonCode_(exclusion).replace(/[^A-Z0-9]+/g, '_');
       else {
-        var frequency = (typeof v6FrequencyStatus_ === 'function') ? v6FrequencyStatus_({ accountId: cand.accountId, contactId: cand.contactId, campaignId: CAMPANA_A_CAMPAIGN_ID_, campaignType: campaignType }, ledgerRows) : { eligible: true, status: 'CLEAR' };
+        var frequency = (typeof v6FrequencyStatus_ === 'function') ? v6FrequencyStatus_({ accountId: cand.accountId, contactId: cand.contactId, campaignId: CAMPANA_A_CAMPAIGN_ID_, campaignType: campaignType }, ledgerRows) : { eligible: false, status: 'GOVERNANCE_UNAVAILABLE' };
         if (!frequency.eligible) reason = 'FREQUENCY_' + v6AuraEmailText_(frequency.status).toUpperCase().replace(/[^A-Z0-9]+/g, '_');
       }
     }
@@ -838,7 +842,7 @@ function v6AuraCampanaABuildQueue_() {
     // v6AuraEmailAccountStopped_ already uses -- this does not change what counts as stopped.
     var pipelineRow = accountPipelineById[accountId] || null;
     var currentStage = pipelineRow ? String(pipelineRow.currentStage || '').toUpperCase() : '';
-    var rawStopped = !!currentStage && (currentStage === 'CLOSED / SUPPRESSED' || (typeof v6PipelineAdvanced_ === 'function' && v6PipelineAdvanced_(currentStage)));
+    var rawStopped = v6RecipientPipelineStopped_(currentStage,r);
     var overrideCheck = rawStopped ? v6AuraCampanaAStopOverrideCheck_(currentStage, pipelineRow, campaigns) : { overridable: false, reason: 'NOT_STOPPED' };
     var stopped = rawStopped && !overrideCheck.overridable;
     profile.ELIGIBILITY_MS += Date.now() - tElig0;
@@ -1018,9 +1022,11 @@ function v6AuraCampanaADispatchBatch_() {
     var accountId = v6AuraEmailText_(job.accountId), contactId = v6AuraEmailText_(job.contactId);
     var now = new Date().toISOString();
     try {
+      var securityReason=v6RecipientSecurityCheck_(job);
+      if(securityReason!=="CLEAR"){job.status="SUPPRESSED";job.error=securityReason;counts.suppressed++;updated.push(job);return;}
       var pipelineRow = pipelineByAccountId[accountId] || null;
       var stage = pipelineRow ? String(pipelineRow.currentStage || '').toUpperCase() : '';
-      var accountStopped = !!stage && (stage === 'CLOSED / SUPPRESSED' || (typeof v6PipelineAdvanced_ === 'function' && v6PipelineAdvanced_(stage)));
+      var accountStopped = v6RecipientPipelineStopped_(stage,job);
       if (accountStopped) {
         job.status = 'STOPPED'; job.processedAt = now; counts.stopped++; updated.push(job); return;
       }

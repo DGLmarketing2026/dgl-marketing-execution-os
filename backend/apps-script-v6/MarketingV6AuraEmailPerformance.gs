@@ -34,7 +34,7 @@ function v6AuraReconcileEmailEvents_() {
     if(!v6Rows_('MKT_EMAIL_EVENTS').some(function(e){return e.eventId===eventId;}))v6UpsertByKey_('MKT_EMAIL_EVENTS',['eventId'],{eventId:eventId,jobId:q.jobId,campaignId:q.campaignId,accountId:q.accountId,contactId:q.contactId,email:q.email,eventType:'REPLY',occurredAt:v6AuraEmailDate_(r.responseAt),source:'MKT_RESPONSES',externalId:r.externalMessageId||r.responseId,createdAt:new Date().toISOString()});
   });
 }
-function v6AuraEmailPerformance_() {
+function v6AuraEmailPerformanceData_() {
   var events=v6Rows_('MKT_EMAIL_EVENTS'),responses=v6Rows_('MKT_RESPONSES'),queue=v6Rows_('MKT_EMAIL_QUEUE');
   var campaigns=v6Rows_('MKT_CAMPAIGNS'),contacts=v6Rows_('MKT_CONTACTS_SECURE'),accounts=v6Rows_('MKT_ACCOUNTS');
   function find(list,key,value){return list.filter(function(r){return value&&String(r[key])===String(value);})[0]||{};}
@@ -76,7 +76,7 @@ function v6AuraEmailPerformanceJob_(payload) {
   var jobs=v6Rows_('MKT_EMAIL_QUEUE').filter(function(q){return q.jobId===id;});
   if(!jobs.length)return {status:'NOT_FOUND',jobId:id};
   if(jobs.length!==1)return {status:'AMBIGUOUS_JOB_ID',jobId:id};
-  var job=jobs[0],row=v6AuraEmailPerformance_().rows.filter(function(r){return r.jobId===id;})[0];
+  var job=jobs[0],row=v6AuraEmailPerformanceData_().rows.filter(function(r){return r.jobId===id;})[0];
   // Explicit fields only: no reconstructed content, invented IDs or historical writes.
   ['firstName','status','processedAt','createdAt','sequenceStep','subject','htmlBody','replyTo','creativeId','creativeVersion','creativeApprovalId','htmlChecksum','recipientRenderedChecksum','recipientContentChecksum'].forEach(function(k){row[k]=job[k]==null?'':job[k];});
   return row;
@@ -138,4 +138,44 @@ function v6AuraIngestGmailDsn_(options) {
     else {progress.start=next;props.setProperty('AURA_DSN_PROGRESS',JSON.stringify(progress));}
     return {ingested:count,nextStart:next};
   } finally {lock.releaseLock();}
+}
+
+function v6AuraPerformanceSummary_(rows,tracking){
+  var s={sent:0,failed:0,bounced:0,replied:0,opened:tracking.opened==='NOT_TRACKED'?null:0,clicked:tracking.clicked==='NOT_TRACKED'?null:0};
+  rows.forEach(function(r){if(r.sentAt||r.sendStatus==='SENT')s.sent++;if(r.failedAt||r.sendStatus==='FAILED')s.failed++;if(r.bounceStatus)s.bounced++;if(r.replied)s.replied++;if(r.opened)s.opened++;if(r.clicked)s.clicked++;});
+  var sent=rows.filter(function(r){return r.sendStatus==='SENT';});s.sentRecipientJobs=sent.length;
+  s.sentUniqueEmails=new Set(sent.map(function(r){return String(r.email||'').toLowerCase().trim();}).filter(Boolean)).size;
+  s.sentUniqueAccounts=new Set(sent.map(function(r){return r.accountId;}).filter(Boolean)).size;return s;
+}
+function v6AuraPerformanceFilter_(rows,p){
+  p=p||{};
+  ['from','to'].forEach(function(k){if(p[k]&&!/^\d{4}-\d{2}-\d{2}$/.test(p[k]))throw new Error('INVALID_FILTER');});
+  if(p.metric&&['sent','failed','bounced','replied','opened','clicked'].indexOf(p.metric)<0)throw new Error('INVALID_FILTER');
+  var search=String(p.search||'').toLowerCase().slice(0,200);
+  return rows.filter(function(r){
+    if(p.jobId&&r.jobId!==p.jobId)return false;
+    if(['campaignId','campaignFamily','sendStatus','language'].some(function(k){return p[k]&&String(r[k])!==String(p[k]);}))return false;
+    if(search&&![r.company,r.contactName,r.email].some(function(v){return String(v||'').toLowerCase().indexOf(search)>=0;}))return false;
+    if(p.metric&&!({sent:!!r.sentAt||r.sendStatus==='SENT',failed:!!r.failedAt||r.sendStatus==='FAILED',bounced:!!r.bounceStatus,replied:r.replied,opened:r.opened,clicked:r.clicked})[p.metric])return false;
+    var dates=[r.sentAt,r.failedAt,r.replyAt,r.bounceAt,r.openAt,r.clickAt].filter(Boolean).map(function(d){return String(d).slice(0,10);});
+    return (!p.from&&!p.to)||dates.some(function(d){return (!p.from||d>=p.from)&&(!p.to||d<=p.to);});
+  });
+}
+function v6AuraEmailPerformance_(payload){
+  var data=v6AuraEmailPerformanceData_();
+  // Preserve internal callers that explicitly use the legacy zero-argument API.
+  if(payload===undefined)return data;
+  var p=payload||{},filtered=v6AuraPerformanceFilter_(data.rows,p).sort(function(a,b){return String(b.sentAt||'').localeCompare(String(a.sentAt||''))||String(a.jobId).localeCompare(String(b.jobId));});
+  var pageSize=Math.min(100,Math.max(1,Math.floor(Number(p.pageSize)||25))),totalPages=Math.max(1,Math.ceil(filtered.length/pageSize)),page=Math.min(totalPages,Math.max(1,Math.floor(Number(p.page)||1)));
+  var facets={};['campaignId','campaignFamily','sendStatus','language'].forEach(function(k){facets[k]=Array.from(new Set(data.rows.map(function(r){return r[k];}).filter(Boolean))).sort();});
+  return {summary:data.summary,summaryGlobal:data.summary,summaryFiltered:v6AuraPerformanceSummary_(filtered,data.tracking),rows:filtered.slice((page-1)*pageSize,page*pageSize),page:page,pageSize:pageSize,totalRows:filtered.length,totalGlobalRows:data.rows.length,totalPages:totalPages,tracking:data.tracking,facets:facets};
+}
+function v6AuraEmailPerformanceExport_(payload){
+  var p=payload||{},data=v6AuraEmailPerformanceData_(),rows=v6AuraPerformanceFilter_(data.rows,p);
+  if(rows.length>5000)throw new Error('EXPORT_LIMIT_EXCEEDED');
+  var columns=['jobId','campaignId','company','contactName','email','sentFamily','language','sendStatus','sentAt','bounceStatus','bounceReason','replied','replyAt'];
+  var safeRows=rows.map(function(r){var out={};columns.forEach(function(k){out[k]=r[k];});return out;});
+  var filters={};['search','campaignId','campaignFamily','sendStatus','language','from','to','metric'].forEach(function(k){filters[k+'Applied']=!!p[k];});
+  mktV55Audit_('PII_REPORT_EXPORT',{correlationId:p.correlationId||''},'COMPLETED',{reportType:'EMAIL_PERFORMANCE',rowCount:rows.length,filters:filters,timestamp:new Date().toISOString()});
+  return {rows:safeRows,columns:columns,totalRows:rows.length};
 }
