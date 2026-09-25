@@ -1,6 +1,7 @@
 var AURA_EMAIL_EVENT_HEADERS_ = ['eventId','jobId','campaignId','accountId','contactId','email','eventType','occurredAt','source','externalId','reasonCode','reasonText','createdAt'];
 var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
   MKT_EMAIL_EVENTS:AURA_EMAIL_EVENT_HEADERS_,
+  MKT_CAMPAIGNS:['campaignId','campaignName','campaignType','objective','service','scopeId','audienceId','playbookId','language','status','approvalStatus','messageAngle','creativeSetChecksum','createdAt','updatedAt'],
   MKT_ACCOUNTS:['accountId','externalSystem','externalAccountId','salesforceAccountId','canonicalSalesforceIdStatus','accountName','amOwner','status','sourceUpdatedAt','createdAt','updatedAt'],
   MKT_CONTACTS_SECURE:['contactId','accountId','externalSystem','externalContactId','salesforceContactId','canonicalSalesforceIdStatus','email','emailStatus','doNotContact','status','sourceUpdatedAt','createdAt','updatedAt'],
   MKT_CAMPAIGN_SCOPES:['scopeId','audienceId','campaignId','campaignType','opportunityType','updatedAt'],

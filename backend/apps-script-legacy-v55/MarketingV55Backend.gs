@@ -33,6 +33,7 @@ function handleMarketingV55Api_(e, method) {
 
   var action = String(req.action || '');
   var allowed = [
+  'v6CampaignStudioPrepareScope', 'v6CampaignStudioContext', 'v6CampaignStudioApproveSet',
   'v55CreateTestDraft',
   'v55ResolveRecipients',
   'v55AudienceStatus',
@@ -76,6 +77,9 @@ function handleMarketingV55Api_(e, method) {
     if (action !== 'v55Health') mktV55AssertToken_(req.token || req.apiKey || '');
     var result;
     switch (action) {
+    case 'v6CampaignStudioPrepareScope':
+    case 'v6CampaignStudioContext':
+    case 'v6CampaignStudioApproveSet': result = routeMarketingV6_(action, req); break;
     case 'v6Opportunities':
 case 'v6RunOpportunityEngine':
 case 'v6OpportunitySummary':
@@ -162,7 +166,7 @@ case 'v6AuraRevokeCreativeApproval':
 function setupMarketingV55Backend() {
   var required = {};
   required[MKT_V55.SHEETS.REQUESTS] = ['requestId','createdAt','amOwner','portfolioName','accountName','accountCount','objective','service','messageAngle','priority','commercialContext','requestedOutcome','targetWindow','lane','qnbWindow','audienceId','audienceCount','exclusions','status','campaignId','automationStatus','marketingStatus','createdBy','updatedAt','source','notes'];
-  required[MKT_V55.SHEETS.CAMPAIGNS] = ['campaignId','campaignName','campaignType','audienceId','service','language','templateId','subject','preheader','headline','body','body2','cta','ctaUrl','heroUrl','logoUrl','senderName','replyTo','status','createdAt','updatedAt','requestId','amOwner','playbookId','marketingStatus','approvalStatus'];
+  required[MKT_V55.SHEETS.CAMPAIGNS] = ['campaignId','campaignName','campaignType','audienceId','service','language','templateId','subject','preheader','headline','body','body2','cta','ctaUrl','heroUrl','logoUrl','senderName','replyTo','status','createdAt','updatedAt','requestId','amOwner','playbookId','marketingStatus','approvalStatus','scopeId','objective','messageAngle','creativeSetChecksum'];
   required[MKT_V55.SHEETS.APPROVALS] = ['approvalId','campaignId','requestId','approvalType','approvalScope','status','requestedAt','requestedBy','approvedAt','approvedBy','rejectedAt','rejectedBy','reason','expiresAt','channel','audienceId','accountCount','version','notes','updatedAt'];
   required[MKT_V55.SHEETS.RESPONSES] = ['responseId','campaignId','requestId','accountId','contactId','responseType','responseAt','channel','externalMessageId','rfqId','quoteId','loadId','summary','requiresAMAction','amOwner','stopApplied','handoffId','status','createdAt','notes'];
   required[MKT_V55.SHEETS.STOPS] = ['stopId','campaignId','requestId','accountId','contactId','stopReason','stoppedAt','responseType','scope','remainingCampaignAccountsContinue','sourceEventId','amOwner','sequenceStep','externalId','status','createdBy','createdAt','updatedAt','metadata','notes'];
@@ -257,8 +261,8 @@ function createMarketingV55Campaign_(requestId, strategy) {
   var s = strategy || {}, now = mktV55Now_(), id = mktV55Id_('CMP');
   var campaign = {
     campaignId:id, campaignName:s.campaignName || (request.objective + ' · ' + request.service),
-    campaignType:request.objective, audienceId:request.audienceId || '', service:request.service || '',
-    language:s.language || 'EN', templateId:s.templateId || s.creativeSystem || '', subject:s.subject || '',
+    campaignType:request.objective, objective:request.objective, messageAngle:s.messageAngle || '', scopeId:s.scopeId || '', audienceId:request.audienceId || s.scopeId || '', service:request.service || '',
+    language:s.scopeId ? 'MULTILINGUAL' : (s.language || ''), templateId:s.templateId || s.creativeSystem || '', subject:s.subject || '',
     preheader:s.preheader || '', headline:s.headline || '', body:s.body || '', body2:s.body2 || '',
     cta:s.cta || '', ctaUrl:s.ctaUrl || '', heroUrl:s.heroUrl || '', logoUrl:s.logoUrl || '',
     senderName:s.senderName || 'DGL', replyTo:s.replyTo || '', status:'CAMPAIGN READY', createdAt:now, updatedAt:now,
@@ -292,6 +296,7 @@ function requestMarketingV55Approval_(campaignId, data) {
 }
 
 function recordMarketingV55Approval_(campaignId, data) {
+  if (campaignId === 'CMP-CAMPANA-A-HA-PRIORITARIA' && String((data || {}).status || 'APPROVED').toUpperCase() === 'APPROVED') v6StudioAssertSetReady_(campaignId);
   if (!data || !data.approvedBy) throw new Error('approvedBy is required');
   var c = mktV55Find_(MKT_V55.SHEETS.CAMPAIGNS,'campaignId',campaignId);
   if (!c) throw new Error('Campaign not found: ' + campaignId);
@@ -303,7 +308,8 @@ function recordMarketingV55Approval_(campaignId, data) {
   a.status=approved?'APPROVED':'REJECTED'; a.approvedAt=approved?now:''; a.approvedBy=approved?data.approvedBy:'';
   a.rejectedAt=approved?'':now; a.rejectedBy=approved?'':data.approvedBy; a.reason=data.reason || ''; a.updatedAt=now;
   mktV55Upsert_(MKT_V55.SHEETS.APPROVALS,'approvalId',a,'APR');
-  c.status=approved?'APPROVED':'CAMPAIGN READY'; c.marketingStatus=c.status; c.approvalStatus=a.status; c.updatedAt=now;
+  if (approved && campaignId === 'CMP-CAMPANA-A-HA-PRIORITARIA') c.creativeSetChecksum = v6StudioAssertSetReady_(campaignId).creativeSetChecksum;
+  c.status=approved?'APPROVED':'CAMPAIGN READY'; c.marketingStatus=c.status; if(approved && campaignId==='CMP-CAMPANA-A-HA-PRIORITARIA') c.status='AUTO_ACTIVE'; c.approvalStatus=a.status; c.updatedAt=now;
   mktV55Upsert_(MKT_V55.SHEETS.CAMPAIGNS,'campaignId',c,'CMP');
   mktV55Audit_('APPROVAL_RECORDED',{campaignId:campaignId,requestId:c.requestId,approvedBy:data.approvedBy},approved?'APPROVED':'BLOCKED',{approvalId:a.approvalId,status:a.status});
   return {approval:a,campaign:c};

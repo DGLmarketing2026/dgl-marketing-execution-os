@@ -1,3 +1,10 @@
+function v6AuraCreativeLanguage_(value) {
+  var s = String(value || '').trim().toLowerCase();
+  if (/^(es|spanish|español)$/.test(s)) return 'ES';
+  if (/^(en|english)$/.test(s)) return 'EN';
+  if (/^(pt|pt-br|portuguese|português|português \(brasil\))$/.test(s)) return 'PT';
+  return '';
+}
 // INICIATIVA 2 -- Campaign Studio como unica fuente canonica del email.
 //
 // Problem this file solves: before this change, AURA's own queue-build functions
@@ -119,7 +126,14 @@ function v6AuraEnsureCampaignCreativesSheet_() {
 // invalidation of the OLD in-flight approval state itself happens in the browser,
 // campaign-studio-v5.js, the moment Marketing edits an approved creative).
 function v6AuraPersistApprovedCreative_(payload) {
-  var p = payload || {};
+  var p = Object.assign({}, payload || {});
+  if (p.campaignId === 'CMP-CAMPANA-A-HA-PRIORITARIA') {
+    p.language = v6AuraCreativeLanguage_(p.language);
+    if (!p.language) throw new Error('CREATIVE_LANGUAGE_REQUIRED');
+    var context = v6CampaignStudioContext_({campaignId:p.campaignId});
+    if (!context.audienceResolved || context.requiredLanguages.indexOf(p.language) < 0) throw new Error('AUDIENCE_LANGUAGE_UNRESOLVED');
+    v6StudioAssertBrand_(p); v6StudioAssertContent_(p);
+  }
   v6AuraEnsureCampaignCreativesSheet_();
   var campaignId = v6AuraEmailText_(p.campaignId);
   if (!campaignId) throw new Error('CREATIVE_APPROVAL_MISSING_CAMPAIGN_ID');
@@ -168,7 +182,10 @@ function v6AuraPersistApprovedCreative_(payload) {
 // blindly). A persisted row missing any of these is a persistence bug, not a valid approval,
 // and must never be reported back as one.
 function v6AuraApproveCreative_(payload) {
-  var record = v6AuraPersistApprovedCreative_(payload);
+  var lock = (payload || {}).campaignId === 'CMP-CAMPANA-A-HA-PRIORITARIA' ? LockService.getScriptLock() : null;
+  if (lock) lock.waitLock(30000);
+  var record;
+  try { record = v6AuraPersistApprovedCreative_(payload); } finally { if (lock) lock.releaseLock(); }
   if (!record || !record.creativeId || !record.approvalId || !(Number(record.creativeVersion) > 0) || !record.htmlChecksum || !record.contentChecksum) {
     throw new Error('CREATIVE_APPROVAL_PERSISTENCE_INCOMPLETE');
   }
@@ -278,15 +295,18 @@ function v6AuraLatestApprovedCreative_(campaignId) {
 // same time, under the same campaignId. Every other (single-language) campaign can keep using
 // v6AuraLatestApprovedCreative_ above; this is additive, not a replacement.
 function v6AuraLatestApprovedCreativeForLanguage_(campaignId, language) {
-  var id = v6AuraEmailText_(campaignId), lang = v6AuraEmailText_(language);
+  var id = v6AuraEmailText_(campaignId), lang = v6AuraCreativeLanguage_(language);
+  if (language && !lang) return null;
   var ledger = v6AuraRevokedLedger_();
   var rows = v6Rows_('MKT_CAMPAIGN_CREATIVES').filter(function (r) {
-    return v6AuraEmailText_(r.campaignId) === id && (!lang || v6AuraEmailText_(r.language) === lang) &&
+    return v6AuraEmailText_(r.campaignId) === id && (!lang || v6AuraCreativeLanguage_(r.language) === lang) &&
       String(r.status || 'APPROVED').toUpperCase() !== 'REVOKED' &&
       !Object.prototype.hasOwnProperty.call(ledger, v6AuraEmailText_(r.creativeId));
   });
   if (!rows.length) return null;
   rows.sort(function (a, b) { return Number(b.creativeVersion || 0) - Number(a.creativeVersion || 0); });
+  var latest = v6Rows_('MKT_CAMPAIGN_CREATIVES').filter(function(r){return v6AuraEmailText_(r.campaignId)===id && (!lang || v6AuraCreativeLanguage_(r.language)===lang);}).sort(function(a,b){return Number(b.creativeVersion||0)-Number(a.creativeVersion||0);})[0];
+  if (!latest || latest.creativeId !== rows[0].creativeId) return null;
   return rows[0];
 }
 
@@ -429,6 +449,9 @@ function v6AuraValidateQueuedCreative_(job) {
 // unvalidated. This wrapper is the one thing either dispatcher may call: no validator function,
 // or the validator itself throwing, both resolve to BLOCKED, never to an open gate.
 function v6AuraValidateCreativeOrBlock_(job) {
+  if ((job || {}).campaignId === 'CMP-CAMPANA-A-HA-PRIORITARIA') {
+    if (typeof v6AuraCampanaACreativeSetReadiness_ !== 'function' || !v6AuraCampanaACreativeSetReadiness_().ready) return {blocked:true,error:'CREATIVE_SET_INCOMPLETE'};
+  }
   if (typeof v6AuraValidateQueuedCreative_ !== 'function') return { blocked: true, error: 'CREATIVE_VALIDATION_UNAVAILABLE' };
   try {
     return v6AuraValidateQueuedCreative_(job);
@@ -510,11 +533,16 @@ function v6AuraVerifyAndCreateTestDraft_(req) {
   var campaignId = v6AuraEmailText_(r.campaignId || draftInput.campaignId);
   if (!campaignId) throw new Error('TEST_DRAFT_MISSING_CAMPAIGN_ID');
 
-  var creative = v6AuraLatestApprovedCreative_(campaignId);
+  var creative = draftInput.language ? v6AuraLatestApprovedCreativeForLanguage_(campaignId, draftInput.language) : v6AuraLatestApprovedCreative_(campaignId);
   if (!creative || !creative.htmlBody || !creative.subject || !creative.approvalId || String(creative.status || 'APPROVED').toUpperCase() === 'REVOKED') {
     throw new Error('TEST_DRAFT_CREATIVE_NOT_APPROVED');
   }
 
+  if (campaignId === 'CMP-CAMPANA-A-HA-PRIORITARIA') {
+    if (!v6AuraCreativeLanguage_(draftInput.language)) throw new Error('TEST_DRAFT_LANGUAGE_REQUIRED');
+    v6StudioAssertBrand_(creative); v6StudioAssertContent_(creative);
+    if (v6AuraChecksum_(creative.htmlBody) !== creative.htmlChecksum || v6AuraCanonicalContentChecksum_(creative.subject,creative.htmlBody,creative.textBody,creative.templateId,creative.creativeVersion) !== creative.contentChecksum || (draftInput.subject && draftInput.subject !== creative.subject)) throw new Error('TEST_DRAFT_CREATIVE_MISMATCH');
+  }
   var studioHtml = String(draftInput.htmlBody || '');
   if (!studioHtml) throw new Error('TEST_DRAFT_MISSING_HTML_BODY');
   var storedHtml = String(creative.htmlBody || '');

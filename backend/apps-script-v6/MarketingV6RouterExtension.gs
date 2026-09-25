@@ -8,6 +8,9 @@ function routeMarketingV6_(action, payload) {
   var a = String(action || '');
 
   switch (a) {
+    case 'v6CampaignStudioPrepareScope': return v6CampaignStudioPrepareScope_(p);
+    case 'v6CampaignStudioContext': return v6CampaignStudioContext_(p);
+    case 'v6CampaignStudioApproveSet': return v6CampaignStudioApproveSet_(p);
     case 'v6AuraEmailPerformanceJob': return v6AuraEmailPerformanceJob_(p);
     case 'v6AuraEmailPerformance': return v6AuraEmailPerformance_();
     case 'v6Opportunities':
@@ -132,7 +135,7 @@ function routeMarketingV6_(action, payload) {
     case 'v6AuraApproveCreative':
       return typeof v6AuraApproveCreative_ === 'function' ? v6AuraApproveCreative_(p) : v6RouteMissing_(a, 'v6AuraApproveCreative_');
     case 'v6AuraLatestApprovedCreative':
-      return typeof v6AuraLatestApprovedCreative_ === 'function' ? v6AuraLatestApprovedCreative_((p || {}).campaignId) : v6RouteMissing_(a, 'v6AuraLatestApprovedCreative_');
+      return typeof v6AuraLatestApprovedCreative_ === 'function' ? (p.language ? v6AuraLatestApprovedCreativeForLanguage_(p.campaignId, p.language) : v6AuraLatestApprovedCreative_(p.campaignId)) : v6RouteMissing_(a, 'v6AuraLatestApprovedCreative_');
     // PR #3 audit punto 4 -- editing an approved creative must revoke the BACKEND record
     // (MarketingV6AuraCreativeApproval.gs), not only local browser state.
     case 'v6AuraRevokeCreativeApproval':

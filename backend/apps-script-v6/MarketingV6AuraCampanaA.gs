@@ -484,12 +484,14 @@ function v6AuraCampanaAEnsureCampaignAndScope_(preloadedAccounts) {
   Object.keys(realIdByHashId).forEach(function (hashId) { realIdSet[realIdByHashId[hashId]] = true; });
   var accountIds = Object.keys(realIdSet);
   var now = new Date().toISOString();
-  v6UpsertByKey_('MKT_CAMPAIGNS', ['campaignId'], {
+  var existingCampaign = v6Rows_('MKT_CAMPAIGNS').filter(function(c){return c.campaignId === CAMPANA_A_CAMPAIGN_ID_;})[0] || {};
+  v6UpsertByKey_('MKT_CAMPAIGNS', ['campaignId'], Object.assign({}, existingCampaign, {
     campaignId: CAMPANA_A_CAMPAIGN_ID_, scopeId: CAMPANA_A_SCOPE_ID_,
     campaignName: 'Activation Prioritaria - Campana A (HA)', campaignType: 'Activation', objective: 'Activation',
-    service: 'Multiservicio', amOwner: 'Multiple', language: 'Spanish', status: 'AUTO_ACTIVE',
-    createdAt: now, updatedAt: now
-  });
+    service: 'Multiservicio', amOwner: 'Multiple', language: 'MULTILINGUAL', status: 'AUTO_ACTIVE',
+    audienceId: CAMPANA_A_SCOPE_ID_, playbookId: 'ACTIVATION_ACCOUNT', messageAngle: 'Current Movement',
+    createdAt: existingCampaign.createdAt || now, updatedAt: now
+  }));
   v6AuraEnsureCampaignScope_({
     scopeId: CAMPANA_A_SCOPE_ID_, campaignId: CAMPANA_A_CAMPAIGN_ID_,
     opportunityType: 'Activation', campaignType: 'Activation', accountIds: accountIds, batchWrite: true
@@ -691,6 +693,8 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
 // one execution again (see above). Phase timings (MATCH_MS/LANGUAGE_MS/ELIGIBILITY_MS/COPY_MS/
 // QUEUE_WRITE_MS) are returned on result.profile.
 function v6AuraCampanaABuildQueue_() {
+  var setGate = typeof v6AuraCampanaACreativeSetReadiness_ === 'function' ? v6AuraCampanaACreativeSetReadiness_() : {ready:false};
+  if (!setGate.ready) return {status:'CREATIVE_SET_INCOMPLETE',built:0,campaignId:CAMPANA_A_CAMPAIGN_ID_,gate:setGate};
   var profile = { MATCH_MS: 0, LANGUAGE_MS: 0, ELIGIBILITY_MS: 0, COPY_MS: 0, QUEUE_WRITE_MS: 0 };
   v6AuraCampanaALog_('MATCH_START');
   var tMatch0 = Date.now();
@@ -993,6 +997,8 @@ function v6AuraCampanaAPreflight_() {
 // is an unavoidable, real per-recipient action, not a Sheets read/write, and is never part of
 // the performance problem this pass fixes.
 function v6AuraCampanaADispatchBatch_() {
+  var setGate = typeof v6AuraCampanaACreativeSetReadiness_ === 'function' ? v6AuraCampanaACreativeSetReadiness_() : {ready:false};
+  if (!setGate.ready) return {status:'CREATIVE_SET_INCOMPLETE',processed:0,sent:0,gate:setGate};
   v6AuraCampanaALog_('DISPATCH_START');
   var mode = v6AuraSendMode_();
   var senderName = v6AuraEmailSenderName_();
