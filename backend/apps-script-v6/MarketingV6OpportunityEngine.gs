@@ -35,7 +35,7 @@ function v6AggregateOpportunities_(rows){
         detectedAccounts:0,
         eligibleAccounts:0,
         suppressedAccounts:0,
-        priority:v6OpportunityPriority_(type),
+        priority:row.priority!==undefined&&row.priority!==null&&String(row.priority)!==''&&isFinite(Number(row.priority))?Number(row.priority):v6OpportunityPriority_(type),
         source:String(row.sourceReport||row.source||'PRIVATE COMMERCIAL REPORTS'),
         campaignStatus:String(row.campaignStatus||'OPPORTUNITY DETECTED'),
         nextAction:String(row.nextAction||'Evaluate campaign eligibility'),

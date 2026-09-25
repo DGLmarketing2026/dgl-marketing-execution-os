@@ -6,7 +6,7 @@
   const CREATIVE_SYSTEMS={
     "editorial-white":{
       id:"editorial-white",name:"DGL Editorial White",
-      use:"Reactivation / Retention",
+      use:"Executive editorial",
       desc:"Composición blanca, headline dominante, fotografía integrada y mucho aire.",
       thumb:"editorial",layout:"editorial",recommendedFor:["Reactivation","Retention","Activation"]
     },
@@ -46,7 +46,7 @@
     "Activation":{
       recommendedSystem:"editorial-white",
       angles:["Current Movement"],
-      defaultAngle:"Current Movement",defaultCta:"Generate Quote"
+      defaultAngle:"Current Movement",defaultCta:"Send Requirement"
     },
     "Reactivation":{
       recommendedSystem:"editorial-white",
@@ -162,6 +162,7 @@
   function resolveAsset({objective="Reactivation",service="FTL",angle=""}={}){
     if(objective==="Quoted Not Booked")return "";
 
+    if(objective==="Activation"&&service==="Multiservicio")return null;
     if(objective==="Activation")return serviceAsset(service);
 
     if(objective==="Cross-Sell"){
@@ -191,6 +192,7 @@
   }
 
   const CTA={
+    "Send Requirement":{en:"SEND A REQUIREMENT",es:"ENVIAR REQUERIMIENTO",pt:"ENVIAR REQUERIMENTO"},
     "Generate Quote":{es:"ENVIAR MOVIMIENTO",en:"SEND A SHIPMENT",pt:"ENVIAR EMBARQUE"},
     "Recover Quote":{es:"ACTUALIZAR COTIZACIÓN",en:"UPDATE QUOTE",pt:"ATUALIZAR COTAÇÃO"},
     "Reply":{es:"RESPONDER A DGL",en:"REPLY TO DGL",pt:"RESPONDER À DGL"},

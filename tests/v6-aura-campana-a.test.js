@@ -161,6 +161,9 @@ function makeContext(opts) {
       return rec;
     });
   }
+  // These legacy queue units isolate per-recipient checks. Full-set integration is tested
+  // with the real governance implementation in campaign-studio-governance.test.js.
+  ctx.v6AuraCampanaACreativeSetReadiness_ = () => ({ready:true});
   ctx.__tables = tables; ctx.__sentEmails = sentEmails; ctx.__loggedLines = loggedLines; ctx.__callCounts = callCounts;
   return ctx;
 }

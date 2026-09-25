@@ -113,7 +113,7 @@ OBJECTIVES.forEach(objective=>{
   assert(!/\.replace\(\/\(\["'\(=\]\)assets\\\//.test(studioSource),'requestDraft() must no longer post-process relative assets/ URLs -- emailHtml() must already emit absolute URLs before approval');
   // PR #3 audit punto 2 -- functional CTA (mailto:), never a placeholder href="#".
   assert(/const DGL_CANONICAL_REPLY_TO="info@dglus\.com"/.test(studioSource),'a canonical reply-to constant must exist for the CTA mailto: link');
-  assert(/const ctaHref=`mailto:\$\{DGL_CANONICAL_REPLY_TO\}\?subject=\$\{encodeURIComponent\(subjectSample\)\}`/.test(studioSource),'the CTA button must be a real mailto: link built from the canonical reply-to address');
+  assert(/const ctaHref=`mailto:\$\{s\.replyTo\|\|DGL_CANONICAL_REPLY_TO\}\?subject=\$\{encodeURIComponent\(subjectSample\)\}`/.test(studioSource),'the CTA button must be a real mailto: link built from the canonical reply-to address');
   assert(!/<a href="#" style=/.test(studioSource),'the CTA button must no longer use a placeholder href="#"');
   console.log('PASS: emailHtml() emits absolute assets/ URLs and a functional mailto: CTA, with no post-processing step left anywhere');
 })();

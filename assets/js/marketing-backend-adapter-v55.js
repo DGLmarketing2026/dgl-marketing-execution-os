@@ -223,6 +223,9 @@
     version:"5.5",mode:"LOCAL_DEMO",endpoint:ENDPOINT,health,connect,disconnect,refresh,
     isConnected:()=>state===STATES.PRIVATE_BACKEND,getConnectionState,
     getRequests:()=>clone(requests),createRequest,updateRequest,
+    prepareCampaignStudioScope:scopeId=>mutate("v6CampaignStudioPrepareScope",{scopeId},false),
+    getCampaignStudioContext:campaignId=>mutate("v6CampaignStudioContext",{campaignId},false),
+    approveCreativeSet:(campaignId,approvedBy)=>mutate("v6CampaignStudioApproveSet",{campaignId,approvedBy},false),
     getCampaigns:()=>clone(campaigns),createCampaign,updateCampaign,
     requestApproval:(id,data)=>campaignAction("v55RequestApproval",id,data),
     recordApproval:(id,data)=>campaignAction("v55RecordApproval",id,data),
@@ -275,7 +278,7 @@
     // reads it back for a post-approval invalidation check or a Test Draft comparison. Neither
     // writes a queue row nor sends anything -- still no second way to trigger a real send.
     approveCreative:(campaignId,creative)=>mutate("v6AuraApproveCreative",{campaignId,...(creative||{})},false),
-    getLatestApprovedCreative:campaignId=>mutate("v6AuraLatestApprovedCreative",{campaignId},false),
+    getLatestApprovedCreative:(campaignId,language)=>mutate("v6AuraLatestApprovedCreative",{campaignId,language},false),
     // PR #3 audit punto 4 -- editing an approved creative must revoke the BACKEND record, not
     // only local UI state. Called by campaign-studio-v5.js's invalidateApproval() helper on
     // every content change after an approval, before local state is reset.

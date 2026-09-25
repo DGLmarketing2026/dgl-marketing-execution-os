@@ -23,7 +23,7 @@ function loadInWindow(files){
   assert.strictEqual(act.recommendedSystem,'editorial-white','Activation recommendedSystem must be editorial-white');
   assert.strictEqual(act.defaultAngle,'Current Movement','Activation defaultAngle must be Current Movement');
   assert.strictEqual(JSON.stringify(act.angles),JSON.stringify(['Current Movement']),'Activation has exactly one approved angle: Current Movement');
-  assert.strictEqual(act.defaultCta,'Generate Quote','Activation defaultCta must be Generate Quote');
+  assert.strictEqual(act.defaultCta,'Send Requirement','Activation defaultCta must be Send Requirement');
   assert(Lib.CREATIVE_SYSTEMS['editorial-white'].recommendedFor.includes('Activation'),'editorial-white must list Activation in recommendedFor');
   const asset=Lib.resolveAsset({objective:'Activation',service:'FTL',angle:'Current Movement'});
   assert(asset,'resolveAsset(Activation) must return a real asset path, not fall through silently to an unrelated branch');
@@ -38,13 +38,13 @@ function loadInWindow(files){
   const act=Copy.generate({objective:'Activation',service:'FTL',language:'Spanish'});
   const reactivation=Copy.generate({objective:'Reactivation',service:'FTL',language:'Spanish',angle:'Previous Relationship'});
   assert.notStrictEqual(act.subjectA,reactivation.subjectA,'Activation must NOT fall back to Reactivation copy');
-  assert.strictEqual(act.subjectA,'{{firstName}}, ¿tiene un movimiento {{service}} en puerta?','Activation ES subjectA must match the approved backend text exactly (merge tags resolved at send time)');
-  assert.strictEqual(act.headline,'¿QUÉ MOVIMIENTO TIENE EN PUERTA?','Activation ES headline must match the approved backend text exactly');
-  assert.strictEqual(act.cta,'ENVIAR MOVIMIENTO','Activation defaultCta (Generate Quote) must resolve to the ES CTA label');
+  assert.strictEqual(act.subjectA,'{{firstName}}, ¿tiene algún movimiento para estos días?','Activation ES subjectA must match the approved backend text exactly (merge tags resolved at send time)');
+  assert.strictEqual(act.headline,'¿TIENE ALGÚN MOVIMIENTO EN PUERTA?','Activation ES headline must match the approved backend text exactly');
+  assert.strictEqual(act.cta,'ENVIAR REQUERIMIENTO','Activation defaultCta (Send Requirement) must resolve to the ES CTA label');
   const en=Copy.generate({objective:'Activation',service:'FTL',language:'English'});
   const pt=Copy.generate({objective:'Activation',service:'FTL',language:'Português (Brasil)'});
-  assert.strictEqual(en.subjectA,'{{firstName}}, any {{service}} shipments coming up?','Activation EN subjectA must match approved backend text');
-  assert.strictEqual(pt.subjectA,'{{firstName}}, tem algum embarque de {{service}} previsto?','Activation PT subjectA must match approved backend text');
+  assert.strictEqual(en.subjectA,'{{firstName}}, any ground moves coming up?','Activation EN subjectA must match approved backend text');
+  assert.strictEqual(pt.subjectA,'{{firstName}}, tem algum embarque terrestre previsto?','Activation PT subjectA must match approved backend text');
   console.log('PASS: copy-engine-v5.js has a dedicated ACTIVATION block matching backend copy exactly, no fallback');
 })();
 

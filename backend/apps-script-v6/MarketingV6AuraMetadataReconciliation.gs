@@ -2,7 +2,7 @@
 function v6AuraCampanaAReconcileMetadataOnly_() {
   var lock=LockService.getScriptLock();lock.waitLock(30000);
   try {
-    var specs=[{table:'MKT_CAMPAIGNS',key:'campaignId',id:'CMP-CAMPANA-A-HA-PRIORITARIA',values:{campaignName:'Activation Prioritaria - Campana A (HA)',campaignType:'Activation',objective:'Activation',service:'Multiservicio',status:'AUTO_ACTIVE'}},
+    var specs=[{table:'MKT_CAMPAIGNS',key:'campaignId',id:'CMP-CAMPANA-A-HA-PRIORITARIA',values:{campaignName:'Activation Prioritaria - Campana A (HA)',campaignType:'Activation',objective:'Activation',service:'Multiservicio',status:'AUTO_ACTIVE',audienceId:'SCOPE-CAMPANA-A-HA-PRIORITARIA',scopeId:'SCOPE-CAMPANA-A-HA-PRIORITARIA',language:'MULTILINGUAL',playbookId:'ACTIVATION_ACCOUNT',messageAngle:'Current Movement'}},
       {table:'MKT_CAMPAIGN_SCOPES',key:'scopeId',id:'SCOPE-CAMPANA-A-HA-PRIORITARIA',values:{campaignType:'Activation',opportunityType:'Activation'}}];
     // Validate both exact records and all columns before the first write.
     var plans=specs.map(function(spec){

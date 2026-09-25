@@ -167,6 +167,7 @@
     return {subjectA:g("v5SubjectA"),subjectB:g("v5SubjectB"),preheader:g("v5Preheader"),headline:g("v5Headline"),body:g("v5Body"),body2:g("v5Body2"),cta:g("v5Cta")};
   }
   function sample(text,s){
+    if(s?.governed)return String(text||"");
     return String(text||"").replaceAll("{{firstName}}","Laura").replaceAll("{{company}}","ABC Logistics").replaceAll("{{service}}",s.service||"FTL").replaceAll("{{lane}}",s.lane||"Houston → Dallas");
   }
 
@@ -220,14 +221,14 @@
     });
   }
 
-  function emailHtml(){
-    const s=strategy(),c=currentCopy(),sys=Lib().CREATIVE_SYSTEMS[s.creativeSystem]||Lib().CREATIVE_SYSTEMS["editorial-white"];
+  function emailHtml(explicitStrategy,explicitCopy){
+    const s=explicitStrategy||strategy(),c=explicitCopy||currentCopy(),sys=Lib().CREATIVE_SYSTEMS[s.creativeSystem]||Lib().CREATIVE_SYSTEMS["editorial-white"];
     const service=Lib().SERVICES[s.service]||Lib().SERVICES.Multiservicio;
     const h=sample(c.headline,s),b=sample(c.body,s),b2=sample(c.body2,s),cta=sample(c.cta,s),pre=sample(c.preheader,s);
     const subjectSample=sample(c.subjectA,s)||h;
     const proof=service.proof.map(x=>`<td style="padding:0 16px 0 0;font-family:Arial,sans-serif"><div style="width:18px;height:2px;background:#77B82A;margin-bottom:7px"></div><div style="font-size:9px;font-weight:800;line-height:1.35;color:#526071">${esc(x)}</div></td>`).join("");
     // PR #3 audit punto 2 -- functional CTA (mailto:), never href="#".
-    const ctaHref=`mailto:${DGL_CANONICAL_REPLY_TO}?subject=${encodeURIComponent(subjectSample)}`;
+    const ctaHref=`mailto:${s.replyTo||DGL_CANONICAL_REPLY_TO}?subject=${encodeURIComponent(subjectSample)}`;
     const button=`<table role="presentation" cellspacing="0" cellpadding="0"><tr><td bgcolor="#77B82A" style="border-radius:7px"><a href="${ctaHref}" style="display:inline-block;padding:14px 21px;font-family:Arial,sans-serif;font-size:12px;font-weight:900;color:#071005;text-decoration:none">${esc(cta)} →</a></td></tr></table>`;
 
     if(sys.layout==="minimal"){
@@ -242,7 +243,7 @@
           <p style="font-size:15px;line-height:1.7;color:#4F5868;margin:23px 0 0">${esc(b)}</p>
           <p style="font-size:15px;line-height:1.7;color:#4F5868;margin:8px 0 24px">${esc(b2)}</p>${button}
         </td></tr>
-        <tr><td style="border-top:1px solid #E7E9ED;padding:18px 34px;font-family:Arial,sans-serif;font-size:10px;color:#98A2B3">DGL Freight Broker · Your inland freight partner.</td></tr>
+        <tr><td style="border-top:1px solid #E7E9ED;padding:18px 34px;font-family:Arial,sans-serif;font-size:10px;color:#98A2B3">Dedicated Ground Logistics · Your inland freight partner.</td></tr>
       </table></td></tr></table></body></html>`;
     }
 
@@ -396,7 +397,9 @@
 
   function updateQA(){
     const set=(id,on,text)=>{const e=document.getElementById(id);if(e)e.innerHTML=`<i data-lucide="${on?"check-circle-2":"circle"}"></i>${text}`};
-    set("qaBrand",true,"Official DGL logo loaded");
+    const brandImage=document.querySelector('img[data-dgl-brand-qa]');
+    const brandValid=!!brandImage&&brandImage.complete&&brandImage.naturalWidth>0&&brandImage.src===OFFICIAL_LOGO&&emailHtml().includes(OFFICIAL_LOGO);
+    set("qaBrand",brandValid,brandValid?"Canonical DGL logo loaded":"CANONICAL DGL LOGO VALIDATION FAILED");
     set("qaVisual",true,value("v5HeroUrl")?"Approved hero loaded":"Service hero loaded");
     set("qaCopy",!!value("v5Headline"),"Message generated");
     set("qaApproval",state.approved,state.approved?"Creative approved":"Approval pending");
@@ -459,14 +462,14 @@
             <div class="v5-section-head"><div><h3>Creative Direction</h3><p>Basado en el lenguaje visual histórico de DGL, sin copiar piezas anteriores.</p></div><span class="v5-badge green">6 SYSTEMS</span></div>
             <div class="v5-creative-grid">
               ${systems.map(s=>`<div class="v5-creative-card" data-system="${esc(s.id)}">
-                <div class="v5-thumb ${esc(s.thumb)}">${thumbnail(s,{objective:"Reactivation",service:"FTL",angle:"Previous Relationship"})}</div>
+                <div class="v5-thumb ${esc(s.thumb)}">${thumbnail(s,strategy())}</div>
                 <div class="v5-creative-copy"><strong>${esc(s.name)}</strong><span>${esc(s.use)}</span><small>${esc(s.desc)}</small></div>
               </div>`).join("")}
             </div>
             <div class="v5-strategy-grid v5-asset-controls" style="margin-top:12px">
               <div class="v5-field"><label>CTA Intent</label><select id="v5CtaIntent" class="v5-input">${ctaOptions()}</select></div>
               <div class="v5-field v5-asset-field"><label>Hero Asset</label><div class="v5-asset-selector"><div class="v5-asset-preview" id="v5HeroAssetPreview"><img src="${DEFAULT_HERO}" alt="Selected DGL FTL photographic hero"></div><div><strong id="v5HeroAssetTitle">FTL reactivation photography</strong><span id="v5HeroAssetNote">Previous Relationship</span></div></div><input id="v5HeroUrl" class="v5-input" placeholder="Or paste an approved asset path / URL"></div>
-              <div class="v5-field v5-asset-field"><label>Official Logo</label><div class="v5-asset-selector neutral"><div class="v5-logo-preview"><img src="${OFFICIAL_LOGO}" alt="Official DGL white logo"></div><div><strong>Official DGL white logo</strong><span>Displayed on the navy campaign masthead.</span></div></div><input id="v5LogoUrl" class="v5-input" value="${OFFICIAL_LOGO}" aria-label="Official DGL logo asset path"></div>
+              <div class="v5-field v5-asset-field"><label>Official Logo</label><div class="v5-asset-selector neutral"><div class="v5-logo-preview"><img data-dgl-brand-qa src="${OFFICIAL_LOGO}" alt="Official DGL white logo"></div><div><strong>Official DGL white logo</strong><span>Displayed on the navy campaign masthead.</span></div></div><input id="v5LogoUrl" type="hidden" class="v5-input" value="${OFFICIAL_LOGO}" aria-label="Official DGL logo asset path"></div>
               <div class="v5-field v5-token-field"><label>Personalization Tokens</label><div class="v5-token-note"><strong>Recipient-safe merge fields</strong><span>Preview uses fictional samples only.</span></div><div class="v5-personalization">
                 <label class="v5-toggle"><input id="v5PFirst" type="checkbox" checked> First name</label>
                 <label class="v5-toggle"><input id="v5PCompany" type="checkbox" checked> Company</label>
@@ -512,7 +515,6 @@
           <div class="v5-approval-actions">
             <button class="v5-btn" data-v5-test><i data-lucide="mail"></i>CREATE TEST DRAFT</button>
             <button class="v5-btn" data-v5-approve><i data-lucide="check-circle"></i>Approve Creative</button>
-            <button class="v5-btn primary" data-v5-audience><i data-lucide="send"></i>Create Audience Drafts</button>
           </div>
           <p style="font-size:8.5px;line-height:1.45;color:#7C8499;margin:10px 2px 0">Draft actions require the private Apps Script backend. No customer data is stored in GitHub.</p>
         </div>
@@ -610,7 +612,6 @@
       return;
     }
     if(e.target.closest("[data-v5-test]")){setTestDraftButton("CREATING TEST DRAFT",true);try{await requestDraft("TEST_DRAFT");setTestDraftButton("TEST DRAFT CREATED",false);global.DGL_INTERACTIONS?.toast?.("Test draft created in Gmail. Open Drafts to review it.");}catch(error){setTestDraftButton("CREATE TEST DRAFT",false);global.DGL_INTERACTIONS?.toast?.(error.message,"error");}return}
-    if(e.target.closest("[data-v5-audience]")){requestDraft("AUDIENCE_DRAFTS").then(()=>global.DGL_INTERACTIONS?.toast?.("Audience drafts requested.")).catch(err=>global.DGL_INTERACTIONS?.toast?.(err.message,"error"));return}
   });
 
   document.addEventListener("change",e=>{
@@ -640,11 +641,42 @@
     }
   });
 
+
+  function governedEmail(s,c) {
+    if (!s || !s.campaignId || !s.language || !s.replyTo) throw new Error("CANONICAL_CONTEXT_REQUIRED");
+    if (!compatibleSystems(s).some(x=>x.id===s.creativeSystem)) throw new Error("INCOMPATIBLE_CREATIVE_SYSTEM");
+    const href="mailto:"+s.replyTo+"?subject="+encodeURIComponent(c.subjectA);
+    // Embedded editable copy is part of the checksummed HTML, never a second render source.
+    const copyData=encodeURIComponent(JSON.stringify(c));
+    if(s.objective!=="Activation"||s.service!=="Multiservicio")return emailHtml({...s,governed:true},c)
+      .replace('<html>','<html lang="'+esc(s.language.toLowerCase())+'" data-dgl-copy="'+copyData+'" data-dgl-brand-sha256="'+esc(s.logoSha256)+'">')
+      .replace(/ onerror="[^"]*"/g,'');
+    return `<div data-dgl-brand-sha256="${esc(s.logoSha256)}" data-dgl-copy="${copyData}" lang="${esc(s.language.toLowerCase())}" style="background:#f3f5f7;padding:28px 12px"><table role="presentation" width="680" align="center" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:white;font-family:Arial,sans-serif;color:#05035C"><tr><td style="background:#05035C;padding:30px 40px;border-bottom:3px solid #77B82A"><img src="${OFFICIAL_LOGO}" width="190" alt="DGL / Freight Broker"></td></tr><tr><td style="display:none">${esc(c.preheader)}</td></tr><tr><td style="padding:44px 40px"><h1 style="font-size:32px;line-height:1.18;margin:0 0 28px">${esc(c.headline)}</h1><p style="font-size:16px;line-height:1.7">${esc(c.body)}</p><p style="font-size:16px;line-height:1.7;margin-bottom:32px">${esc(c.body2)}</p><a href="${esc(href)}" style="display:inline-block;background:#77B82A;color:#05035C;padding:16px 24px;font-size:13px;font-weight:bold;text-decoration:none">${esc(c.cta)}</a></td></tr><tr><td style="border-top:1px solid #eee;padding:24px 40px;font-size:11px;color:#687284">Dedicated Ground Logistics · Your inland freight partner.</td></tr></table></div>`;
+  }
+  function storedCopy(html) {
+    const m=String(html||"").match(/data-dgl-copy="([^"]+)"/);
+    return m?JSON.parse(decodeURIComponent(m[1])):null;
+  }
+  function compatibleSystems(s) {
+    const all=Object.values(Lib().CREATIVE_SYSTEMS);
+    if(s.objective==="Activation"&&s.service==="Multiservicio")return all.filter(x=>x.id==="editorial-white");
+    return all.filter(x=>(x.recommendedFor||[]).includes(s.objective));
+  }
+  function governedPanel(context,model) {
+    const v=model.variant,s=model.strategy;
+    const labels={subjectA:"Subject A",subjectB:"Subject B",preheader:"Preheader",headline:"Headline",body:"Opening paragraph",body2:"Follow-up paragraph",cta:"Button text"};
+    const locked=[['Campaign Name',context.campaignName],['Objective',context.objective],['Campaign Family',context.campaignType],['Service',context.service],['Audience',context.audienceId],['Scope',context.scopeId],['Playbook',context.playbookId],['Message Angle',context.messageAngle],['Campaign language',context.language]];
+    return `<section class="v5-studio governed-studio"><header class="v5-topbar"><div><p>PRIVATE BACKEND · GOVERNED CAMPAIGN</p><h1>Campaign Studio</h1></div></header><div class="governed-summary">${locked.map(([k,x])=>`<div><small>${esc(k)}</small><strong>${esc(x||'UNRESOLVED')}</strong></div>`).join('')}</div><p>${context.eligibleContacts} eligible contacts · ${context.eligibleAccounts} unique accounts · ${context.excludedContacts} excluded contacts</p><nav class="governed-tabs" aria-label="Language variants">${model.languages.map(l=>{const x=model.variants[l];return `<button data-studio-language="${l}" aria-selected="${l===s.language}">${l} · ${context.languageCounts[l]||0} recipients · ${x.dirty?'DRAFT':'SAVED'} · ${x.approved?'APPROVED v'+x.creativeVersion:'APPROVAL PENDING'} · ${x.testDraftStatus}</button>`;}).join('')}</nav><div class="governed-editor"><section class="v5-panel v5-panel-pad"><h2>Creative · ${s.language}</h2>${['subjectA','subjectB','preheader','headline','body','body2','cta'].map(k=>`<label>${labels[k]}<textarea class="v5-input" data-studio-copy="${k}" ${model.busy?'disabled':''}>${esc(v.copy[k])}</textarea></label>`).join('')}<h3>Compatible creative systems</h3>${compatibleSystems(s).map(x=>`<button data-studio-system="${x.id}"><strong>${esc(x.name)}</strong><div>${esc(s.objective)} · ${esc(s.service)} · ${esc(s.angle)} · ${s.language}</div><p>${esc(v.copy.headline)}</p></button>`).join('')}</section><section class="v5-panel v5-panel-pad"><h2>Exact preview · ${s.language}</h2><p data-studio-subject>${esc(v.copy.subjectA)}</p><iframe title="${s.language} email preview" sandbox="" data-studio-preview></iframe><p role="status">${esc(model.qa)}</p><p>${esc(model.message||'')}</p><div class="v5-approval-actions"><button class="v5-btn" data-studio-test ${!model.canTest||model.busy?'disabled':''}>CREATE TEST DRAFT</button><button class="v5-btn" data-studio-approve ${!model.canApprove||model.busy?'disabled':''}>APPROVE VARIANT</button><button class="v5-btn primary" data-studio-set ${!model.canApproveSet||model.busy?'disabled':''}>APPROVE CREATIVE SET</button></div></section></div></section>`;
+  }
   global.DGL_MODULE_RENDERERS=global.DGL_MODULE_RENDERERS||{};
   global.DGL_MODULE_RENDERERS["campaign-studio"]=render;
   function loadStrategy(patch){
     if(!document.getElementById("v5Objective"))return {status:"BLOCKED",message:"Campaign Studio must be rendered before loading a strategy."};
     state.incoming={...(state.incoming||{}),...(patch||{})};applyIncoming();generate();return {status:"READY",strategy:strategy()};
   }
-  global.DGL_CAMPAIGN_STUDIO_V5={render,emailHtml,strategy,getStrategy:strategy,loadStrategy,generate,getPreview:()=>({html:emailHtml(),copy:currentCopy(),strategy:strategy()}),deriveCampaignName};
+  global.DGL_CAMPAIGN_STUDIO_V5={governedEmail,governedPanel,storedCopy,compatibleSystems,officialLogo:OFFICIAL_LOGO,
+    render:container=>global.DGL_CAMPAIGN_STUDIO_V6?global.DGL_CAMPAIGN_STUDIO_V6.render(container):render(container),
+    emailHtml,strategy:()=>global.DGL_CAMPAIGN_STUDIO_V6?.getContext()||strategy(),getStrategy:()=>global.DGL_CAMPAIGN_STUDIO_V6?.getContext()||strategy(),
+    loadStrategy:patch=>global.DGL_CAMPAIGN_STUDIO_V6?{status:"BLOCKED",message:"Campaign identity is governed by the private backend."}:loadStrategy(patch),generate,
+    getPreview:()=>global.DGL_CAMPAIGN_STUDIO_V6?({html:global.DGL_CAMPAIGN_STUDIO_V6.preview(),strategy:global.DGL_CAMPAIGN_STUDIO_V6.getContext()}):({html:emailHtml(),copy:currentCopy(),strategy:strategy()}),deriveCampaignName};
 })(window);

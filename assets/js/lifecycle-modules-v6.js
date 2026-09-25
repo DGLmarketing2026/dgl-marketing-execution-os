@@ -16,6 +16,7 @@ const OWNER_KEY="dgl_v6_owner_filter";
 
 const ORDER={QNB:1,RETENTION:2,REACTIVATION:3,"CROSS-SELL":4,NURTURE:5};
 const FAMILY_LABEL={
+  ACTIVATION:"Activation",
   QNB:"Quoted Not Booked",
   RETENTION:"Retention",
   REACTIVATION:"Reactivation",
@@ -58,10 +59,12 @@ function scopeId(x){
 }
 function objective(x){
   const f=family(x.opportunityType);
+  if(f==="ACTIVATION")return"Activation";
   if(f==="QNB")return"Quoted Not Booked";
   if(f==="CROSS-SELL")return"Cross-Sell";
   if(f==="RETENTION"||f==="NURTURE")return"Retention";
-  return"Reactivation";
+  if(f==="REACTIVATION")return"Reactivation";
+  return "";
 }
 function qnbStrategy(reason){
   const r=U(reason);
@@ -91,6 +94,8 @@ function context(x){
     amOwner:x.amOwner||"Unassigned",
     campaignFamily:f,
     objective:objective(x),
+    playbookId:f==="ACTIVATION"?"ACTIVATION_ACCOUNT":g.DGL_MARKETING_PLAYBOOKS?.getPlaybookForRequest?.({objective:objective(x)})?.id,
+    messageAngle:f==="ACTIVATION"?"Current Movement":undefined,
     campaignName:`${FAMILY_LABEL[f]||f} · ${x.service||"Multiservicio"}${w?` · ${w}`:""}${x.reasonCategory?` · ${x.reasonCategory}`:""}`,
     service:x.service||"Multiservicio",
     qnbWindow:w,window:w,
@@ -113,13 +118,12 @@ function context(x){
     policyApprovalStatus:"AUTO BY POLICY · EXCEPT EXCEPTIONS",
     requiresHumanReview:false,
     executionReadiness:"BLOCKED",
-    priority:+x.priority||ORDER[f]||99,
+    priority:x.priority != null && x.priority !== "" && Number.isFinite(+x.priority) ? +x.priority : ORDER[f]||99,
     lastEngineRun:x.lastEngineRun||null
   };
 }
 function openStudio(x){
-  sessionStorage.setItem("dgl_v5_campaign_context",JSON.stringify(context(x)));
-  location.hash="#/campaign-studio";
+  return x.campaignId?g.DGL_CAMPAIGN_STUDIO_V6.openCampaign(x.campaignId):g.DGL_CAMPAIGN_STUDIO_V6.openScope(context(x));
 }
 
 let cache={groups:null,summary:null,pipe:null,ts:0};
@@ -359,6 +363,7 @@ async function control(c){
   c.innerHTML=header("Campaign Control","Automatic policy gates before activation; exceptions remain reviewable.","EXECUTION CONTROL · V6")+
     kpis([["CAMPAIGNS",campaigns.length],["AUTOMATION MODE","POLICY-BASED",false],["CONTACTS","BLOCKED",false],["BULK PROVIDER",P(),false]])+
     `<div class="life-status-strip blocked"><div><span>Production execution</span><strong>${E(P())}</strong></div><p>Gmail remains Test Draft / QA only. Production remains blocked until provider + authoritative contacts + backend policy enforcement are clear.</p></div>`;
+  c.innerHTML+=`<section class="life-panel">${campaigns.map(x=>`<article><h3>${E(x.campaignName||x.name||x.campaignId||x.id)}</h3><p>${E(x.campaignType||x.objective)} · ${E(x.service)}</p><button data-studio-open="${E(x.campaignId||x.id)}">OPEN IN STUDIO</button></article>`).join('')}</section>`;
 }
 async function email(c){
   if(!C())return required(c,"Email Marketing","Governed email QA and delivery readiness.");
@@ -829,5 +834,5 @@ style.textContent=`
 `;
 document.head.appendChild(style);
 
-g.DGL_LIFECYCLE_MODULES_V6={version:"6.4-automation-first",scopeId,contextFor:context,openStudio,loadLive:live,normalizeWindow:normalizedWindow,automationProfile};
+g.DGL_LIFECYCLE_MODULES_V6={family,objective,version:"6.4-automation-first",scopeId,contextFor:context,openStudio,loadLive:live,normalizeWindow:normalizedWindow,automationProfile};
 })(window);
