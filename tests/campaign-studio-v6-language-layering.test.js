@@ -64,3 +64,33 @@ const Copy=loadRealAppCopyLayer();
   assert.equal(pt.languageCode,'pt-BR','lowercase "pt" must also resolve to pt-BR, not the Spanish default');
   console.log('PASS: lowercase "pt" language code also resolves to genuine Portuguese copy');
 })();
+
+// Campaign A regression (browser-discovered 2026-09-28): copy-experience-v1.js's copyFor() had no
+// Activation branch, so Activation fell through to the Reactivation template and injected the
+// service name ("Multiservicio") into every ES/EN/PT field -- copy the governed backend rejects for
+// Campaign A (ACTIVATION_COPY_INVALID in v6AuraApproveCreative_ and v6CampaignStudioTestDraft_).
+// Activation must come unchanged from copy-engine-v5's service-neutral ACTIVATION table.
+(function activationCopyIsCanonicalAndBackendValidTest(){
+  const engineOnly=(()=>{
+    const ctx={window:{}};vm.createContext(ctx);
+    vm.runInContext(fs.readFileSync(path.join(root,'assets/js/creative-library-v5.js'),'utf8'),ctx);
+    vm.runInContext(fs.readFileSync(path.join(root,'assets/js/copy-engine-v5.js'),'utf8'),ctx);
+    return ctx.window.DGL_COPY_ENGINE_V5;
+  })();
+  // Same pattern the backend applies to Campaign A drafts and approvals.
+  const BACKEND_INVALID=/stay close|staying close|seguimos cerca|relationship continuity|multiservicio|\{\{service\}\}/i;
+  const args={objective:'Activation',service:'Multiservicio',angle:'Current Movement',ctaIntent:'Send Requirement'};
+  const expectedCode={ES:'es',EN:'en',PT:'pt-BR'};
+  for(const language of ['ES','EN','PT']){
+    const layered=Copy.generate({...args,language}),canonical=engineOnly.generate({...args,language});
+    for(const field of ['subjectA','subjectB','preheader','headline','body','body2','cta'])
+      assert.equal(layered[field],canonical[field],language+' '+field+' must equal the canonical copy-engine-v5 Activation copy');
+    assert(!BACKEND_INVALID.test(Object.values(layered).join(' ')),language+' Activation copy must pass the governed backend copy rules (no service injection)');
+    assert.equal(layered.languageCode,expectedCode[language]);
+  }
+  assert.equal(Copy.generate({...args,language:'EN'}).subjectA,'{{firstName}}, any ground moves coming up?');
+  // Other families still use copy-experience-v1's own templates.
+  assert.notEqual(Copy.generate({objective:'Reactivation',service:'FTL',angle:'Previous Relationship',language:'EN'}).subjectA,
+    engineOnly.generate({objective:'Reactivation',service:'FTL',angle:'Previous Relationship',language:'EN'}).subjectA);
+  console.log('PASS: Activation copy through the real copy-experience-v1 chain equals the canonical service-neutral copy and passes the Campaign A backend copy rules');
+})();
