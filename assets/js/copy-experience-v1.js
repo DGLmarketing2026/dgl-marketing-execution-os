@@ -218,6 +218,11 @@
     const lang = lg(s || {});
     let old = {};
     try { old = original(s || {}) || {}; } catch(_) {}
+    // Activation copy is owned by copy-engine-v5's ACTIVATION table (service-neutral, governed
+    // Campaign A copy). copyFor() has no Activation branch, so without this guard Activation fell
+    // through to the Reactivation template and injected the service name ("Multiservicio"),
+    // which the governed backend rejects (ACTIVATION_COPY_INVALID).
+    if (s && s.objective === "Activation" && old.subjectA) return { ...old, languageCode: lang };
     const c = copyFor(s || {}, lang);
     return {
       ...old,
