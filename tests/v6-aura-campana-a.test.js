@@ -153,7 +153,7 @@ function makeContext(opts) {
     tables.MKT_CAMPAIGN_CREATIVES = creativeTemplates.map(function (t, i) {
       var rec = {
         creativeId: 'CMP-CAMPANA-A-HA-PRIORITARIA:CREATIVE:' + (i + 1), campaignId: 'CMP-CAMPANA-A-HA-PRIORITARIA',
-        templateId: 'editorial', creativeVersion: i + 1, subject: t.subject, preheader: 'Preheader',
+        status: 'APPROVED', templateId: 'editorial', creativeVersion: i + 1, subject: t.subject, preheader: 'Preheader',
         htmlBody: '<img src="'+ctx.V6_STUDIO_LOGO_+'">'+t.htmlBody, textBody: 'Text body', heroUrl: '', logoUrl: ctx.V6_STUDIO_LOGO_, language: t.language,
         approvedAt: new Date().toISOString(), approvedBy: 'Marketing',
         approvalId: 'CAPR:CMP-CAMPANA-A-HA-PRIORITARIA:' + (i + 1), createdAt: new Date().toISOString()
@@ -290,7 +290,7 @@ function gmailOpp(accountId, accountName, amOwner, sheetName) {
   // one real variant non-deterministically and this test needs one specific, known template.
   var realTemplateCreative = {
     creativeId: 'CMP-CAMPANA-A-HA-PRIORITARIA:CREATIVE:TEST6', campaignId: 'CMP-CAMPANA-A-HA-PRIORITARIA',
-    templateId: 'editorial', creativeVersion: 99, subject: '{{firstName}}, ¿tiene algún movimiento para estos días?', preheader: 'Preheader',
+    status: 'APPROVED', templateId: 'editorial', creativeVersion: 99, subject: '{{firstName}}, ¿tiene algún movimiento para estos días?', preheader: 'Preheader',
     htmlBody: '<p>{{firstName}} {{company}}</p><a href="mailto:info@dglus.com?subject=RE">ENVIAR MOVIMIENTO</a> DGL Freight Broker',
     textBody: 'Text body', heroUrl: '', logoUrl: '', language: 'Spanish',
     approvedAt: new Date().toISOString(), approvedBy: 'Marketing', approvalId: 'CAPR:TEST6', createdAt: new Date().toISOString()

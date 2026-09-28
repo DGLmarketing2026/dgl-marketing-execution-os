@@ -15,7 +15,7 @@ function createModel(context){
   const m={context:Object.freeze({...context}),language:(context.requiredLanguages||[])[0]||"ES",layout:"editorial",variants:{},brand:null,busy:false,error:"",pendingRevokes:new Set()};
   LANGUAGES.forEach(language=>{
     const approved=context.approvedCreativeVariants?.[language];
-    m.variants[language]={copy:g.DGL_COPY_ENGINE_V5.generate({objective:context.objective,service:context.service,angle:context.messageAngle,language,ctaIntent:"Send Requirement"}),dirty:!approved,testDraftStatus:"NOT CREATED",approved:!!approved,...(approved||{})};
+    m.variants[language]={copy:g.DGL_COPY_ENGINE_V5.generate({objective:context.objective,service:context.service,angle:context.messageAngle,language,qnbWindow:context.qnbWindow,ctaIntent:context.campaignId==="CMP-CAMPANA-A-HA-PRIORITARIA"?"Send Requirement":g.DGL_CREATIVE_LIBRARY_V5?.OBJECTIVES?.[context.objective]?.defaultCta}),dirty:!approved,testDraftStatus:context.testDraftStatus?.[language]||(approved?"APPROVED / TEST DRAFT REQUIRED":"UNAPPROVED"),approved:!!approved,...(approved||{})};
   });return m;
 }
 function selectLanguage(m,language){if(!LANGUAGES.includes(language))throw Error("Unsupported language");m.language=language;}
@@ -25,8 +25,8 @@ async function revoke(m,languages){
 
   languages.forEach(l=>{
     const v=m.variants[l];if(v.creativeId)m.pendingRevokes.add(v.creativeId);
-    v.dirty=true;v.approved=false;v.storedHtml=null;
-    if(v.testDraftStatus==="CREATED")v.testDraftStatus="STALE AFTER EDIT";
+    v.dirty=true;v.approved=false;v.storedHtml=null;v.storedText=null;
+    if(v.testDraftStatus==="CREATED"||v.testDraftStatus==="TEST DRAFT VERIFIED")v.testDraftStatus="STALE AFTER EDIT";
     ["creativeId","creativeVersion","approvalId","htmlChecksum","contentChecksum"].forEach(k=>delete v[k]);
   });
   m.context=Object.freeze({...m.context,creativeSetStatus:"PENDING",approvalStatus:"PENDING"});
@@ -49,8 +49,8 @@ function validateBrand(){
   });
 }
 function payload(m){
-  const c=m.variants[m.language].copy;
-  return {language:m.language,subject:c.subjectA,preheader:c.preheader,htmlBody:emailHtml(m),textBody:[c.headline,c.body,c.body2,c.cta].join("\n\n"),templateId:m.layout,logoUrl:LOGO,heroUrl:"",approvedBy:"Marketing",creativeCopy:c,brandValidation:m.brand};
+  const v=m.variants[m.language],c=v.copy;
+  return {creativeId:v.creativeId,creativeVersion:v.creativeVersion,approvalId:v.approvalId,contentChecksum:v.contentChecksum,htmlChecksum:v.htmlChecksum,language:m.language,subject:c.subjectA,preheader:c.preheader,htmlBody:emailHtml(m),textBody:!v.dirty&&v.storedText!=null?v.storedText:[c.headline,c.body,c.body2,c.cta].join("\n\n"),templateId:m.layout,logoUrl:LOGO,heroUrl:"",approvedBy:"Marketing",creativeCopy:c,brandValidation:m.brand};
 }
 async function run(action){
   const m=model;if(!m||m.busy)return;m.busy=true;m.error="";draw();
@@ -64,30 +64,43 @@ async function run(action){
     if(action==="variant"){
       const record=await api().approveCreative(c.campaignId,payload(m));
       if(!record?.creativeId||!record.approvalId||!record.contentChecksum||!record.htmlChecksum||!(record.creativeVersion>0))throw Error("Incomplete approval record");
-      Object.assign(m.variants[m.language],record,{approved:true,dirty:false});
+      Object.assign(m.variants[m.language],record,{approved:true,dirty:false,testDraftStatus:"APPROVED / TEST DRAFT REQUIRED"});
       m.context=Object.freeze(await api().campaignStudioContext(c.campaignId));
     }else if(action==="set"){
       m.context=Object.freeze(await api().approveCreativeSet(c.campaignId));
     }else if(action==="draft"){
       await api().campaignStudioTestDraft(c.campaignId,payload(m));
-      m.variants[m.language].testDraftStatus="CREATED";
+      m.context=Object.freeze(await api().campaignStudioContext(c.campaignId));
+      const v=m.variants[m.language],e=m.context.testDraftVerifications?.[m.language];
+      if(!e||e.creativeId!==v.creativeId||String(e.creativeVersion)!==String(v.creativeVersion)||String(e.contentChecksum)!==String(v.contentChecksum))throw Error("Test draft verification is missing or stale.");
+      v.testDraftStatus="TEST DRAFT VERIFIED";
     }
   }catch(e){m.error=e.message||String(e);}finally{m.busy=false;if(model===m)draw();}
 }
+function variantStatus(v){return v.testDraftStatus==="STALE AFTER EDIT"?"STALE AFTER EDIT":!v.approved?"UNAPPROVED":v.testDraftStatus==="TEST DRAFT VERIFIED"?"TEST DRAFT VERIFIED":"APPROVED / TEST DRAFT REQUIRED";}
+function canApproveSet(m){
+  const c=m.context;return c.audienceResolved&&c.requiredLanguages?.length>0&&c.requiredLanguages.every(l=>{
+    const v=m.variants[l],e=c.testDraftVerifications?.[l];
+    return v.approved&&!v.dirty&&(!c.testDraftReviewRequired||(v.testDraftStatus==="TEST DRAFT VERIFIED"&&e&&e.creativeId===v.creativeId&&String(e.creativeVersion)===String(v.creativeVersion)&&String(e.contentChecksum)===String(v.contentChecksum)));
+  });
+}
+function actionDisabled(m,a){return m.busy||!m.context.audienceResolved||(a==="set"&&!canApproveSet(m))||(a==="draft"&&(!m.variants[m.language].approved||m.variants[m.language].dirty));}
 function preview(){
   if(!mount||!model)return;
   const frame=mount.querySelector("[data-preview]");if(frame)frame.srcdoc=emailHtml(model);
   const status=mount.querySelector("[data-variant-status]");
-  if(status){const v=model.variants[model.language];status.textContent=model.language+" · "+(v.approved?"APPROVED":"UNAPPROVED")+" · "+v.testDraftStatus;}
+  mount.querySelectorAll("[data-language]").forEach(b=>{const status=b.querySelector("small");if(status)status.textContent=variantStatus(model.variants[b.dataset.language]);});
+  mount.querySelectorAll("[data-action]").forEach(b=>b.disabled=actionDisabled(model,b.dataset.action));
+  if(status){const v=model.variants[model.language];status.textContent=model.language+" · "+variantStatus(v);}
 }
 function draw(){
   const m=model;if(!mount||!m)return;const c=m.context,v=m.variants[m.language];
   mount.innerHTML='<div class="page-head"><div><div class="eyebrow">GOVERNED CAMPAIGN STUDIO</div><h2>'+E(c.campaignName)+'</h2><p>Private backend strategy · Creative fields only</p></div><button class="btn" data-picker>SELECT CAMPAIGN</button></div>'+
-    '<section class="card card-pad"><dl style="display:flex;flex-wrap:wrap;gap:24px">'+["objective","service","scopeId","playbookId","messageAngle","language"].map(k=>'<div><dt>'+E(k)+'</dt><dd style="margin:8px 0;font-weight:bold">'+E(c[k])+'</dd></div>').join("")+'</dl><p>'+E(c.eligibleContacts)+' eligible contacts · '+E(c.eligibleAccounts)+' unique accounts · '+E(c.excludedContacts)+' excluded contacts</p><p>Creative set: '+E(c.creativeSetStatus)+' · Required: '+E((c.requiredLanguages||[]).join(" / "))+'</p></section>'+
+    '<section class="card card-pad"><dl style="display:flex;flex-wrap:wrap;gap:24px">'+["objective","service","audienceId","playbookId","messageAngle","language"].map(k=>'<div><dt>'+E(k)+'</dt><dd style="margin:8px 0;font-weight:bold">'+E(c[k])+'</dd></div>').join("")+'</dl><p>'+E(c.eligibleContacts)+' eligible contacts · '+E(c.eligibleAccounts)+' unique accounts · '+E(c.excludedContacts)+' excluded contacts</p><p>Creative set: '+E(c.creativeSetStatus)+' · Required: '+E((c.requiredLanguages||[]).join(" / "))+'</p></section>'+
     '<section class="card card-pad" style="margin-top:20px"><h3>Creative System</h3><div style="display:flex;gap:12px">'+["editorial","executive"].map(l=>'<button class="btn" data-layout="'+l+'" '+(m.busy?'disabled':'')+'>'+E(l)+'<br><small>'+E([c.objective,c.service,c.messageAngle,m.language].join(" · "))+'</small></button>').join("")+'</div></section>'+
-    '<div role="tablist" aria-label="Creative language" style="display:flex;gap:12px;margin:24px 0">'+LANGUAGES.map(l=>'<button class="btn '+(m.language===l?'btn-primary':'')+'" role="tab" aria-selected="'+(m.language===l)+'" data-language="'+l+'" '+(m.busy?'disabled':'')+'>'+l+'</button>').join("")+'</div>'+
+    '<div role="tablist" aria-label="Creative language" style="display:flex;gap:12px;margin:24px 0">'+LANGUAGES.map(l=>'<button class="btn '+(m.language===l?'btn-primary':'')+'" role="tab" aria-selected="'+(m.language===l)+'" data-language="'+l+'" '+(m.busy?'disabled':'')+'>'+l+'<br><small>'+E(variantStatus(m.variants[l]))+'</small></button>').join("")+'</div>'+
     '<p data-variant-status></p><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:24px"><fieldset style="border:0;padding:0" '+(m.busy?'disabled':'')+'>'+FIELDS.map(k=>'<label style="display:block;margin-bottom:14px">'+E(k)+'<textarea data-copy="'+k+'" style="display:block;width:100%;min-height:65px;padding:12px;box-sizing:border-box">'+E(v.copy[k])+'</textarea></label>').join("")+'</fieldset><iframe data-preview title="'+m.language+' email preview" sandbox="" style="width:100%;height:820px;border:1px solid #ddd;background:white"></iframe></div>'+
-    '<p role="alert">'+E(m.error)+'</p><div style="display:flex;gap:12px;flex-wrap:wrap">'+[["draft","CREATE TEST DRAFT"],["variant","APPROVE VARIANT"],["set","APPROVE CREATIVE SET"]].map(([a,label])=>'<button class="btn btn-primary" data-action="'+a+'" '+(m.busy||!c.audienceResolved?'disabled':'')+'>'+label+'</button>').join("")+'</div><p>Test Draft creates an unsent Gmail draft. Logo validation runs before approval.</p>';
+    '<p role="alert">'+E(m.error)+'</p><div style="display:flex;gap:12px;flex-wrap:wrap">'+[["draft","CREATE TEST DRAFT"],["variant","APPROVE VARIANT"],["set","APPROVE CREATIVE SET"]].map(([a,label])=>'<button class="btn btn-primary" data-action="'+a+'" '+(actionDisabled(m,a)?'disabled':'')+'>'+label+'</button>').join("")+'</div><p>Test Draft creates an unsent Gmail draft. Logo validation runs before approval.</p>';
   mount.querySelector("[data-picker]").onclick=()=>{g.location.hash="#/campaign-studio";render(mount,"");};
   mount.querySelectorAll("[data-language]").forEach(b=>b.onclick=()=>{selectLanguage(m,b.dataset.language);draw();});
   mount.querySelectorAll("[data-layout]").forEach(b=>b.onclick=async()=>{m.busy=true;draw();try{await changeLayout(m,b.dataset.layout);}catch(e){m.error=e.message;}finally{m.busy=false;draw();}});
@@ -111,13 +124,13 @@ async function render(container,explicitId){
     for(const l of LANGUAGES){
       const v=model.variants[l];if(!v.approved)continue;
       const record=await api().getLatestApprovedCreative(id,l);if(ticket!==epoch)return;
-      if(record?.creativeId===v.creativeId){model.layout=record.templateId||model.layout;v.storedHtml=record.htmlBody;v.copy.subjectA=record.subject;v.copy.preheader=record.preheader;if(record.creativeCopy){try{v.copy=JSON.parse(record.creativeCopy);}catch(_){}}}
+      if(record?.creativeId===v.creativeId){model.layout=record.templateId||model.layout;v.storedHtml=record.htmlBody;v.storedText=record.textBody;v.copy.subjectA=record.subject;v.copy.preheader=record.preheader;if(record.creativeCopy){try{v.copy=JSON.parse(record.creativeCopy);}catch(_){}}}
       else{v.approved=false;v.dirty=true;}
     }
     draw();
   }catch(e){if(ticket===epoch)container.innerHTML='<h2>SELECT A CAMPAIGN TO OPEN IN STUDIO</h2><p role="alert">'+E(e.message)+'</p>';}
 }
-g.DGL_CAMPAIGN_STUDIO_V6={version:"governed-activation-v2",render,createModel,selectLanguage,editCopy,changeLayout,emailHtml,validateBrand,navigationId,getState:()=>model};
+g.DGL_CAMPAIGN_STUDIO_V6={version:"governed-activation-v2",render,createModel,canApproveSet,variantStatus,selectLanguage,editCopy,changeLayout,emailHtml,validateBrand,navigationId,getState:()=>model};
 g.DGL_MODULE_RENDERERS=g.DGL_MODULE_RENDERERS||{};g.DGL_MODULE_RENDERERS["campaign-studio"]=render;
 g.addEventListener?.("dgl:v55-backend-change",()=>{if(g.location?.hash.includes("campaign-studio")&&!model&&mount)render(mount);});
 })(window);
