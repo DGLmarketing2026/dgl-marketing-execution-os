@@ -53,6 +53,54 @@ function v6AcqUpsert_(name,keys,record){
   if(idx>=0)sheet.getRange(idx+2,1,1,headers.length).setValues([values]);else sheet.appendRow(values);
   return record;
 }
+
+// --- Public lead intake (WordPress form -> action:"submitLead") -----------
+// QA-vs-production routing is decided server-side from MKT_ACQ_WP_PAGES.status
+// (PRIVATE_QA vs PUBLISHED) for the submitted landingPageId, never from a
+// client-supplied flag, so isolation is explicit and verifiable, not incidental.
+function v6AcqSubmitLead_(request) {
+  var landingPageId = v6AcqText_(request.landingPageId);
+    var email = v6AcqText_(request.email).toLowerCase();
+      var firstName = v6AcqText_(request.firstName);
+        var lastName = v6AcqText_(request.lastName);
+          var company = v6AcqText_(request.company);
+            var phone = v6AcqText_(request.phone);
+              var honeypot = v6AcqText_(request.website);
+
+                if (honeypot) return { status: 'REJECTED', reason: 'spam signal detected' };
+                  if (!landingPageId) return { status: 'REJECTED', reason: 'missing landingPageId' };
+                    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { status: 'REJECTED', reason: 'invalid or missing email' };
+                      if (!company) return { status: 'REJECTED', reason: 'missing company' };
+                        if (!firstName && !lastName) return { status: 'REJECTED', reason: 'missing name' };
+
+                          var wpPage = v6WpFindRow_('MKT_ACQ_WP_PAGES', ['landingPageId'], { landingPageId: landingPageId });
+                            if (!wpPage) return { status: 'REJECTED', reason: 'unknown landing page' };
+                              var isQa = v6WpText_(wpPage.status) === 'PRIVATE_QA';
+
+                                var landing = v6AcqRows_('MKT_ACQ_LANDING_PAGES').filter(function (r) { return v6AcqText_(r.landingPageId) === landingPageId; })[0] || {};
+                                  var now = v6AcqNow_();
+                                    var common = {
+                                        landingPageId: landingPageId, signalId: v6AcqText_(landing.signalId), company: company, email: email,
+                                            service: v6AcqText_(request.service) || v6AcqText_(wpPage.service),
+                                                utmSource: v6AcqText_(request.utm_source), utmMedium: v6AcqText_(request.utm_medium), utmCampaign: v6AcqText_(request.utm_campaign)
+                                                  };
+
+                                                    if (isQa) {
+                                                        var qaLead = Object.assign({ leadId: v6AcqId_('QALEAD'), createdAt: now, qaRunId: v6AcqText_(request.qaRunId) }, common);
+                                                            v6WpUpsert_('MKT_ACQ_QA_LEADS', ['email', 'landingPageId'], qaLead);
+                                                                return { status: 'OK', qa: true, leadId: qaLead.leadId };
+                                                                  }
+
+                                                                    var lead = Object.assign({
+                                                                        leadId: v6AcqId_('LEAD'), createdAt: now, firstName: firstName, lastName: lastName, phone: phone,
+                                                                            country: '', origin: v6AcqText_(request.origin), destination: v6AcqText_(request.destination),
+                                                                                notes: v6AcqText_(request.notes), validationStatus: 'NEW', dedupeStatus: '', existingContactId: '',
+                                                                                    existingAccountId: '', qualificationStatus: '', scoreStatus: '', routingStatus: '',
+                                                                                        salesforceLeadId: '', salesforceLeadOwner: '', cycleId: v6AcqText_(wpPage.cycleId), routedAt: '', updatedAt: now
+                                                                                          }, common);
+                                                                                            v6AcqUpsert_('MKT_ACQ_LEADS', ['email', 'landingPageId'], lead);
+                                                                                              return { status: 'OK', qa: false, leadId: lead.leadId };
+                                                                                              }
 function v6AcqSetup_(){
   Object.keys(MKT_V6_ACQ_SCHEMA).forEach(function(name){v6AcqEnsureSheet_(name,MKT_V6_ACQ_SCHEMA[name]);});
   var boot=v6AcqBootstrapEvergreenSignals_(),trigger=v6AcqInstallAutomationTrigger_();

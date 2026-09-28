@@ -26,7 +26,8 @@ function makeBook(){
             }
           };
         },
-        appendRow(values){s.rows.push(values.slice());}
+        appendRow(values){s.rows.push(values.slice());},
+        deleteRow(r){s.rows.splice(r-2,1);}
       };
     },
     insertSheet(name){sheets.set(name,{headers:[],rows:[]});return this.getSheetByName(name);},
@@ -230,11 +231,14 @@ function wpProps(extra){return Object.assign({ACQ_WP_BASE_URL:'https://www.dglus
   const run=ctx.v6AcqWpQaRun_();
   const details=JSON.parse(run.details);
   assert.equal(details.leadIsolation,'isolated correctly',`QA lead isolation must hold, got: ${details.leadIsolation}`);
-  const qaLeads=ctx.v6WpRows_('MKT_ACQ_QA_LEADS');
   const realLeads=ctx.v6AcqRows_('MKT_ACQ_LEADS');
-  assert(qaLeads.length>=1,'the synthetic QA lead must be recorded in MKT_ACQ_QA_LEADS');
+  // Live behavior (reconciled from the live Apps Script project): the synthetic QA lead is
+  // recorded in MKT_ACQ_QA_LEADS during the run (leadIsolation above requires it), then removed
+  // by v6WpQaLeadsCleanup_ so QA never accumulates rows.
+  assert(details.qaLeadsRemoved.removed>=1,'the synthetic QA lead must have been recorded, then cleaned up after the run');
+  assert.equal(ctx.v6WpRows_('MKT_ACQ_QA_LEADS').filter(r=>/^ACQ-QA-/.test(r.signalId)).length,0,'QA leads for the run must be cleaned up');
   assert.equal(realLeads.filter(r=>/^ACQ-QA-/.test(r.signalId)).length,0,'no QA-originated row may ever appear in MKT_ACQ_LEADS');
-  console.log('PASS: the synthetic QA lead is isolated to MKT_ACQ_QA_LEADS and never reaches MKT_ACQ_LEADS');
+  console.log('PASS: the synthetic QA lead is isolated to MKT_ACQ_QA_LEADS, never reaches MKT_ACQ_LEADS, and is cleaned up after the run');
 })();
 
 (function testNoQaSalesforceRouting(){
