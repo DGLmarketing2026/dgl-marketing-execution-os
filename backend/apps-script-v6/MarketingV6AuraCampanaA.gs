@@ -684,6 +684,24 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
 // checkpoint/resume safety net protects against ever needing the whole recipient list to fit in
 // one execution again (see above). Phase timings (MATCH_MS/LANGUAGE_MS/ELIGIBILITY_MS/COPY_MS/
 // QUEUE_WRITE_MS) are returned on result.profile.
+// --- Family-scoped jobId: Campaign A changed family (historical Retention -> Activation) under the
+// SAME campaignId, so the shared JOB:<campaignId>:<contactId>:<step> id collided with every
+// historical Retention row (real DRY_RUN: 140 eligible, 140 skippedExisting, 0 built). Activation
+// jobs are now keyed JOB:<campaignId>:<FAMILY>:<contactId>:<step> -- still deterministic and
+// idempotent, and never equal to a historical row, so those rows are never read-matched or
+// rewritten by the batch upsert. A legacy-format row is still honored as "already built" ONLY when
+// it is itself the same family (a pre-namespacing Activation job), so no Activation contact is
+// ever queued twice.
+var CAMPANA_A_JOB_FAMILY_ = 'Activation';
+function v6AuraCampanaAJobId_(family, contactId, sequenceStep) {
+  return 'JOB:' + CAMPANA_A_CAMPAIGN_ID_ + ':' + String(family).toUpperCase() + ':' + contactId + ':' + sequenceStep;
+}
+function v6AuraCampanaAJobAlreadyBuilt_(queueById, family, contactId, sequenceStep) {
+  if (queueById[v6AuraCampanaAJobId_(family, contactId, sequenceStep)]) return true;
+  var legacy = queueById[v6AuraEmailJobId_(CAMPANA_A_CAMPAIGN_ID_, contactId, sequenceStep)];
+  return !!legacy && v6AuraEmailText_(legacy.playbookId) === family;
+}
+
 function v6AuraCampanaABuildQueue_() {return v6CampaignStudioLocked_(v6AuraCampanaABuildQueueLocked_);}
 function v6AuraCampanaABuildQueueLocked_() {
   var profile = { MATCH_MS: 0, LANGUAGE_MS: 0, ELIGIBILITY_MS: 0, COPY_MS: 0, QUEUE_WRITE_MS: 0 };
@@ -692,7 +710,7 @@ function v6AuraCampanaABuildQueueLocked_() {
   v6EnsureContactRecipientSchema_();
   var accounts = v6Rows_('MKT_ACCOUNTS');
   var setup = v6AuraCampanaAEnsureCampaignAndScope_(accounts);
-  var result = { status: setup.count ? 'QUEUE_BUILD_COMPLETE' : 'SOURCE_EMPTY_OR_NOT_FOUND', campaignId: CAMPANA_A_CAMPAIGN_ID_, accounts: setup.count, recipients: 0, built: 0, skippedExisting: 0, skippedIneligible: 0, blockedNoReplyTo: 0, blockedCreative: 0, byLanguage: { ES: 0, EN: 0, PT: 0 } };
+  var result = { status: setup.count ? 'QUEUE_BUILD_COMPLETE' : 'SOURCE_EMPTY_OR_NOT_FOUND', campaignId: CAMPANA_A_CAMPAIGN_ID_, accounts: setup.count, recipients: 0, built: 0, skippedExisting: 0, crossFamilyHistoricalIgnored: 0, skippedIneligible: 0, blockedNoReplyTo: 0, blockedCreative: 0, byLanguage: { ES: 0, EN: 0, PT: 0 } };
   if (!setup.count) { profile.MATCH_MS = Date.now() - tMatch0; v6AuraCampanaALog_('MATCH_END (0 accounts, SOURCE_EMPTY_OR_NOT_FOUND)'); result.profile = profile; return result; }
 
   // recipients below are keyed by the REAL MKT_ACCOUNTS accountId (v6AuraCampanaAEnsureCampaignAndScope_
@@ -746,8 +764,9 @@ function v6AuraCampanaABuildQueueLocked_() {
 
   v6AuraCampanaALog_('MATCH_START (per-contact index preload)');
   var tMatch1 = Date.now();
+  // jobId -> row (read-only), so a legacy-format id can be told apart by its own family.
   var existingIds = {};
-  v6Rows_('MKT_EMAIL_QUEUE').forEach(function (r) { existingIds[v6AuraEmailText_(r.jobId)] = true; });
+  v6Rows_('MKT_EMAIL_QUEUE').forEach(function (r) { existingIds[v6AuraEmailText_(r.jobId)] = r; });
   var accountsById = {}; accounts.forEach(function (a) { accountsById[v6AuraEmailText_(a.accountId)] = a; });
   var contactsById = {}; v6Rows_('MKT_CONTACTS_SECURE').forEach(function (c) { contactsById[v6AuraEmailText_(c.contactId)] = c; });
   // Real country, per real account name, as captured directly from the tab by
@@ -796,8 +815,9 @@ function v6AuraCampanaABuildQueueLocked_() {
     if (i > startIndex && (i - startIndex) % 50 === 0) v6AuraCampanaALog_('LANGUAGE/ELIGIBILITY/COPY progress: ' + (i - startIndex) + '/' + (recipients.length - startIndex) + ' processed, ' + (Date.now() - loopStart) + 'ms elapsed');
     var r = recipients[i];
     var accountId = v6AuraEmailText_(r.accountId), contactId = v6AuraEmailText_(r.contactId);
-    var jobId = v6AuraEmailJobId_(CAMPANA_A_CAMPAIGN_ID_, contactId, sequenceStep);
-    if (existingIds[jobId]) { result.skippedExisting++; continue; }
+    var jobId = v6AuraCampanaAJobId_(CAMPANA_A_JOB_FAMILY_, contactId, sequenceStep);
+    if (v6AuraCampanaAJobAlreadyBuilt_(existingIds, CAMPANA_A_JOB_FAMILY_, contactId, sequenceStep)) { result.skippedExisting++; continue; }
+    if (existingIds[v6AuraEmailJobId_(CAMPANA_A_CAMPAIGN_ID_, contactId, sequenceStep)]) result.crossFamilyHistoricalIgnored++;
     if (!accountId || !contactId || !v6AuraEmailText_(r.email)) { result.skippedIneligible++; continue; }
 
     var tLang0 = Date.now();
@@ -862,7 +882,7 @@ function v6AuraCampanaABuildQueueLocked_() {
       status: stopped ? 'STOPPED' : (replyToBlocked ? 'SUPPRESSED' : (policyApproved ? 'PENDING' : 'REVIEW_REQUIRED')),
       gmailDraftId: '', createdAt: now, processedAt: '', error: replyToBlocked ? 'MISSING_REPLY_TO_CONFIGURATION' : '',
       requestId: CAMPANA_A_CAMPAIGN_ID_, amOwner: v6AuraEmailText_(gmailOpp.amOwner) || v6AuraEmailText_(account.amOwner) || '',
-      playbookId: 'Activation', sequenceStep: sequenceStep, scheduledAt: now,
+      playbookId: CAMPANA_A_JOB_FAMILY_, sequenceStep: sequenceStep, scheduledAt: now,
       approvalId: policyApproved ? '' : ('APR:' + CAMPANA_A_CAMPAIGN_ID_), approvedAt: '', approvedBy: '',
       stopOnResponse: true, country: country, preferredLanguage: langInfo.language,
       languageSource: langInfo.source, languageReason: langInfo.reason,
@@ -879,7 +899,7 @@ function v6AuraCampanaABuildQueueLocked_() {
     };
     profile.COPY_MS += Date.now() - tCopy0;
     pendingJobs.push(job);
-    existingIds[jobId] = true;
+    existingIds[jobId] = job;
     result.built++;
     if (replyToBlocked) result.blockedNoReplyTo++;
   }
