@@ -1,3 +1,5 @@
+var V6_STUDIO_LOGO_='https://dglmarketing2026.github.io/dgl-marketing-execution-os/assets/brand/dgl-logo-white.png';
+function v6StudioLanguage_(value){var s=String(value||'').trim().toLowerCase();return /^(es|spanish)$/.test(s)?'ES':/^(en|english)$/.test(s)?'EN':/^(pt|pt-br|portuguese|português|português \(brasil\))$/.test(s)?'PT':'';}
 // INICIATIVA 2 -- Campaign Studio como unica fuente canonica del email.
 //
 // Problem this file solves: before this change, AURA's own queue-build functions
@@ -119,6 +121,10 @@ function v6AuraEnsureCampaignCreativesSheet_() {
 // invalidation of the OLD in-flight approval state itself happens in the browser,
 // campaign-studio-v5.js, the moment Marketing edits an approved creative).
 function v6AuraPersistApprovedCreative_(payload) {
+  if((payload||{}).campaignId==='CMP-CAMPANA-A-HA-PRIORITARIA')return v6CampaignStudioLocked_(function(){return v6AuraPersistApprovedCreativeLocked_(payload);});
+  return v6AuraPersistApprovedCreativeLocked_(payload);
+}
+function v6AuraPersistApprovedCreativeLocked_(payload) {
   var p = payload || {};
   v6AuraEnsureCampaignCreativesSheet_();
   var campaignId = v6AuraEmailText_(p.campaignId);
@@ -137,6 +143,13 @@ function v6AuraPersistApprovedCreative_(payload) {
   v6AuraAssertHtmlProductionSafe_(htmlBody);
   v6AuraAssertNoInternalLabels_(subject, htmlBody, textBody, 'CREATIVE_APPROVAL_INTERNAL_LABEL_DETECTED');
 
+  if(campaignId==='CMP-CAMPANA-A-HA-PRIORITARIA'){
+    var context=v6CampaignStudioContext_({campaignId:campaignId});
+    if(!context.audienceResolved)throw new Error('AUDIENCE_UNRESOLVED');
+    if(!v6StudioLanguage_(p.language))throw new Error('CREATIVE_LANGUAGE_REQUIRED');
+    if(/stay close|staying close|seguimos cerca|relationship continuity|multiservicio|\{\{service\}\}/i.test([subject,p.preheader,htmlBody,textBody].join(' ')))throw new Error('ACTIVATION_COPY_INVALID');
+    v6CampaignStudioValidateBrand_(p);
+  }
   var existing = v6Rows_('MKT_CAMPAIGN_CREATIVES').filter(function (r) { return v6AuraEmailText_(r.campaignId) === campaignId; });
   var maxVersion = existing.reduce(function (max, r) { var v = Number(r.creativeVersion || 0); return v > max ? v : max; }, 0);
   var version = maxVersion + 1;
@@ -149,10 +162,10 @@ function v6AuraPersistApprovedCreative_(payload) {
     creativeId: creativeId, campaignId: campaignId, templateId: templateId,
     creativeVersion: version, subject: subject, preheader: String(p.preheader || ''),
     htmlBody: htmlBody, textBody: textBody, heroUrl: String(p.heroUrl || ''),
-    logoUrl: String(p.logoUrl || ''), language: String(p.language || ''),
+    logoUrl: String(p.logoUrl || ''), language: v6StudioLanguage_(p.language),
     approvedAt: now, approvedBy: approvedBy, approvalId: approvalId,
     htmlChecksum: htmlChecksum, createdAt: now,
-    status: 'APPROVED', contentChecksum: contentChecksum, revokedAt: '', revokedBy: ''
+    creativeCopy: JSON.stringify(p.creativeCopy||{}), status: 'APPROVED', contentChecksum: contentChecksum, revokedAt: '', revokedBy: ''
   };
   v6UpsertByKey_('MKT_CAMPAIGN_CREATIVES', ['creativeId'], record);
   return record;
@@ -224,6 +237,10 @@ function v6AuraMarkRevokedInLedger_(creativeId, revokedBy, revokedAt) {
 // updated. The caller (the router, then campaign-studio-v5.js's invalidateApproval()) must
 // treat that thrown error as a real failure, not a background warning.
 function v6AuraRevokeCreativeApproval_(creativeId, revokedBy) {
+  if(String(creativeId).indexOf('CMP-CAMPANA-A-HA-PRIORITARIA:')===0)return v6CampaignStudioLocked_(function(){return v6AuraRevokeCreativeApprovalLocked_(creativeId,revokedBy);});
+  return v6AuraRevokeCreativeApprovalLocked_(creativeId,revokedBy);
+}
+function v6AuraRevokeCreativeApprovalLocked_(creativeId, revokedBy) {
   var id = v6AuraEmailText_(creativeId);
   if (!id) throw new Error('CREATIVE_REVOKE_MISSING_CREATIVE_ID');
   var row = v6Rows_('MKT_CAMPAIGN_CREATIVES').filter(function (r) { return v6AuraEmailText_(r.creativeId) === id; })[0];
@@ -278,16 +295,15 @@ function v6AuraLatestApprovedCreative_(campaignId) {
 // same time, under the same campaignId. Every other (single-language) campaign can keep using
 // v6AuraLatestApprovedCreative_ above; this is additive, not a replacement.
 function v6AuraLatestApprovedCreativeForLanguage_(campaignId, language) {
-  var id = v6AuraEmailText_(campaignId), lang = v6AuraEmailText_(language);
+  var id = v6AuraEmailText_(campaignId), lang = v6StudioLanguage_(language);
   var ledger = v6AuraRevokedLedger_();
   var rows = v6Rows_('MKT_CAMPAIGN_CREATIVES').filter(function (r) {
-    return v6AuraEmailText_(r.campaignId) === id && (!lang || v6AuraEmailText_(r.language) === lang) &&
-      String(r.status || 'APPROVED').toUpperCase() !== 'REVOKED' &&
-      !Object.prototype.hasOwnProperty.call(ledger, v6AuraEmailText_(r.creativeId));
+    return v6AuraEmailText_(r.campaignId) === id && (lang && v6StudioLanguage_(r.language) === lang) ;
   });
   if (!rows.length) return null;
   rows.sort(function (a, b) { return Number(b.creativeVersion || 0) - Number(a.creativeVersion || 0); });
-  return rows[0];
+  var latest=rows[0];
+  return String(latest.status||'APPROVED').toUpperCase()==='APPROVED'&&!Object.prototype.hasOwnProperty.call(ledger,v6AuraEmailText_(latest.creativeId))?latest:null;
 }
 
 // --- Personalization (Iniciativa 2, punto 4) ------------------------------------------
@@ -359,8 +375,15 @@ function v6AuraResolveApprovedCreativeForSend_(campaignId, vars) {
 // Defense in depth, re-checked independently at send time (state can change between
 // queue build and dispatch): never re-renders anything, only recomputes checksums over
 // bytes already sitting on the job / already persisted in MKT_CAMPAIGN_CREATIVES.
-function v6AuraValidateQueuedCreative_(job) {
+function v6AuraValidateQueuedCreative_(job, studioGate) {
   var j = job || {};
+  if (!j.creativeId || !j.creativeApprovalId) return { blocked: true, error: 'CREATIVE_NOT_APPROVED' };
+  if(j.campaignId==='CMP-CAMPANA-A-HA-PRIORITARIA'){
+    if(typeof v6CampaignStudioSetGate_!=='function')return {blocked:true,error:'CREATIVE_SET_INCOMPLETE'};
+    var gate=(studioGate&&typeof v6CampaignStudioLockDepth_!=='undefined'&&v6CampaignStudioLockDepth_>0)?studioGate:v6CampaignStudioSetGate_(j.campaignId);if(gate.blocked)return gate;
+    var current=gate.context.approvedCreativeVariants[v6StudioLanguage_(j.preferredLanguage)];
+    if(!current||current.creativeId!==j.creativeId)return {blocked:true,error:'CREATIVE_VERSION_MISMATCH'};
+  }
   if (!j.creativeId || !j.creativeApprovalId) return { blocked: true, error: 'CREATIVE_NOT_APPROVED' };
   // (a) the job row itself has not drifted from what was queued (htmlBody only).
   var currentHtmlChecksum = v6AuraChecksum_(j.htmlBody);
@@ -428,10 +451,10 @@ function v6AuraValidateQueuedCreative_(job) {
 // in PRODUCTION it meant a missing/renamed/broken validator FAILED OPEN and let a job through
 // unvalidated. This wrapper is the one thing either dispatcher may call: no validator function,
 // or the validator itself throwing, both resolve to BLOCKED, never to an open gate.
-function v6AuraValidateCreativeOrBlock_(job) {
+function v6AuraValidateCreativeOrBlock_(job, studioGate) {
   if (typeof v6AuraValidateQueuedCreative_ !== 'function') return { blocked: true, error: 'CREATIVE_VALIDATION_UNAVAILABLE' };
   try {
-    return v6AuraValidateQueuedCreative_(job);
+    return v6AuraValidateQueuedCreative_(job, studioGate);
   } catch (err) {
     return { blocked: true, error: 'CREATIVE_VALIDATION_UNAVAILABLE' };
   }
@@ -510,7 +533,7 @@ function v6AuraVerifyAndCreateTestDraft_(req) {
   var campaignId = v6AuraEmailText_(r.campaignId || draftInput.campaignId);
   if (!campaignId) throw new Error('TEST_DRAFT_MISSING_CAMPAIGN_ID');
 
-  var creative = v6AuraLatestApprovedCreative_(campaignId);
+  var creative = draftInput.language ? v6AuraLatestApprovedCreativeForLanguage_(campaignId,draftInput.language) : v6AuraLatestApprovedCreative_(campaignId);
   if (!creative || !creative.htmlBody || !creative.subject || !creative.approvalId || String(creative.status || 'APPROVED').toUpperCase() === 'REVOKED') {
     throw new Error('TEST_DRAFT_CREATIVE_NOT_APPROVED');
   }

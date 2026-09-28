@@ -166,6 +166,7 @@ function fakeScriptApp(state){
 function seedRequiredSheets(ctx,extraOpportunityHeaders){
   var schema=ctx.MKT_V6_CONTACT_RECIPIENT_SCHEMA;
   var sheets={
+    MKT_CAMPAIGNS:new FakeSheet([schema.MKT_CAMPAIGNS]),
     MKT_ACCOUNTS:new FakeSheet([schema.MKT_ACCOUNTS]),
     MKT_CONTACTS_SECURE:new FakeSheet([schema.MKT_CONTACTS_SECURE]),
     MKT_CAMPAIGN_SCOPES:new FakeSheet([schema.MKT_CAMPAIGN_SCOPES]),

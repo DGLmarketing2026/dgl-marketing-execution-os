@@ -34,7 +34,7 @@ var MKT_V6_AURA_GMAIL_SCHEMA = {
 // violate the "never invent structured rows" rule.
 //
 // 'Campana A - HA prioritaria' (Marketing_DGL_14-09-2026, confirmed 2026-09-14): the first
-// House-Account priority Retention initiative processed through a dedicated pipeline
+// House-Account priority Activation initiative processed through a dedicated pipeline
 // (MarketingV6AuraCampanaA.gs) rather than the shared multi-source Retention bucket. Every
 // OTHER tab in that same workbook (Campana B included) is deliberately left unmapped here, so
 // v6AuraGmailParseTable_ returns null for it and it is never turned into an opportunity --
@@ -47,7 +47,7 @@ var MKT_V6_AURA_GMAIL_SHEET_FAMILY = {
   'Recuperacion FTL': 'Reactivation',
   'Promocion dirigida': 'Cross-Sell',
   'Expansion de servicio': 'Cross-Sell',
-  'Campana A - HA prioritaria': 'Retention'
+  'Campana A - HA prioritaria': 'Activation'
 };
 var MKT_V6_AURA_GMAIL_DATA_QUALITY_SHEETS = ['Confirmar datos contacto'];
 

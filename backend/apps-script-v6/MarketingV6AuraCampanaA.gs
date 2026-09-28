@@ -442,7 +442,7 @@ function v6AuraCampanaAPreferredLanguage_(contact, account, tabCountry) {
   return { language: 'EN', source: 'EN_FALLBACK_NO_SIGNAL', reason: 'no contact-level language signal, no Campana A tab country, no MKT_CONTACTS_SECURE/MKT_ACCOUNTS country found under any checked field name' };
 }
 function v6AuraCampanaALanguageCampaignFlag_(lang) {
-  return lang === 'EN' ? 'English' : lang === 'PT' ? 'Português (Brasil)' : 'Spanish';
+  return v6StudioLanguage_(lang);
 }
 
 // --- No-name-aware subject merge -----------------------------------------------------------
@@ -483,13 +483,7 @@ function v6AuraCampanaAEnsureCampaignAndScope_(preloadedAccounts) {
   var realIdSet = {};
   Object.keys(realIdByHashId).forEach(function (hashId) { realIdSet[realIdByHashId[hashId]] = true; });
   var accountIds = Object.keys(realIdSet);
-  var now = new Date().toISOString();
-  v6UpsertByKey_('MKT_CAMPAIGNS', ['campaignId'], {
-    campaignId: CAMPANA_A_CAMPAIGN_ID_, scopeId: CAMPANA_A_SCOPE_ID_,
-    campaignName: 'Activation Prioritaria - Campana A (HA)', campaignType: 'Activation', objective: 'Activation',
-    service: 'Multiservicio', amOwner: 'Multiple', language: 'Spanish', status: 'AUTO_ACTIVE',
-    createdAt: now, updatedAt: now
-  });
+  v6CampaignStudioPatchCampaign_(CAMPANA_A_CAMPAIGN_ID_, v6CampaignStudioCanonicalA_(), true);
   v6AuraEnsureCampaignScope_({
     scopeId: CAMPANA_A_SCOPE_ID_, campaignId: CAMPANA_A_CAMPAIGN_ID_,
     opportunityType: 'Activation', campaignType: 'Activation', accountIds: accountIds, batchWrite: true
@@ -690,7 +684,8 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
 // checkpoint/resume safety net protects against ever needing the whole recipient list to fit in
 // one execution again (see above). Phase timings (MATCH_MS/LANGUAGE_MS/ELIGIBILITY_MS/COPY_MS/
 // QUEUE_WRITE_MS) are returned on result.profile.
-function v6AuraCampanaABuildQueue_() {
+function v6AuraCampanaABuildQueue_() {return v6CampaignStudioLocked_(v6AuraCampanaABuildQueueLocked_);}
+function v6AuraCampanaABuildQueueLocked_() {
   var profile = { MATCH_MS: 0, LANGUAGE_MS: 0, ELIGIBILITY_MS: 0, COPY_MS: 0, QUEUE_WRITE_MS: 0 };
   v6AuraCampanaALog_('MATCH_START');
   var tMatch0 = Date.now();
@@ -723,6 +718,8 @@ function v6AuraCampanaABuildQueue_() {
   });
   var resolved = v6AuraCampanaAResolveRecipients_(setup.accountIds, accountRealIdByName, 'Activation');
   var recipients = resolved.eligible;
+  var setGate=v6CampaignStudioSetGate_(CAMPANA_A_CAMPAIGN_ID_);
+  if(setGate.blocked){result.status='CREATIVE_SET_INCOMPLETE';result.blockedCreative=true;return result;}
   result.recipients = recipients.length;
   result.candidates = resolved.candidates.length;
   result.sourceContacts = resolved.sourceContactsWithEmail;
@@ -778,8 +775,7 @@ function v6AuraCampanaABuildQueue_() {
     var langFlag = v6AuraCampanaALanguageCampaignFlag_(lang);
     if (!(langFlag in creativeCache)) {
       var creative = (typeof v6AuraLatestApprovedCreativeForLanguage_ === 'function') ? v6AuraLatestApprovedCreativeForLanguage_(CAMPANA_A_CAMPAIGN_ID_, langFlag) : null;
-      var valid = creative && creative.htmlBody && creative.subject && creative.approvalId &&
-        String(v6AuraChecksum_(creative.htmlBody)) === String(creative.htmlChecksum);
+      var valid = v6CampaignStudioVariantValid_(creative);
       creativeCache[langFlag] = valid ? creative : null;
     }
     return creativeCache[langFlag];
@@ -992,9 +988,12 @@ function v6AuraCampanaAPreflight_() {
 // final batch. A real send (LIVE mode only) still calls GmailApp.sendEmail individually -- that
 // is an unavoidable, real per-recipient action, not a Sheets read/write, and is never part of
 // the performance problem this pass fixes.
-function v6AuraCampanaADispatchBatch_() {
+function v6AuraCampanaADispatchBatch_() {return v6CampaignStudioLocked_(v6AuraCampanaADispatchBatchLocked_);}
+function v6AuraCampanaADispatchBatchLocked_() {
   v6AuraCampanaALog_('DISPATCH_START');
   var mode = v6AuraSendMode_();
+  var setGate=v6CampaignStudioSetGate_(CAMPANA_A_CAMPAIGN_ID_);
+  if(setGate.blocked)return {status:'CREATIVE_SET_INCOMPLETE',processed:0,sent:0,built:0};
   var senderName = v6AuraEmailSenderName_();
   var allQueueJobs = v6Rows_('MKT_EMAIL_QUEUE');
   var jobs = allQueueJobs.filter(function (r) { return v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && v6AuraEmailText_(r.status).toUpperCase() === 'PENDING'; });
@@ -1040,7 +1039,8 @@ function v6AuraCampanaADispatchBatch_() {
       // Iniciativa 2 punto 2/5 -- same dispatch-time defense in depth as the shared
       // auraProcessEmailQueue (MarketingV6AuraEmailDispatcher.gs): re-validate the
       // creative-approval chain at send time too, never re-rendering anything.
-      var creativeCheck = v6AuraValidateCreativeOrBlock_(job);
+      // The complete set is stable while this dispatch holds the shared script lock.
+      var creativeCheck = v6AuraValidateCreativeOrBlock_(job, setGate);
       if (creativeCheck.blocked) {
         job.status = 'BLOCKED'; job.error = creativeCheck.error; job.processedAt = now; counts.blockedCreative++; updated.push(job); return;
       }

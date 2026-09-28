@@ -144,6 +144,7 @@ function v6AuraEmailJobId_(campaignId, contactId, sequenceStep) {
 // already exists (by jobId) -- this function only ever creates, so a job's status, once the
 // dispatcher has moved it past PENDING, is never silently reset by a later automatic tick.
 function v6AuraBuildEmailQueueForCampaign_(campaign) {
+  if(campaign.campaignId==='CMP-CAMPANA-A-HA-PRIORITARIA')return v6AuraCampanaABuildQueue_();
   v6AuraEnsureCampaignCreativesSheet_();
   v6EnsureContactRecipientSchema_();
   var sequenceStep = 1;
@@ -268,7 +269,7 @@ function v6AuraRepairEmailQueueContent_() {
   var creativeByCampaignId = {};
   jobs.forEach(function (job) {
     var campaign = campaignsById[v6AuraEmailText_(job.campaignId)];
-    if (!campaign) { skippedNoCampaign++; return; }
+    if (!campaign || campaign.campaignId==='CMP-CAMPANA-A-HA-PRIORITARIA') { skippedNoCampaign++; return; }
     // Iniciativa 2 -- repair must never regenerate content via v6AuraEmailHtml_() either; it
     // repairs a job's content from the SAME approved-creative source of truth the builder uses.
     // A job whose campaign has no valid approved creative is left untouched (not silently

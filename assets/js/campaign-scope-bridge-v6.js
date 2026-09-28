@@ -164,6 +164,8 @@ async function autoAdvance(){
   return activePromise;
 }
 function install(){
+  // Governed Studio owns selection and approval; the legacy bridge is opt-in only.
+  if(!global.DGL_ENABLE_LEGACY_SCOPE_BOOTSTRAP)return;
   const render=global.DGL_MODULE_RENDERERS?.["campaign-studio"];
   if(!render)return;
   global.DGL_MODULE_RENDERERS["campaign-studio"]=container=>{

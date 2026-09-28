@@ -63,6 +63,7 @@ function handleMarketingV55Api_(e, method) {
 // v55RecordApproval above, never a send. It writes MKT_CAMPAIGN_CREATIVES only; it never writes a
 // queue row and never calls GmailApp -- still excluded, same as before, are every AURA function
 // that writes queue rows or could ever send a real email.
+'v6CampaignStudioTestDraft', 'v6CampaignStudioContext', 'v6CampaignStudioList', 'v6CampaignStudioApproveSet',
 'v6AuraApproveCreative', 'v6AuraLatestApprovedCreative',
 // PR #3 audit remediation -- editing an approved creative must revoke the BACKEND record, not
 // only local browser state. Writes MKT_CAMPAIGN_CREATIVES only (flips status to REVOKED on the
@@ -105,11 +106,18 @@ case 'v6AuraAutomaticReportStatus':
 case 'v6AuraCampanaALatestRunSummary':
   result = routeMarketingV6_(action, req);
   break;
+case 'v6CampaignStudioTestDraft':
+  result = routeMarketingV6_(action, req);
+  mktV55Audit_('TEST_DRAFT_CREATED', req, 'COMPLETED', result);
+  break;
  case 'v6IngestAuthoritativeContacts':
 case 'v6ResolveRecipients':
 case 'v6AudienceStatus':
 case 'v55ResolveRecipients':
 case 'v55AudienceStatus':
+case 'v6CampaignStudioContext':
+case 'v6CampaignStudioList':
+case 'v6CampaignStudioApproveSet':
 case 'v6AuraApproveCreative':
 case 'v6AuraLatestApprovedCreative':
 case 'v6AuraRevokeCreativeApproval':

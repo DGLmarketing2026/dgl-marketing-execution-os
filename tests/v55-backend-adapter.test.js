@@ -20,7 +20,7 @@ assert(source.includes('params.set("payload",JSON.stringify(payload))'));
 assert(source.includes('mutate("v55CreateCampaign",{requestId:payload.requestId,strategy:'));
 for(const action of ["v55Requests","v55CreateRequest","v55UpdateRequest","v55Campaigns","v55CreateCampaign","v55RequestApproval","v55RecordApproval","v55ActivateCampaign","v55PauseCampaign","v55CreateTestDraft","v55ResolveRecipients","v55AudienceStatus","v55RecordResponse","v55StopAccount","v55Handoff","v55RecordOutcome","v55Activity"])assert(source.includes(`"${action}"`),`Missing ${action}`);
 assert(source.includes('new CustomEvent("dgl:v55-backend-change"'));
-assert(source.includes('form.method="POST"'));assert(source.includes('action:"v55CreateTestDraft",token:token(),payload:JSON.stringify({campaignId,draft})'));assert(source.includes('TEST_DRAFT_CREATED'));
+assert(source.includes('form.method="POST"'));assert(source.includes('action,token:token(),payload:JSON.stringify({campaignId,draft})'));assert(source.includes('TEST_DRAFT_CREATED'));
 assert(!/console\.(?:log|error|warn)/.test(source));
 assert(requestsUi.includes('api?.isConnected?.()?api.getRequests():DEMO_REQUESTS'));
 assert(requestsUi.includes('await adapter().createRequest(record)'));

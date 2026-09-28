@@ -12,7 +12,14 @@
   const clean = v => String(v == null ? "" : v).trim();
   const lg = s => {
     const x = clean(s.language).toLowerCase();
-    if (x === "pt-br" || x.includes("portugu")) return "pt-BR";
+    // PR #9 visual QA fix: the governed Campaign Studio (campaign-studio-v6.js) calls
+    // DGL_COPY_ENGINE_V5.generate({language:"PT",...}) -- the bare "PT" code, never "pt-BR" and
+    // never a string containing "portugu". Before this fix, bare "pt"/"PT" fell through every
+    // branch here to the "es" default, so this module's own generate() override (line ~210)
+    // silently replaced the correctly-generated Portuguese copy with Spanish copy for every PT
+    // variant. "pt" is unambiguous in this domain (ES/EN/PT-BR only) so it is now recognized
+    // alongside "pt-br" and any "portugu*" spelling.
+    if (x === "pt" || x === "pt-br" || x.includes("portugu")) return "pt-BR";
     if (x === "english" || x === "en") return "en";
     return "es";
   };

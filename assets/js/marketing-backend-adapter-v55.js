@@ -190,22 +190,22 @@
   const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   function activityError(row){const value=row&&((row.error||row.message||row.result)||"Test draft creation failed."),raw=typeof value==="object"?JSON.stringify(value):String(value),secret=token();return secret?raw.replaceAll(secret,"[redacted]"):raw;}
 
-  function postTestDraft(campaignId,draft){
+  function postTestDraft(campaignId,draft,action="v55CreateTestDraft"){
     if(!token())return Promise.reject(new Error("Private backend token required"));
     return new Promise((resolve,reject)=>{
       const suffix=`${Date.now()}_${++requestSequence}`,frame=document.createElement("iframe"),form=document.createElement("form");
       frame.name=`dglV55DraftFrame_${suffix}`;frame.hidden=true;form.hidden=true;form.method="POST";form.action=ENDPOINT;form.target=frame.name;
-      const fields={action:"v55CreateTestDraft",token:token(),payload:JSON.stringify({campaignId,draft})};
+      const fields={action,token:token(),payload:JSON.stringify({campaignId,draft})};
       Object.entries(fields).forEach(([name,value])=>{const input=document.createElement("input");input.type="hidden";input.name=name;input.value=value;form.appendChild(input);});
       document.body.append(frame,form);
       try{form.submit();form.remove();resolve(frame);}catch(error){form.remove();frame.remove();reject(error);}
     });
   }
 
-  async function createTestDraft(campaignId,draft){
+  async function createTestDraft(campaignId,draft,action="v55CreateTestDraft"){
     if(state!==STATES.PRIVATE_BACKEND)throw new Error("Connect the private backend before creating a test draft.");
     if(!campaignId)throw new Error("A backend campaignId is required.");
-    const baseline=new Set(activity.map(activityKey)),frame=await postTestDraft(campaignId,draft);
+    const baseline=new Set(activity.map(activityKey)),frame=await postTestDraft(campaignId,draft,action);
     try{
       for(let attempt=0;attempt<20;attempt++){
         await wait(attempt===0?900:1500);await refresh();
@@ -274,8 +274,12 @@
     // persists the FULL approved creative (never just a status flag); getLatestApprovedCreative
     // reads it back for a post-approval invalidation check or a Test Draft comparison. Neither
     // writes a queue row nor sends anything -- still no second way to trigger a real send.
+    campaignStudioContext:campaignId=>mutate("v6CampaignStudioContext",{campaignId},false),
+    campaignStudioTestDraft:(campaignId,draft)=>createTestDraft(campaignId,draft,"v6CampaignStudioTestDraft"),
+    campaignStudioList:()=>mutate("v6CampaignStudioList",{},false),
+    approveCreativeSet:campaignId=>mutate("v6CampaignStudioApproveSet",{campaignId},false),
     approveCreative:(campaignId,creative)=>mutate("v6AuraApproveCreative",{campaignId,...(creative||{})},false),
-    getLatestApprovedCreative:campaignId=>mutate("v6AuraLatestApprovedCreative",{campaignId},false),
+    getLatestApprovedCreative:(campaignId,language)=>mutate("v6AuraLatestApprovedCreative",{campaignId,language},false),
     // PR #3 audit punto 4 -- editing an approved creative must revoke the BACKEND record, not
     // only local UI state. Called by campaign-studio-v5.js's invalidateApproval() helper on
     // every content change after an approval, before local state is reset.
