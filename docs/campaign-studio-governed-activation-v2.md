@@ -178,11 +178,25 @@ against fake PNG bytes) already passes in `tests/campaign-studio-governed.test.j
 pass. Canonical colors #77B82A (accent border + CTA background) and #05035C (header background +
 CTA text) are present verbatim in `emailHtml()`'s output and were visible correctly rendered in
 every live screenshot (desktop and mobile, all three languages). The literal PNG byte fetch of the
-hosted GitHub Pages logo could not be exercised in the isolated sandbox: outbound access to
-`dglmarketing2026.github.io` is rejected by that sandbox's own egress policy (`CONNECT tunnel
-failed, response 403`), confirmed by a direct `curl` from the same sandbox -- a network-policy
-limit of this QA environment, not an application defect. LIVE_LOGO_FETCH=NOT_RUNTIME_VERIFIED;
-brand markup/lockup/color correctness otherwise PASS.
+hosted GitHub Pages logo could not be exercised in the isolated cloud sandbox (outbound access to
+`dglmarketing2026.github.io` was rejected by that sandbox's own egress policy, confirmed by a
+direct `curl` reproduction of a 403 CONNECT-tunnel failure) -- a network-policy limit of that QA
+environment, not an application defect.
+
+**Live logo fetch -- verified 2026-09-28, operator-reachable browser (Claude in Chrome):**
+`https://dglmarketing2026.github.io/dgl-marketing-execution-os/assets/brand/dgl-logo-white.png`
+loaded successfully with no 404: `document.images[0].complete === true`,
+`naturalWidth === 917`, `naturalHeight === 330`. Screenshot confirms the genuine canonical
+DGL/Freight Broker lockup (green diamond/arrow mark, "DGL" wordmark, "FREIGHT BROKER" tagline,
+green accent consistent with #77B82A) -- not broken, not distorted, not a placeholder.
+LIVE_LOGO_FETCH=PASS.
+
+A per-PR live Campaign Studio preview to cross-check the same logo render was also checked: PR #9's
+own GitHub page reports "This branch has not been deployed / No deployments" -- this repository's
+GitHub Pages site is published from `main` only, and PR #9 is an unmerged branch with no separate
+preview environment. CAMPAIGN_STUDIO_LIVE_LOGO_PREVIEW=NOT_AVAILABLE (no deployment exists to check
+against; this is an environment fact, not a defect). Brand markup/lockup/color correctness overall:
+PASS.
 
 ### Tests (independently reproduced this pass, not reused)
 
@@ -233,11 +247,22 @@ call.
 ## Merge gate
 
 READY_FOR_CHATGPT_FINAL_AUDIT=YES.
-READY_FOR_MERGE=NO.
-No merge or production deployment performed. Remaining before merge: an operator-reachable browser
-(the in-app browser or Claude in Chrome, from a machine that can also reach a running instance of
-this branch) should independently confirm the same three visual fixes and the live GitHub Pages
-logo fetch, since this pass's browser QA ran in a sandbox that cannot reach either the operator's
-own browser or the public logo host. After approval, frontend and Apps Script modules must be
-released together; legacy ScriptProperties-only sets intentionally stop authorizing Campaign A
-until valid drafts and a durable set approval exist.
+READY_FOR_MERGE=YES, pending human sign-off.
+No merge or production deployment performed. The one previously-open blocker -- independent
+confirmation of the live GitHub Pages logo fetch from an operator-reachable browser -- was closed
+on 2026-09-28 (see "Live logo fetch -- verified" above): PASS, no 404, correct canonical lockup.
+The per-PR Campaign Studio live-preview cross-check was found NOT_AVAILABLE (this repository has
+no deployed preview environment for an unmerged branch), which is an environment fact and not a
+merge blocker, since the same asset and the same `emailHtml()` markup were already verified
+correct both in live Playwright screenshots against the real `index.html` and via this direct
+hosted-logo fetch.
+All other gate items from this document remain as recorded above: visual QA (desktop/mobile,
+EN/ES/PT) PASS; approval governance (valid approval, edit/language/variant/campaign invalidation,
+immutable draft/set evidence) PASS by reproduction; AURA regression suite PASS; historical 109 SENT
+rows and Retention family unchanged; AURA_SEND_MODE unchanged; REAL_EMAILS_SENT=0; 56/56 test
+scripts passed; `git diff --check` PASS; no PR-introduced unresolved HIGH/CRITICAL issue identified.
+PR #3 (`feature/campaign-studio-canonical-source`) was not touched by any of this work.
+This document records engineering and QA evidence only -- it does not itself authorize a merge.
+A human with repository merge rights must still review and merge PR #9; frontend and Apps Script
+modules must be released together, and legacy ScriptProperties-only sets intentionally stop
+authorizing Campaign A until valid drafts and a durable set approval exist.
