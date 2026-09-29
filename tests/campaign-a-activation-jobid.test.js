@@ -81,10 +81,16 @@ const statusCounts = rows => rows.reduce((m, r) => (m[r.status] = (m[r.status] |
   tables.MKT_CONTACTS_SECURE.push({ contactId: 'C3', accountId: 'ACC-1', firstName: 'Person', email: 'private3@example.test', preferredLanguage: 'EN' });
   const ctx = harness.makeContext({ tables, props: PROPS() });
   const build = ctx.v6AuraCampanaABuildQueue_();
-  assert.equal(build.built, 3);
-  assert.equal(build.skippedExisting, 1, 'a legacy-format Activation job must not be rebuilt');
-  assert.equal(tables.MKT_EMAIL_QUEUE.filter(j => j.contactId === 'C3' && j.playbookId === 'Activation').length, 1);
-  console.log('campana-a jobid test 3 (legacy-format Activation jobs are still honored as already built): PASS');
+  // A never-SENT legacy Activation job that predates the governed render contract is refreshed
+  // IN PLACE under its own legacy jobId -- never duplicated under a second id.
+  assert.equal(build.built, 4);
+  assert.equal(build.refreshed, 1);
+  const c3 = tables.MKT_EMAIL_QUEUE.filter(j => j.contactId === 'C3' && j.playbookId === 'Activation');
+  assert.equal(c3.length, 1);
+  assert.equal(c3[0].jobId, legacyId('C3'));
+  assert.equal(c3[0].renderContract, 'GOVERNED_TOKEN_MERGE_V1');
+  assert.equal(ctx.v6AuraCampanaABuildQueue_().refreshed, 0, 'a refreshed job is then stable');
+  console.log('campana-a jobid test 3 (legacy-format Activation jobs are refreshed in place, never duplicated): PASS');
 })();
 
 // 4. Creative gate stays fail-closed with Retention history present.
