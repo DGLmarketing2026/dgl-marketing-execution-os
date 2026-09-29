@@ -278,6 +278,7 @@
     campaignStudioTestDraft:(campaignId,draft)=>createTestDraft(campaignId,draft,"v6CampaignStudioTestDraft"),
     campaignStudioList:()=>mutate("v6CampaignStudioList",{},false),
     approveCreativeSet:campaignId=>mutate("v6CampaignStudioApproveSet",{campaignId},false),
+    campaignIntake:campaignType=>mutate("v6AuraCampaignIntake",{campaignType},false),
     approveCreative:(campaignId,creative)=>mutate("v6AuraApproveCreative",{campaignId,...(creative||{})},false),
     getLatestApprovedCreative:(campaignId,language)=>mutate("v6AuraLatestApprovedCreative",{campaignId,language},false),
     // PR #3 audit punto 4 -- editing an approved creative must revoke the BACKEND record, not

@@ -105,6 +105,29 @@ function makeContext(opts) {
     });
     return { created: created, updated: updated };
   };
+  // Legacy fixtures (written before the contact-level source rule) model Campaign A's
+  // contacts in MKT_CONTACTS_SECURE only. Unless a test seeds MKT_AURA_CAMPANA_A_SOURCE_ROWS
+  // itself, those active contacts of Campaign A accounts ARE the explicit source (derived here,
+  // one row per contact). Dedicated source-structure tests live in
+  // tests/aura-campaign-execution-final.test.js.
+  var rawRows = ctx.v6Rows_;
+  function derivedSourceRows() {
+    var norm = ctx.v6AuraCampanaANormalizeAccountName_;
+    var opps = (tables.MKT_AURA_GMAIL_OPPORTUNITIES || []).filter(function (o) { return o.sourceSheet === 'Campana A - HA prioritaria'; });
+    var accounts = tables.MKT_ACCOUNTS || [];
+    var rows = [];
+    (tables.MKT_CONTACTS_SECURE || []).forEach(function (c) {
+      if (String(c.status || 'ACTIVE').toUpperCase() === 'INACTIVE') return;
+      var account = accounts.filter(function (a) { return a.accountId === c.accountId; })[0];
+      var opp = opps.filter(function (o) { return o.accountId === c.accountId || (account && norm(account.accountName) === norm(o.accountName)); })[0];
+      if (opp) rows.push({ sourceRow: 5 + rows.length, accountName: opp.accountName, amOwner: opp.amOwner, contactName: c.firstName || '', email: c.email || '', country: '' });
+    });
+    return rows;
+  }
+  ctx.v6Rows_ = function (name) {
+    if (name === 'MKT_AURA_CAMPANA_A_SOURCE_ROWS' && !tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS) { bump(callCounts.v6Rows_, name); return derivedSourceRows(); }
+    return rawRows(name);
+  };
   ctx.v6EnsureContactRecipientSchema_ = function () { return { status: 'SCHEMA READY' }; };
   ctx.v6AuraCampanaAEnsureRunSummarySheet_ = function () { return { status: 'ALREADY_EXISTS' }; };
   // Same stub pattern as v6EnsureContactRecipientSchema_ above -- MarketingV6AuraCreativeApproval.gs's
@@ -463,7 +486,8 @@ function gmailOpp(accountId, accountName, amOwner, sheetName) {
 // run never returns.
 (function realTimeStageMarkersLoggedInOrderTest() {
   var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
-  var sheetValues = campanaASheetValues([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High']]);
+  // The source tab carries the contact itself (execution unit = contact/email), as the real tab does.
+  var sheetValues = campanaASheetValuesWithContacts([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Colombia', 'Maria', 'maria@progeral.com']]);
   var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
   // A successful direct-spreadsheet ingest (status OK below) is required to exercise
   // PARSE_START/END and the GMAIL_REPROCESS_SKIPPED path -- seed the real account/contact under
@@ -586,7 +610,7 @@ function campanaASheetValuesWithContacts(dataRows) {
   // v6AuraGmailOpportunityId_ derives accountId as 'ACC-' + hash(normalized account name); to
   // keep this test independent of that exact hash function, seed the contact under whatever
   // accountId the real ingest actually produced.
-  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': campanaASheetValues([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High']]) } } });
+  var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': campanaASheetValuesWithContacts([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Colombia', 'Maria', 'maria@progeral.com']]) } } });
   var ingested = ctx.v6AuraCampanaAIngestFromSpreadsheet_();
   var realAccountId = ctx.__tables.MKT_AURA_GMAIL_OPPORTUNITIES[0].accountId;
   tables.MKT_CONTACTS_SECURE[0].accountId = realAccountId;
@@ -630,7 +654,7 @@ function campanaASheetValuesWithContacts(dataRows) {
 // carry, and every job records languageSource/languageReason -- never a bare, unexplained value.
 (function languageTraceabilityTabCountryPrimaryTest() {
   var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
-  var sheetValues = campanaASheetValuesWithContacts([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Brasil', '', '']]);
+  var sheetValues = campanaASheetValuesWithContacts([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Brasil', 'Joao', 'joao@progeral.com']]);
   var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
   ctx.v6AuraCampanaAIngestFromSpreadsheet_();
   var realAccountId = tables.MKT_AURA_GMAIL_OPPORTUNITIES[0].accountId;
@@ -648,7 +672,7 @@ function campanaASheetValuesWithContacts(dataRows) {
 // in full ('Spanish') still resolves correctly, and is still ranked ahead of the tab's country.
 (function languageValueNormalizationTest() {
   var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
-  var sheetValues = campanaASheetValuesWithContacts([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Brasil', '', '']]);
+  var sheetValues = campanaASheetValuesWithContacts([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Brasil', 'Joao', 'joao@progeral.com']]);
   var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
   ctx.v6AuraCampanaAIngestFromSpreadsheet_();
   var realAccountId = tables.MKT_AURA_GMAIL_OPPORTUNITIES[0].accountId;
@@ -739,7 +763,7 @@ function campanaASheetValuesWithContacts(dataRows) {
 // not just reported as a diagnostic, a genuine recipient recovery.
 (function realAccountResolutionRecoversRecipientTest() {
   var tables = { MKT_ACCOUNTS: [], MKT_CONTACTS_SECURE: [] };
-  var sheetValues = campanaASheetValues([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High']]);
+  var sheetValues = campanaASheetValuesWithContacts([['Progeral Corp', 'Luis Simoes', 'HA priority', 'High', 'Colombia', 'Maria', 'maria@progeral.com']]);
   var ctx = makeContext({ tables: tables, spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': sheetValues } } });
   ctx.v6AuraCampanaAIngestFromSpreadsheet_();
   var hashAccountId = tables.MKT_AURA_GMAIL_OPPORTUNITIES[0].accountId;
@@ -811,13 +835,16 @@ function campanaASheetValuesWithContacts(dataRows) {
   assert.equal(sameFamily.status, 'STOPPED', 'a still-active Activation-family response must never be overridden by this rule');
   assert.equal(sameFamily.stopOverrideReason, 'SAME_FAMILY_ACTIVATION_STILL_ACTIVE');
 
-  // (d) CLOSED / SUPPRESSED, even if old and cross-family -> NEVER overridden (hard stop).
+  // (d) CLOSED / SUPPRESSED is an ACCOUNT-level status (2026-09-29 rule): explicit Campaign A
+  // source membership takes precedence, so the contact is not stopped; the account status is
+  // recorded on the job for audit. Contact-level DNC/exclusions still block (see
+  // tests/aura-campaign-execution-final.test.js).
   var closed = scenario(
     { currentStage: 'CLOSED / SUPPRESSED', responseAt: oldDate, campaignId: 'CMP-OLD-QNB' },
     { campaignId: 'CMP-OLD-QNB', objective: 'Quoted Not Booked' }
   );
-  assert.equal(closed.status, 'STOPPED', 'CLOSED / SUPPRESSED must always be a hard stop, never overridden');
-  assert.equal(closed.stopOverrideReason, 'HARD_STOP_CLOSED_SUPPRESSED');
+  assert.equal(closed.status, 'PENDING', 'an account-level CLOSED / SUPPRESSED status must not suppress an explicit source contact');
+  assert.equal(closed.accountStatusOverride, 'CLOSED / SUPPRESSED');
 
   // (e) LOAD / REACTIVATED (an ongoing, successful relationship), old and cross-family -> NEVER
   // overridden -- this is a real engaged account, not a stale one-off response.
@@ -843,17 +870,18 @@ function campanaASheetValuesWithContacts(dataRows) {
     ],
     MKT_ACCOUNT_PIPELINE: [
       { accountId: 'ACC-1', currentStage: 'RESPONDED', responseAt: oldDate, campaignId: 'CMP-OLD-QNB' },
-      { accountId: 'ACC-2', currentStage: 'CLOSED / SUPPRESSED', responseAt: oldDate, campaignId: 'CMP-OLD-QNB' }
+      // A real engagement stop (not an account-status-only stage, which no longer stops a source contact).
+      { accountId: 'ACC-2', currentStage: 'LOAD / REACTIVATED', responseAt: oldDate, campaignId: 'CMP-OLD-QNB' }
     ],
     MKT_CAMPAIGNS: [{ campaignId: 'CMP-OLD-QNB', objective: 'Quoted Not Booked' }]
   };
   var ctx = makeContext({ tables: tables });
   ctx.v6AuraCampanaABuildQueue_();
   var breakdown = ctx.v6AuraCampanaAStoppedBreakdown_();
-  assert.equal(breakdown.totalStopped, 1, 'only the CLOSED/SUPPRESSED account remains stopped');
+  assert.equal(breakdown.totalStopped, 1, 'only the engaged (LOAD / REACTIVATED) account remains stopped');
   assert.equal(breakdown.totalOverridden, 1, 'the stale cross-family RESPONDED account must be counted as overridden');
   assert.equal(breakdown.byOverrideReason.STALE_CROSS_FAMILY_RESPONSE, 1);
-  assert.equal(breakdown.byOverrideReason.HARD_STOP_CLOSED_SUPPRESSED, 1);
+  assert.equal(breakdown.byOverrideReason.STAGE_NOT_ELIGIBLE_FOR_OVERRIDE, 1);
   console.log('campana-a test 27 (STOPPED breakdown reports accurate override counts and reasons): PASS');
 })();
 
@@ -1127,23 +1155,25 @@ function campanaASheetValuesWithContacts(dataRows) {
   console.log('campana-a test 40 (account-level stopOnResponse still fully protects a CAMPANA_A_SOURCE-only recipient): PASS');
 })();
 
-// 41. A contact known only in MKT_CONTACTS_SECURE (not listed with an email on this particular
-// tab extract) is still included -- the tab becoming primary never removes a previously-included,
-// real, governed recipient.
-(function contactsSecureOnlyRecipientStillIncludedTest() {
+// 41. (2026-09-29 rule) The authoritative Campaign A audience is the source contact list: a
+// contact known only in MKT_CONTACTS_SECURE (not on the source) is NOT queued -- it is reported
+// as a diagnostic count (contactsSecureNotInSource) so the source stays exactly the confirmed
+// contact list, while the listed contact of the same account is queued independently.
+(function contactsSecureOnlyContactNotInSourceIsDiagnosticOnlyTest() {
   var tables = {
     MKT_AURA_GMAIL_OPPORTUNITIES: [gmailOpp('ACC-1', 'Progeral Corp', 'Owner')],
     MKT_ACCOUNTS: [{ accountId: 'ACC-1', accountName: 'Progeral Corp' }],
-    MKT_CONTACTS_SECURE: [{ contactId: 'CON-NOVA', accountId: 'ACC-1', firstName: 'Carla', email: 'carla@progeral.com', country: 'Colombia' }]
+    MKT_CONTACTS_SECURE: [{ contactId: 'CON-NOVA', accountId: 'ACC-1', firstName: 'Carla', email: 'carla@progeral.com', country: 'Colombia' }],
+    MKT_AURA_CAMPANA_A_SOURCE_ROWS: [{ sourceRow: 5, accountName: 'Progeral Corp', amOwner: 'Owner', contactName: 'Joao', email: 'joao@progeral.com', country: 'Colombia' }]
   };
   var ctx = makeContext({ tables: tables });
   var build = ctx.v6AuraCampanaABuildQueue_();
+  assert.equal(build.candidates, 1, 'candidates must equal the source contact rows exactly');
   assert.equal(build.built, 1);
-  assert.equal(build.recipientSourceBreakdown.CONTACTS_SECURE, 1);
-  var job = tables.MKT_EMAIL_QUEUE[0];
-  assert.equal(job.contactId, 'CON-NOVA');
-  assert.equal(job.recipientSource, 'CONTACTS_SECURE');
-  console.log('campana-a test 41 (a contact known only in MKT_CONTACTS_SECURE, not on this tab extract, is still included -- the tab never removes a previously-included recipient): PASS');
+  assert.equal(build.contactsSecureNotInSource, 1);
+  assert.equal(tables.MKT_EMAIL_QUEUE[0].email, 'joao@progeral.com');
+  assert(!tables.MKT_EMAIL_QUEUE.some(function (j) { return j.contactId === 'CON-NOVA'; }), 'a contact outside the authoritative source must never be queued');
+  console.log('campana-a test 41 (a MKT_CONTACTS_SECURE-only contact outside the authoritative source is diagnostic only, never queued): PASS');
 })();
 
 // 42. v6AuraCampanaAAudit_ reports an accurate byRecipientSource breakdown computed from the
@@ -1172,7 +1202,9 @@ function campanaASheetValuesWithContacts(dataRows) {
 // creativeId/creativeApprovalId (e.g. a legacy row) is blocked, never sent, even under LIVE.
 (function campanaADispatchBlocksJobWithNoCreativeReferenceTest() {
   var tables = {
-    MKT_EMAIL_QUEUE: [{ jobId: 'JOB:LEGACY:CAMPANA-A:1', campaignId: 'CMP-CAMPANA-A-HA-PRIORITARIA', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: '<p>legacy, no creative reference</p>', replyTo: 'info@dglus.com', status: 'PENDING', sequenceStep: 1, preferredLanguage: 'ES' }]
+    MKT_EMAIL_QUEUE: [{ jobId: 'JOB:LEGACY:CAMPANA-A:1', campaignId: 'CMP-CAMPANA-A-HA-PRIORITARIA', accountId: 'ACC-1', contactId: 'CON-1', email: 'contact@shipperco.com', subject: 'x', htmlBody: '<p>legacy, no creative reference</p>', replyTo: 'info@dglus.com', status: 'PENDING', sequenceStep: 1, preferredLanguage: 'ES' }],
+    // The authoritative source gate must pass for dispatch to evaluate jobs at all.
+    MKT_AURA_CAMPANA_A_SOURCE_ROWS: [{ sourceRow: 5, accountName: 'Shipper Co', contactName: 'Contact', email: 'contact@shipperco.com' }]
   };
   var ctx = makeContext({ tables: tables });
   ctx.auraEnableLiveSending();

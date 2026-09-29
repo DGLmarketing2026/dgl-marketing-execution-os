@@ -119,14 +119,37 @@ function v6AuraEmailActiveExclusion_(accountId, contactId) {
 // the same (campaignId, accountId, contactId, sequenceStep) reach SENT, even if some future
 // caller ever mints a job under a different jobId scheme for the same recipient/step.
 function v6AuraEmailDuplicateSentExists_(job) {
+  var key = v6AuraJobDuplicateKey_(job);
   return v6Rows_('MKT_EMAIL_QUEUE').some(function (r) {
     return v6AuraEmailText_(r.jobId) !== v6AuraEmailText_(job.jobId) &&
-      v6AuraEmailText_(r.campaignId) === v6AuraEmailText_(job.campaignId) &&
-      v6AuraEmailText_(r.accountId) === v6AuraEmailText_(job.accountId) &&
-      v6AuraEmailText_(r.contactId) === v6AuraEmailText_(job.contactId) &&
-      String(r.sequenceStep) === String(job.sequenceStep) &&
+      v6AuraJobDuplicateKey_(r) === key &&
       v6AuraEmailText_(r.status).toUpperCase() === 'SENT';
   });
+}
+
+// --- Canonical campaign family (AURA intake) ---------------------------------------------
+// The five campaign types Marketing chooses from at intake, plus the spellings already stored
+// on historical rows (playbookId 'Retention', objective 'Quoted Not Booked', 'Cross-Sell', ...).
+// Unknown values normalize to '' -- never guessed into another family, so a missing family can
+// never silently fall through to Reactivation copy/design.
+var AURA_CAMPAIGN_TYPES_ = ['ACTIVATION', 'RETENTION', 'REACTIVATION', 'QUOTED_NOT_BOOKED', 'CROSS_SELL'];
+var AURA_CAMPAIGN_TYPE_OBJECTIVE_ = { ACTIVATION: 'Activation', RETENTION: 'Retention', REACTIVATION: 'Reactivation', QUOTED_NOT_BOOKED: 'Quoted Not Booked', CROSS_SELL: 'Cross-Sell' };
+function v6AuraNormalizeCampaignFamily_(value) {
+  var x = v6AuraEmailText_(value).toUpperCase().replace(/[^A-Z]+/g, '_').replace(/^_+|_+$/g, '');
+  if (x === 'ACTIVATION_ACCOUNT') x = 'ACTIVATION';
+  if (x === 'QNB' || x === 'QUOTED_NOT_BOOKED' || x === 'FRESH_QNB') return 'QUOTED_NOT_BOOKED';
+  if (x === 'CROSSSELL') return 'CROSS_SELL';
+  return AURA_CAMPAIGN_TYPES_.indexOf(x) >= 0 ? x : '';
+}
+// Duplicate identity for a queued/sent job: SAME campaign, contact, step AND SAME family.
+// Campaign A changed family (historical Retention -> current Activation) under one campaignId;
+// a historical Retention SENT row and the current Activation job for the same contact are two
+// different messages, never duplicates. Two jobs of the same family (or both without a stored
+// family) for the same contact/step still collide exactly as before.
+function v6AuraJobDuplicateKey_(job) {
+  var j = job || {};
+  var family = v6AuraNormalizeCampaignFamily_(j.playbookId || j.campaignFamily) || v6AuraEmailText_(j.playbookId || j.campaignFamily).toUpperCase();
+  return [v6AuraEmailText_(j.campaignId), v6AuraEmailText_(j.accountId), v6AuraEmailText_(j.contactId), v6AuraEmailText_(j.sequenceStep), family].join('|');
 }
 
 // One job per (campaignId, contactId, sequenceStep) -- deterministic and idempotent, exactly
@@ -522,7 +545,7 @@ function v6AuraEmailQueueAudit_(filterFn) {
 
   var seenKeys = {}, duplicateKeys = {};
   jobs.forEach(function (j) {
-    var key = v6AuraEmailText_(j.campaignId) + '|' + v6AuraEmailText_(j.accountId) + '|' + v6AuraEmailText_(j.contactId) + '|' + v6AuraEmailText_(j.sequenceStep);
+    var key = v6AuraJobDuplicateKey_(j);
     if (seenKeys[key]) duplicateKeys[key] = true; else seenKeys[key] = true;
   });
 
@@ -548,7 +571,7 @@ function v6AuraEmailQueueAudit_(filterFn) {
     if (!/href\s*=\s*"mailto:[^"]+"/i.test(job.htmlBody || '')) issues.push('CTA_NOT_FUNCTIONAL');
     if (!/DGL/i.test(job.htmlBody || '')) issues.push('MISSING_SENDER_SIGNATURE');
     if (!job.replyTo || !v6AuraEmailValid_(job.replyTo)) issues.push('MISSING_REPLY_TO');
-    var dupKey = v6AuraEmailText_(job.campaignId) + '|' + v6AuraEmailText_(job.accountId) + '|' + v6AuraEmailText_(job.contactId) + '|' + v6AuraEmailText_(job.sequenceStep);
+    var dupKey = v6AuraJobDuplicateKey_(job);
     if (duplicateKeys[dupKey]) issues.push('DUPLICATE_JOB_KEY');
     if (job.approvalId && job.approvedAt && String(job.status).toUpperCase() !== 'REVIEW_REQUIRED') issues.push('APPROVAL_RECORDED_BUT_NOT_ENFORCED');
     if (job.approvalId && !job.approvedAt && ['SENT', 'DRY_RUN'].indexOf(String(job.status).toUpperCase()) >= 0) issues.push('APPROVAL_BYPASSED');

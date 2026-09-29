@@ -12,6 +12,7 @@ function routeMarketingV6_(action, payload) {
     case 'v6CampaignStudioTestDraft': return v6CampaignStudioTestDraft_(p);
     case 'v6CampaignStudioList': return v6CampaignStudioList_();
     case 'v6CampaignStudioApproveSet': return v6CampaignStudioApproveSet_(p);
+    case 'v6AuraCampaignIntake': return v6AuraCampaignIntake_(p);
     case 'v6AuraEmailPerformanceJob': return v6AuraEmailPerformanceJob_(p);
     case 'v6AuraEmailPerformance': return v6AuraEmailPerformance_();
     case 'v6Opportunities':

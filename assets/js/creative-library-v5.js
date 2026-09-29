@@ -199,5 +199,14 @@
     "Review Service":{es:"REVISAR SERVICIO",en:"REVIEW SERVICE",pt:"REVISAR SERVIÇO"}
   };
 
-  global.DGL_CREATIVE_LIBRARY_V5={VERSION,CREATIVE_SYSTEMS,OBJECTIVES,SERVICES,CTA,resolveAsset};
+  // AURA intake answers (ACTIVATION / RETENTION / REACTIVATION / QUOTED_NOT_BOOKED / CROSS_SELL)
+  // map onto the existing objective names; any other value is returned unchanged so existing
+  // callers behave exactly as before.
+  const INTAKE_OBJECTIVES={ACTIVATION:"Activation",RETENTION:"Retention",REACTIVATION:"Reactivation",QUOTED_NOT_BOOKED:"Quoted Not Booked",QNB:"Quoted Not Booked",CROSS_SELL:"Cross-Sell"};
+  function normalizeObjective(objective){
+    const key=String(objective==null?"":objective).trim().toUpperCase().replace(/[^A-Z]+/g,"_").replace(/^_+|_+$/g,"");
+    return INTAKE_OBJECTIVES[key]||objective;
+  }
+
+  global.DGL_CREATIVE_LIBRARY_V5={VERSION,CREATIVE_SYSTEMS,OBJECTIVES,SERVICES,CTA,resolveAsset,normalizeObjective};
 })(window);

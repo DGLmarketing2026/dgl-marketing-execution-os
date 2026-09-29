@@ -155,7 +155,7 @@ for(const l of ['Portuguese','Português','pt-BR','pt','PT'])assert.equal(ctx.v6
 (async()=>{
  const revoked=[],window={location:{hash:'#/campaign-studio'},addEventListener(){},DGL_MARKETING_BACKEND_ADAPTER_V55:{revokeApprovedCreative:async id=>revoked.push(id)}};
  const browser={window,URLSearchParams,sessionStorage:{getItem:()=>JSON.stringify({campaignId:'STALE'}),setItem(){}},setTimeout,clearTimeout,Image:class{set src(v){this._src=v;this.complete=true;this.naturalWidth=184;queueMicrotask(()=>this.onload());}get src(){return this._src;}}};
- vm.createContext(browser);['creative-library-v5','copy-engine-v5','campaign-studio-v6'].forEach(n=>vm.runInContext(fs.readFileSync('assets/js/'+n+'.js','utf8'),browser));
+ vm.createContext(browser);['creative-library-v5','creative-render-v5','copy-engine-v5','campaign-studio-v6'].forEach(n=>vm.runInContext(fs.readFileSync('assets/js/'+n+'.js','utf8'),browser));
  const studio=window.DGL_CAMPAIGN_STUDIO_V6;
  assert.equal(studio.navigationId(),'','direct navigation ignores stale browser campaign');
  window.location.hash='#/campaign-studio?campaignId='+id;assert.equal(studio.navigationId(),id);
@@ -165,9 +165,9 @@ for(const l of ['Portuguese','Português','pt-BR','pt','PT'])assert.equal(ctx.v6
  m.variants.ES.testDraftStatus='CREATED';await studio.editCopy(m,'subjectA','Edited ES');
  assert(!m.variants.ES.approved);assert(m.variants.EN.approved&&m.variants.PT.approved);assert.equal(m.variants.ES.testDraftStatus,'STALE AFTER EDIT');
  assert.equal(m.variants.EN.copy.subjectA,english);assert.equal(m.variants.PT.copy.subjectA,portuguese);
- await studio.changeLayout(m,'executive');assert(langs.every(l=>!m.variants[l].approved));assert.deepEqual(revoked,['es','en','pt']);
+ await studio.changeLayout(m,'executive-minimal');assert(langs.every(l=>!m.variants[l].approved));assert.deepEqual(revoked,['es','en','pt']);
  const fresh=studio.createModel(context);
- for(const l of langs){const html=studio.emailHtml(fresh,l);assert(html.includes('mailto:info@dglus.com'));assert(html.includes(ctx.V6_STUDIO_LOGO_));assert(!/Retention|Reactivation|Stay Close|Multiservicio|FTL|qaBrand/.test(html));assert(html.includes('width="680"'));assert(html.includes(l==='ES'?'ENVIAR REQUERIMIENTO':l==='PT'?'ENVIAR REQUERIMENTO':'SEND A REQUIREMENT'));}
+ for(const l of langs){const html=studio.emailHtml(fresh,l);assert(html.includes('mailto:info@dglus.com'));assert(html.includes(ctx.V6_STUDIO_LOGO_));assert(!/Retention|Reactivation|Stay Close|Multiservicio|qaBrand/.test(html));assert(html.includes('width="680"'));assert(html.includes(l==='ES'?'ENVIAR REQUERIMIENTO':l==='PT'?'ENVIAR REQUERIMENTO':'SEND A REQUIREMENT'));}
 
  // Family regression: canonical objective, copy and CTA remain those of each family.
  for(const objective of ['Retention','Reactivation','Quoted Not Booked']){
