@@ -102,12 +102,17 @@ OBJECTIVES.forEach(objective=>{
   console.log('PASS: Approve Creative fails closed -- no campaignId, no connected backend, or an incomplete persisted record all block approval');
 })();
 (function checkEmailHtmlUsesAbsoluteAssetsAndFunctionalCta(){
-  const studioSource=fs.readFileSync(path.join(root,'assets/js/campaign-studio-v5.js'),'utf8');
+  // The premium renderer moved verbatim to creative-render-v5.js (shared by Studio V5 and the
+  // governed V6); V5 delegates to it, so the same guarantees are checked on the shared renderer.
+  const studioSource=fs.readFileSync(path.join(root,'assets/js/creative-render-v5.js'),'utf8');
+  const v5Source=fs.readFileSync(path.join(root,'assets/js/campaign-studio-v5.js'),'utf8');
+  assert(/return Render\(\)\.render\(strategy\(\),currentCopy\(\),\{sample\}\)/.test(v5Source),'Studio V5 must render through the shared premium renderer');
+  assert(/const DEFAULT_HERO=absUrl\(/.test(v5Source),'Studio V5 DEFAULT_HERO must stay absolutized');
   // PR #3 audit punto 1 -- absolute public URLs for every assets/... reference, computed by
   // emailHtml() itself, with no separate post-processing step anywhere in the file.
   assert(/function absUrl\(u\)\{/.test(studioSource),'an absUrl() helper must exist');
   assert(/const BASE_URL="https:\/\/dglmarketing2026\.github\.io\/dgl-marketing-execution-os\/"/.test(studioSource),'BASE_URL must be the canonical public GitHub Pages origin');
-  assert(/const OFFICIAL_LOGO=absUrl\(/.test(studioSource)&&/const DEFAULT_HERO=absUrl\(/.test(studioSource),'OFFICIAL_LOGO and DEFAULT_HERO must be absolutized at definition time');
+  assert(/const OFFICIAL_LOGO=absUrl\(/.test(studioSource),'OFFICIAL_LOGO must be absolutized at definition time');
   assert(/absUrl\(s\.logoUrl\|\|OFFICIAL_LOGO\)/.test(studioSource),'brandHeader must absolutize the logo URL it renders');
   assert(/function assetPath\(s\)\{\s*\n\s*return absUrl\(/.test(studioSource),'assetPath must absolutize the hero asset URL it resolves');
   assert(!/\.replace\(\/\(\["'\(=\]\)assets\\\//.test(studioSource),'requestDraft() must no longer post-process relative assets/ URLs -- emailHtml() must already emit absolute URLs before approval');

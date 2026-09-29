@@ -2,6 +2,31 @@
 function v6CampaignStudioCanonicalA_() {
   return {campaignId:'CMP-CAMPANA-A-HA-PRIORITARIA',campaignName:'Activation Prioritaria - Campana A (HA)',campaignType:'Activation',objective:'Activation',service:'Multiservicio',scopeId:'SCOPE-CAMPANA-A-HA-PRIORITARIA',audienceId:'SCOPE-CAMPANA-A-HA-PRIORITARIA',playbookId:'ACTIVATION_ACCOUNT',messageAngle:'Current Movement',language:'MULTILINGUAL',status:'AUTO_ACTIVE'};
 }
+// --- AURA campaign intake ------------------------------------------------------------------
+// For a newly received Sheet/report the ONLY campaign-level question Marketing answers is the
+// campaign type. Everything else resolves automatically through the existing architecture:
+// per-contact language (EN/ES/PT), the family's premium visual system, the family's own copy
+// and CTA, and contact/email execution. Campaign Studio and every governance gate stay in
+// place for preview, approval, audit and troubleshooting. Read-only: never writes.
+var AURA_INTAKE_QUESTION_='WHAT TYPE OF CAMPAIGN IS THIS?';
+var AURA_INTAKE_AUTOMATION_={
+  ACTIVATION:{messageAngle:'Current Movement',ctaIntent:'Send Requirement',creativeSystem:'editorial-white'},
+  RETENTION:{messageAngle:'Stay Close',ctaIntent:'Reply',creativeSystem:'editorial-white'},
+  REACTIVATION:{messageAngle:'Previous Relationship',ctaIntent:'Generate Quote',creativeSystem:'editorial-white'},
+  QUOTED_NOT_BOOKED:{messageAngle:'Still Active',ctaIntent:'Recover Quote',creativeSystem:'executive-minimal'},
+  CROSS_SELL:{messageAngle:'Additional Capability',ctaIntent:'Generate Quote',creativeSystem:'service-architecture'}
+};
+function v6AuraCampaignIntake_(payload){
+  var raw=String((payload||{}).campaignType||'').trim();
+  if(!raw)throw new Error('CAMPAIGN_TYPE_REQUIRED: '+AURA_INTAKE_QUESTION_);
+  var type=v6AuraNormalizeCampaignFamily_(raw);
+  if(!type)throw new Error('CAMPAIGN_TYPE_INVALID');
+  var auto=AURA_INTAKE_AUTOMATION_[type];
+  return {status:'INTAKE_RESOLVED',question:AURA_INTAKE_QUESTION_,options:AURA_CAMPAIGN_TYPES_.slice(),campaignType:type,manualQuestions:[AURA_INTAKE_QUESTION_],
+    automatic:{objective:AURA_CAMPAIGN_TYPE_OBJECTIVE_[type],campaignType:AURA_CAMPAIGN_TYPE_OBJECTIVE_[type],messageAngle:auto.messageAngle,ctaIntent:auto.ctaIntent,creativeSystem:auto.creativeSystem,
+      language:'AUTO_PER_CONTACT',languages:['EN','ES','PT'],executionUnit:'CONTACT_EMAIL',copy:'FAMILY_ONLY',layout:'AUTO',cta:'AUTO'},
+    governance:{campaignStudio:'PRESENT',creativeApproval:'REQUIRED',testDraftVerification:'REQUIRED',creativeSetApproval:'REQUIRED',sendMode:'UNCHANGED'}};
+}
 function v6CampaignStudioPatchCampaign_(id,patch,create) {
   return v6CampaignStudioLocked_(function(){return v6CampaignStudioPatchCells_(id,patch,create);});
 }
@@ -20,15 +45,16 @@ function v6CampaignStudioAudience_(campaign) {
   if(campaign.campaignId==='CMP-CAMPANA-A-HA-PRIORITARIA'){
     var map=v6AuraCampanaAAccountMap_(),ids={};
     Object.keys(map).forEach(function(hash){var r=map[hash],id=v6AuraCampanaARealAccountId_(hash,r.accountName,accounts);ids[id]=true;names[r.accountName]=id;});
-    v6Rows_('MKT_AURA_CAMPANA_A_SOURCE_ROWS').forEach(function(r){if(r.country&&!countries[names[r.accountName]])countries[names[r.accountName]]=r.country;});
     resolved=v6AuraCampanaAResolveRecipients_(Object.keys(ids),names,'Activation');
+    resolved.candidates.forEach(function(r){if(r.rowCountry&&!countries[r.accountId])countries[r.accountId]=r.rowCountry;});
   }else{
     var rows=v6Rows_('MKT_AUDIENCES').filter(function(r){return r.campaignId===campaign.campaignId&&r.recordType==='RECIPIENT';});
     resolved={eligible:rows.filter(function(r){return r.eligibilityStatus==='ELIGIBLE';}),excluded:rows.filter(function(r){return r.eligibilityStatus!=='ELIGIBLE';})};
   }
   var counts={ES:0,EN:0,PT:0},unique={};
   resolved.eligible.forEach(function(r){var l=v6AuraCampanaAPreferredLanguage_(byContact[r.contactId]||{},byAccount[r.accountId]||{},r.rowCountry||countries[r.accountId]||'').language;counts[l]++;unique[r.accountId]=true;});
-  return {audienceResolved:resolved.eligible.length>0,eligibleContacts:resolved.eligible.length,eligibleAccounts:Object.keys(unique).length,excludedContacts:resolved.excluded.length,languageCounts:counts,requiredLanguages:['ES','EN','PT'].filter(function(l){return counts[l]>0;})};
+  var gate=resolved.sourceGate||{ok:true,status:'SOURCE_OK'};
+  return {audienceResolved:gate.ok&&resolved.eligible.length>0,sourceStatus:gate.status,sourceContacts:gate.actual,expectedSourceContacts:gate.expected,executionUnit:'CONTACT_EMAIL',eligibleContacts:resolved.eligible.length,eligibleAccounts:Object.keys(unique).length,excludedContacts:resolved.excluded.length,languageCounts:counts,requiredLanguages:['ES','EN','PT'].filter(function(l){return counts[l]>0;})};
 }
 function v6CampaignStudioVariantValid_(r) {
   if(r&&r.campaignId==='CMP-CAMPANA-A-HA-PRIORITARIA'&&(String(r.status)!=='APPROVED'||r.logoUrl!==V6_STUDIO_LOGO_||String(r.htmlBody).indexOf('src="'+V6_STUDIO_LOGO_+'"')<0||/stay close|staying close|seguimos cerca|relationship continuity|multiservicio|\{\{service\}\}/i.test([r.subject,r.preheader,r.htmlBody,r.textBody].join(' '))))return false;
@@ -42,6 +68,8 @@ function v6CampaignStudioContext_(payload) {
   var c={};['campaignId','campaignName','campaignType','objective','service','scopeId','audienceId','playbookId','status','approvalStatus','recipientMode','messageAngle','language','qnbWindow'].forEach(function(k){c[k]=row[k]||'';});
   if(id==='CMP-CAMPANA-A-HA-PRIORITARIA')Object.assign(c,v6CampaignStudioCanonicalA_());
   c.recipientMode=c.recipientMode||'GOVERNED_PRIVATE_AUDIENCE';
+  c.intakeQuestion=AURA_INTAKE_QUESTION_;c.campaignFamily=typeof v6AuraNormalizeCampaignFamily_==='function'?v6AuraNormalizeCampaignFamily_(c.campaignType||c.objective):'';
+  c.creativeSystem=c.campaignFamily?AURA_INTAKE_AUTOMATION_[c.campaignFamily].creativeSystem:'';
   try{Object.assign(c,v6CampaignStudioAudience_(c));}catch(e){Object.assign(c,{audienceResolved:false,eligibleContacts:0,eligibleAccounts:0,excludedContacts:0,requiredLanguages:[],languageCounts:{ES:0,EN:0,PT:0}});}
   c.approvedCreativeVariants={};c.missingCreativeVariants=[];
   ['ES','EN','PT'].forEach(function(l){var r=v6AuraLatestApprovedCreativeForLanguage_(id,l);if(v6CampaignStudioVariantValid_(r)){c.approvedCreativeVariants[l]={creativeId:r.creativeId,creativeVersion:r.creativeVersion,approvalId:r.approvalId,htmlChecksum:r.htmlChecksum,contentChecksum:r.contentChecksum};}else if(c.requiredLanguages.indexOf(l)>=0)c.missingCreativeVariants.push(l);});

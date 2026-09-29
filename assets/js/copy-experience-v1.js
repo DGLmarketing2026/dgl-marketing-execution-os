@@ -215,6 +215,8 @@
   }
 
   base.generate = function(s){
+    const normalize = global.DGL_CREATIVE_LIBRARY_V5 && global.DGL_CREATIVE_LIBRARY_V5.normalizeObjective;
+    if (s && normalize) s = { ...s, objective: normalize(s.objective) };
     const lang = lg(s || {});
     let old = {};
     try { old = original(s || {}) || {}; } catch(_) {}
@@ -222,7 +224,11 @@
     // Campaign A copy). copyFor() has no Activation branch, so without this guard Activation fell
     // through to the Reactivation template and injected the service name ("Multiservicio"),
     // which the governed backend rejects (ACTIVATION_COPY_INVALID).
-    if (s && s.objective === "Activation" && old.subjectA) return { ...old, languageCode: lang };
+    if (s && s.objective === "Activation") {
+      // Fail closed: Activation never falls through to the Reactivation template.
+      if (!old.subjectA) throw new Error("ACTIVATION_COPY_UNAVAILABLE");
+      return { ...old, languageCode: lang };
+    }
     const c = copyFor(s || {}, lang);
     return {
       ...old,

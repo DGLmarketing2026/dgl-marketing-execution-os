@@ -59,6 +59,7 @@
   };
 
   function generate(s){
+    s={...s,objective:L().normalizeObjective?L().normalizeObjective(s.objective):s.objective};
     const lg=language(s),service=svc(s),serviceName=service?.name||s.service||"DGL";
     let x;
     if(s.objective==="Quoted Not Booked")x=qnb(s,lg,serviceName);

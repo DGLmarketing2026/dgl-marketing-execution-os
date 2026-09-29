@@ -5,6 +5,14 @@ const LOGO="https://dglmarketing2026.github.io/dgl-marketing-execution-os/assets
 const LANGUAGES=["ES","EN","PT"],FIELDS=["subjectA","subjectB","preheader","headline","body","body2","cta"];
 const E=v=>String(v==null?"":v).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
 const api=()=>g.DGL_MARKETING_BACKEND_ADAPTER_V55;
+const Lib=()=>g.DGL_CREATIVE_LIBRARY_V5,Render=()=>g.DGL_CREATIVE_RENDER_V5;
+// AURA intake: the ONLY campaign-level question Marketing answers. Everything else (per-contact
+// language, premium visual system, family copy and CTA) is resolved automatically from it.
+const INTAKE_QUESTION="WHAT TYPE OF CAMPAIGN IS THIS?",INTAKE_OPTIONS=["ACTIVATION","RETENTION","REACTIVATION","QUOTED_NOT_BOOKED","CROSS_SELL"];
+const INTAKE_BY_OBJECTIVE={"Activation":"ACTIVATION","Retention":"RETENTION","Reactivation":"REACTIVATION","Quoted Not Booked":"QUOTED_NOT_BOOKED","Cross-Sell":"CROSS_SELL"};
+function objectiveOf(context){return Lib().normalizeObjective(context.objective||context.campaignType);}
+function autoSystem(context){return Render().systemFor(objectiveOf(context));}
+function validSystem(id){return !!(id&&Lib().CREATIVE_SYSTEMS[id]);}
 let model=null,mount=null,epoch=0;
 function navigationId(){
   const q=new URLSearchParams((g.location.hash||"").split("?")[1]||"");
@@ -12,10 +20,10 @@ function navigationId(){
   return "";
 }
 function createModel(context){
-  const m={context:Object.freeze({...context}),language:(context.requiredLanguages||[])[0]||"ES",layout:"editorial",variants:{},brand:null,busy:false,error:"",pendingRevokes:new Set()};
+  const m={context:Object.freeze({...context}),language:(context.requiredLanguages||[])[0]||"ES",layout:validSystem(context.creativeSystem)?context.creativeSystem:autoSystem(context),variants:{},brand:null,busy:false,error:"",pendingRevokes:new Set()};
   LANGUAGES.forEach(language=>{
     const approved=context.approvedCreativeVariants?.[language];
-    m.variants[language]={copy:g.DGL_COPY_ENGINE_V5.generate({objective:context.objective,service:context.service,angle:context.messageAngle,language,qnbWindow:context.qnbWindow,ctaIntent:context.campaignId==="CMP-CAMPANA-A-HA-PRIORITARIA"?"Send Requirement":g.DGL_CREATIVE_LIBRARY_V5?.OBJECTIVES?.[context.objective]?.defaultCta}),dirty:!approved,testDraftStatus:context.testDraftStatus?.[language]||(approved?"APPROVED / TEST DRAFT REQUIRED":"UNAPPROVED"),approved:!!approved,...(approved||{})};
+    m.variants[language]={copy:g.DGL_COPY_ENGINE_V5.generate({objective:objectiveOf(context),service:context.service,angle:context.messageAngle,language,qnbWindow:context.qnbWindow,ctaIntent:context.campaignId==="CMP-CAMPANA-A-HA-PRIORITARIA"?"Send Requirement":g.DGL_CREATIVE_LIBRARY_V5?.OBJECTIVES?.[context.objective]?.defaultCta}),dirty:!approved,testDraftStatus:context.testDraftStatus?.[language]||(approved?"APPROVED / TEST DRAFT REQUIRED":"UNAPPROVED"),approved:!!approved,...(approved||{})};
   });return m;
 }
 function selectLanguage(m,language){if(!LANGUAGES.includes(language))throw Error("Unsupported language");m.language=language;}
@@ -35,11 +43,16 @@ async function revoke(m,languages){
   for(const id of ids){await api().revokeApprovedCreative(id,"Marketing");m.pendingRevokes.delete(id);}
 }
 async function editCopy(m,field,value){if(!FIELDS.includes(field))return;const language=m.language;m.variants[language].copy[field]=value;const pending=revoke(m,[language]),current=Promise.all([m.revoking?m.revoking.catch(()=>{}):Promise.resolve(),pending]);m.revoking=current;try{await current;}finally{if(m.revoking===current)m.revoking=null;}}
-async function changeLayout(m,value){m.layout=value;await revoke(m,LANGUAGES);}
+async function changeLayout(m,value){if(!validSystem(value))throw Error("Unknown DGL visual system");m.layout=value;await revoke(m,LANGUAGES);}
+const CTA_SUBJECT={ES:"Requerimiento terrestre",PT:"Requerimento terrestre",EN:"Ground freight requirement"};
+// ONE governed renderer: the existing premium DGL visual systems (creative-render-v5.js), with the
+// visual system auto-selected from the campaign family. Tokens stay unmerged so the approved HTML
+// is exactly what AURA later token-merges per recipient -- never redesigned downstream.
 function emailHtml(m,language=m.language){
   const v=m.variants[language];if(v.storedHtml&&!v.dirty)return v.storedHtml;
-  const c=v.copy,space=m.layout==="executive"?44:36;
-  return '<!doctype html><html lang="'+language.toLowerCase()+'"><body style="margin:0;background:#F3F5F7"><div style="display:none;max-height:0;overflow:hidden">'+E(c.preheader)+'</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:32px 12px"><table role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;background:white"><tr><td style="background:#05035C;padding:24px 36px;border-bottom:4px solid #77B82A"><img src="'+LOGO+'" alt="DGL" width="184" style="display:block;width:184px;height:auto;border:0"></td></tr><tr><td style="padding:'+space+'px;font-family:Arial,sans-serif"><h1 style="font-size:34px;line-height:1.12;color:#05035C;margin:0 0 28px">'+E(c.headline)+'</h1><p style="font-size:16px;line-height:1.7;color:#475467">'+E(c.body)+'</p><p style="font-size:16px;line-height:1.7;color:#475467;margin-bottom:30px">'+E(c.body2)+'</p><table role="presentation" cellspacing="0" cellpadding="0"><tr><td style="background:#77B82A;padding:16px 24px"><a href="mailto:info@dglus.com?subject='+encodeURIComponent(language==="ES"?"Requerimiento terrestre":language==="PT"?"Requerimento terrestre":"Ground freight requirement")+'" style="font-weight:bold;font-size:13px;color:#05035C;text-decoration:none">'+E(c.cta)+'</a></td></tr></table></td></tr><tr><td style="padding:24px 36px;border-top:1px solid #EAECF0;color:#667085;font:11px Arial">Dedicated Ground Logistics · '+(language==="ES"?"Su aliado de transporte terrestre.":language==="PT"?"Seu parceiro de transporte terrestre.":"Your inland freight partner.")+'</td></tr></table></td></tr></table></body></html>';
+  const c=m.context,objective=objectiveOf(c),service=Lib().SERVICES[c.service]||Lib().SERVICES.Multiservicio;
+  const strategy={creativeSystem:m.layout,objective,service:c.service,angle:c.messageAngle,lane:c.lane||"",heroUrl:"",logoUrl:LOGO,serviceDisplay:objective==="Activation"?service.descriptor:undefined};
+  return Render().render(strategy,v.copy,{ctaSubject:CTA_SUBJECT[language]});
 }
 function validateBrand(){
   return new Promise((resolve,reject)=>{
@@ -97,7 +110,8 @@ function draw(){
   const m=model;if(!mount||!m)return;const c=m.context,v=m.variants[m.language];
   mount.innerHTML='<div class="page-head"><div><div class="eyebrow">GOVERNED CAMPAIGN STUDIO</div><h2>'+E(c.campaignName)+'</h2><p>Private backend strategy · Creative fields only</p></div><button class="btn" data-picker>SELECT CAMPAIGN</button></div>'+
     '<section class="card card-pad"><dl style="display:flex;flex-wrap:wrap;gap:24px">'+["objective","service","audienceId","playbookId","messageAngle","language"].map(k=>'<div><dt>'+E(k)+'</dt><dd style="margin:8px 0;font-weight:bold">'+E(c[k])+'</dd></div>').join("")+'</dl><p>'+E(c.eligibleContacts)+' eligible contacts · '+E(c.eligibleAccounts)+' unique accounts · '+E(c.excludedContacts)+' excluded contacts</p><p>Creative set: '+E(c.creativeSetStatus)+' · Required: '+E((c.requiredLanguages||[]).join(" / "))+'</p></section>'+
-    '<section class="card card-pad" style="margin-top:20px"><h3>Creative System</h3><div style="display:flex;gap:12px;flex-wrap:wrap">'+["editorial","executive"].map(l=>'<button class="btn" data-layout="'+l+'" style="white-space:normal;max-width:100%" '+(m.busy?'disabled':'')+'>'+E(l)+'<br><small>'+E([c.objective,c.service,c.messageAngle,m.language].join(" · "))+'</small></button>').join("")+'</div></section>'+
+    '<section class="card card-pad" style="margin-top:20px" data-intake><h3>Campaign intake</h3><p><strong>'+E(INTAKE_QUESTION)+'</strong> <span class="badge" data-intake-answer>'+E(INTAKE_BY_OBJECTIVE[objectiveOf(c)]||"UNANSWERED")+'</span></p><p><small>Options: '+E(INTAKE_OPTIONS.join(" · "))+'</small></p><p><small>Automatic: language per contact (EN / ES / PT) · visual system '+E((Lib().CREATIVE_SYSTEMS[autoSystem(c)]||{}).name||"")+' · '+E(objectiveOf(c))+' copy and CTA · execution unit contact / email</small></p></section>'+
+    '<section class="card card-pad" style="margin-top:20px"><h3>Creative System</h3><div style="display:flex;gap:12px;flex-wrap:wrap">'+Object.values(Lib().CREATIVE_SYSTEMS).map(sys=>'<button class="btn '+(m.layout===sys.id?'btn-primary':'')+'" data-layout="'+E(sys.id)+'" aria-pressed="'+(m.layout===sys.id)+'" style="white-space:normal;max-width:100%" '+(m.busy?'disabled':'')+'>'+E(sys.name)+(sys.id===autoSystem(c)?' · AUTO':'')+'<br><small>'+E(sys.use)+'</small></button>').join("")+'</div></section>'+
     '<div role="tablist" aria-label="Creative language" style="display:flex;gap:12px;margin:24px 0;flex-wrap:wrap">'+LANGUAGES.map(l=>'<button class="btn '+(m.language===l?'btn-primary':'')+'" role="tab" aria-selected="'+(m.language===l)+'" data-language="'+l+'" style="white-space:normal;max-width:100%" '+(m.busy?'disabled':'')+'>'+l+'<br><small>'+E(variantStatus(m.variants[l]))+'</small></button>').join("")+'</div>'+
     '<p data-variant-status></p><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:24px"><fieldset style="border:0;padding:0" '+(m.busy?'disabled':'')+'>'+FIELDS.map(k=>'<label style="display:block;margin-bottom:14px">'+E(k)+'<textarea data-copy="'+k+'" style="display:block;width:100%;min-height:65px;padding:12px;box-sizing:border-box">'+E(v.copy[k])+'</textarea></label>').join("")+'</fieldset><iframe data-preview title="'+m.language+' email preview" sandbox="" style="width:100%;height:820px;border:1px solid #ddd;background:white"></iframe></div>'+
     '<p role="alert">'+E(m.error)+'</p><div style="display:flex;gap:12px;flex-wrap:wrap">'+[["draft","CREATE TEST DRAFT"],["variant","APPROVE VARIANT"],["set","APPROVE CREATIVE SET"]].map(([a,label])=>'<button class="btn btn-primary" data-action="'+a+'" '+(actionDisabled(m,a)?'disabled':'')+'>'+label+'</button>').join("")+'</div><p>Test Draft creates an unsent Gmail draft. Logo validation runs before approval.</p>';
@@ -124,13 +138,13 @@ async function render(container,explicitId){
     for(const l of LANGUAGES){
       const v=model.variants[l];if(!v.approved)continue;
       const record=await api().getLatestApprovedCreative(id,l);if(ticket!==epoch)return;
-      if(record?.creativeId===v.creativeId){model.layout=record.templateId||model.layout;v.storedHtml=record.htmlBody;v.storedText=record.textBody;v.copy.subjectA=record.subject;v.copy.preheader=record.preheader;if(record.creativeCopy){try{v.copy=JSON.parse(record.creativeCopy);}catch(_){}}}
+      if(record?.creativeId===v.creativeId){if(validSystem(record.templateId))model.layout=record.templateId;v.storedHtml=record.htmlBody;v.storedText=record.textBody;v.copy.subjectA=record.subject;v.copy.preheader=record.preheader;if(record.creativeCopy){try{v.copy=JSON.parse(record.creativeCopy);}catch(_){}}}
       else{v.approved=false;v.dirty=true;}
     }
     draw();
   }catch(e){if(ticket===epoch)container.innerHTML='<h2>SELECT A CAMPAIGN TO OPEN IN STUDIO</h2><p role="alert">'+E(e.message)+'</p>';}
 }
-g.DGL_CAMPAIGN_STUDIO_V6={version:"governed-activation-v2",render,createModel,canApproveSet,variantStatus,selectLanguage,editCopy,changeLayout,emailHtml,validateBrand,navigationId,getState:()=>model};
+g.DGL_CAMPAIGN_STUDIO_V6={version:"governed-premium-v3",INTAKE_QUESTION,INTAKE_OPTIONS,autoSystem,render,createModel,canApproveSet,variantStatus,selectLanguage,editCopy,changeLayout,emailHtml,validateBrand,navigationId,getState:()=>model};
 g.DGL_MODULE_RENDERERS=g.DGL_MODULE_RENDERERS||{};g.DGL_MODULE_RENDERERS["campaign-studio"]=render;
 g.addEventListener?.("dgl:v55-backend-change",()=>{if(g.location?.hash.includes("campaign-studio")&&!model&&mount)render(mount);});
 })(window);
