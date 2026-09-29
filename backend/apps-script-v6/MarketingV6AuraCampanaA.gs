@@ -642,22 +642,44 @@ function v6AuraCampanaASourceStats_(dataRows) {
   var rows = dataRows || v6AuraCampanaASourceContactRows_();
   var contactRows = rows.filter(function (r) { return v6AuraEmailText_(r.contactName); }).length;
   var emailRows = rows.filter(function (r) { return v6AuraEmailText_(r.email); }).length;
+  var unique = {};
+  rows.forEach(function (r) { var e = v6AuraEmailText_(r.email).toLowerCase(); if (e) unique[e] = true; });
   return {
     SOURCE_DATA_ROWS: rows.length, SOURCE_CONTACT_ROWS: contactRows, SOURCE_EMAIL_ROWS: emailRows,
-    UNSENDABLE_SOURCE_ROWS: rows.length - emailRows,
+    UNSENDABLE_SOURCE_ROWS: rows.length - emailRows, UNIQUE_EMAILS: Object.keys(unique).length,
     missingContactEmail: rows.filter(function (r) { return !v6AuraEmailText_(r.email); }).map(function (r) {
       return { sourceRow: r.sourceRow, accountName: v6AuraEmailText_(r.accountName), reason: 'SOURCE_MISSING_CONTACT_EMAIL' };
     })
   };
 }
-// Structural gate: a source exists, and every data row names its account (the join key for
-// contact-level governance). No count expectation of any kind.
+// Structural gate, no count expectation of any kind. Only a source with nothing sendable at all
+// (no rows, or no emails) stops the run; an incomplete ROW (missing contact/email, missing account)
+// is marked on that row alone (SOURCE_MISSING_CONTACT_EMAIL / SOURCE_ACCOUNT_MISSING) and every
+// valid row continues.
 function v6AuraCampanaASourceGate_(dataRows) {
   var rows = dataRows || v6AuraCampanaASourceContactRows_();
   var stats = v6AuraCampanaASourceStats_(rows);
   var withoutAccount = rows.filter(function (r) { return !v6AuraEmailText_(r.accountName); }).length;
-  var status = !rows.length ? 'SOURCE_EMPTY' : withoutAccount ? 'SOURCE_STRUCTURE_INVALID' : !stats.SOURCE_EMAIL_ROWS ? 'SOURCE_NO_EMAILS' : 'SOURCE_OK';
+  var status = !rows.length ? 'SOURCE_EMPTY' : !stats.SOURCE_EMAIL_ROWS ? 'SOURCE_NO_EMAILS' : 'SOURCE_OK';
   return Object.assign({ ok: status === 'SOURCE_OK', status: status, actual: rows.length, rowsWithoutAccount: withoutAccount }, stats);
+}
+
+// --- Duplicate-email recipient policy (isolated, configurable) ---------------------------------
+// This is NOT account deduplication: distinct emails of the same account/company/domain are always
+// independent recipients. The policy only decides what happens when the SAME email address appears
+// on more than one source row:
+//   EXACT_EMAIL_ONCE (default): one recipient per exact email address across the whole source.
+//   ONCE_PER_ACCOUNT_EMAIL: one recipient per (account, exact email) -- the same address listed
+//     under two different accounts yields two recipients.
+// Later rows are kept as candidates and reported as DUPLICATE_SOURCE_EMAIL (never silently dropped).
+var CAMPANA_A_DUPLICATE_EMAIL_POLICY_PROPERTY_ = 'CAMPANA_A_DUPLICATE_EMAIL_POLICY';
+var CAMPANA_A_DUPLICATE_EMAIL_POLICIES_ = ['EXACT_EMAIL_ONCE', 'ONCE_PER_ACCOUNT_EMAIL'];
+function v6AuraCampanaADuplicateEmailPolicy_() {
+  var p = v6AuraEmailText_(PropertiesService.getScriptProperties().getProperty(CAMPANA_A_DUPLICATE_EMAIL_POLICY_PROPERTY_)).toUpperCase();
+  return CAMPANA_A_DUPLICATE_EMAIL_POLICIES_.indexOf(p) >= 0 ? p : 'EXACT_EMAIL_ONCE';
+}
+function v6AuraCampanaARecipientKey_(policy, accountId, email) {
+  return policy === 'ONCE_PER_ACCOUNT_EMAIL' ? accountId + '|' + email : email;
 }
 
 // Account resolution for EVERY source contact, not only for accounts whose row produced an
@@ -746,14 +768,15 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
     if (email && !contactsSecureByAccountAndEmail[k]) contactsSecureByAccountAndEmail[k] = c;
   });
 
-  var seen = {}, sourceAccountIds = {};
+  var seen = {}, sourceAccountIds = {}, sourceEmails = {};
+  var duplicatePolicy = v6AuraCampanaADuplicateEmailPolicy_();
   var candidates = sourceRows.map(function (r) {
     var accountId = v6AuraCampanaASourceAccountId_(r.accountName, accountRealIdByName, accounts);
     var email = v6AuraEmailText_(r.email).toLowerCase();
     var key = accountId + '|' + email;
-    // Every DISTINCT valid email is one independent recipient: a repeated email is a duplicate
-    // regardless of account; distinct emails of the same account/company/domain never collapse.
-    var seenKey = email;
+    // Repeated emails are resolved ONLY by the duplicate-email recipient policy; distinct emails
+    // of the same account/company/domain never collapse.
+    var seenKey = v6AuraCampanaARecipientKey_(duplicatePolicy, accountId, email);
     var matched = email ? contactsSecureByAccountAndEmail[key] : null;
     if (accountId) sourceAccountIds[accountId] = true;
     var cand = {
@@ -767,11 +790,12 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
       recipientSource: matched ? 'MERGED' : 'CAMPANA_A_SOURCE',
       duplicateOf: email && seen[seenKey] ? seen[seenKey] : ''
     };
+    if (email) sourceEmails[email] = true;
     if (email && !seen[seenKey]) seen[seenKey] = v6AuraEmailText_(r.sourceRow) || cand.contactId;
     return cand;
   });
   var contactsSecureNotInSource = allContacts.filter(function (c) {
-    return sourceAccountIds[v6AuraEmailText_(c.accountId)] && !seen[v6AuraEmailText_(c.email).toLowerCase()];
+    return sourceAccountIds[v6AuraEmailText_(c.accountId)] && !sourceEmails[v6AuraEmailText_(c.email).toLowerCase()];
   }).length;
 
   var exclusions = v6Rows_('MKT_EXCLUSIONS');
@@ -781,7 +805,7 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
   candidates.forEach(function (cand) {
     var reason = 'CLEAR';
     var status = v6AuraEmailText_(cand.emailStatus).toUpperCase();
-    if (cand.duplicateOf) reason = 'DUPLICATE_SOURCE_CONTACT';
+    if (cand.duplicateOf) reason = 'DUPLICATE_SOURCE_EMAIL';
     else if (!cand.email) reason = 'SOURCE_MISSING_CONTACT_EMAIL';
     else if (!cand.accountId) reason = 'SOURCE_ACCOUNT_MISSING';
     else if (cand.doNotContact) reason = 'DO_NOT_CONTACT';
@@ -803,7 +827,7 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
   return {
     eligible: eligible, excluded: excluded, candidates: candidates,
     sourceContactsWithEmail: sourceRows.filter(function (r) { return v6AuraEmailText_(r.email); }).length,
-    sourceContacts: sourceRows.length, sourceStats: v6AuraCampanaASourceStats_(sourceRows), sourceGate: gate, sourceAccountIds: Object.keys(sourceAccountIds),
+    sourceContacts: sourceRows.length, sourceStats: v6AuraCampanaASourceStats_(sourceRows), duplicateEmailPolicy: duplicatePolicy, sourceGate: gate, sourceAccountIds: Object.keys(sourceAccountIds),
     contactsSecureNotInSource: contactsSecureNotInSource
   };
 }
@@ -890,9 +914,10 @@ function v6AuraCampanaABuildQueueLocked_() {
   result.sourceContacts = resolved.sourceContacts;
   result.sourceContactsWithEmail = resolved.sourceContactsWithEmail;
   result.sourceStats = resolved.sourceStats;
+  result.duplicateEmailPolicy = resolved.duplicateEmailPolicy;
   result.contactsSecureNotInSource = resolved.contactsSecureNotInSource;
-  // Fail closed on a structurally invalid source (empty, rows without account, no emails). Counts
-  // are derived from the data rows; rows without email are reported, never fabricated.
+  // Fail closed only when the source has nothing sendable (empty / no emails). Incomplete rows are
+  // marked individually and every valid row continues; counts are derived from the data rows.
   if (!resolved.sourceGate.ok) {
     result.status = resolved.sourceGate.status;
     profile.ELIGIBILITY_MS += Date.now() - tElig0;
@@ -1514,7 +1539,7 @@ function v6AuraCampanaARegenerateDryRun_() {
   profile.TOTAL_MS = Date.now() - tTotal0;
   var result = {
     runId: runId,
-    status: audit.sourceStatus === 'SOURCE_EMPTY_OR_NOT_FOUND' ? 'SOURCE_EMPTY_OR_NOT_FOUND' : /^SOURCE_(EMPTY|STRUCTURE_INVALID|NO_EMAILS)$/.test(String(build.status)) ? build.status : (build.status === 'CHECKPOINTED_TIME_BUDGET_EXCEEDED' ? 'CHECKPOINTED_TIME_BUDGET_EXCEEDED' : 'REGENERATE_COMPLETE'),
+    status: audit.sourceStatus === 'SOURCE_EMPTY_OR_NOT_FOUND' ? 'SOURCE_EMPTY_OR_NOT_FOUND' : /^SOURCE_(EMPTY|NO_EMAILS)$/.test(String(build.status)) ? build.status : (build.status === 'CHECKPOINTED_TIME_BUDGET_EXCEEDED' ? 'CHECKPOINTED_TIME_BUDGET_EXCEEDED' : 'REGENERATE_COMPLETE'),
     sendMode: v6AuraSendMode_(), triggerStatus: triggerStatus, ingest: ingest, gmailReprocess: gmailReprocess, refreshOpportunities: refreshOpportunities, build: build, preflight: preflight, dispatch: dispatch, audit: audit,
     profile: profile
   };
