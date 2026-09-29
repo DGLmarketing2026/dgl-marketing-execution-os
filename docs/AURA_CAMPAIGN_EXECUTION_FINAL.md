@@ -16,13 +16,24 @@ The answer is one of `ACTIVATION`, `RETENTION`, `REACTIVATION`, `QUOTED_NOT_BOOK
 
 Campaign Studio, creative approvals, test-draft verification and creative-set approval are all unchanged.
 
-## 2. Campaign A source (231 contacts)
+## 2. Campaign A source (counts derived from the data rows)
 
-The authoritative source is the live tab `Marketing_DGL_14-09-2026 › Campana A - HA prioritaria`. Its range is `A1:L231`, which is **231 sheet rows**:
+The authoritative source is the live tab `Marketing_DGL_14-09-2026 › Campana A - HA prioritaria`. Its range `A1:L231` is 231 physical rows, of which rows 1–4 are the title, the summary line (*"227 contactos en 65 cuentas"*), a blank row and the header row. The physical row count is never used as a contact count.
 
-- Rows 1–4 are the title, the summary line (*"227 contactos en 65 cuentas"*), a blank row and the header row.
-- The remaining rows hold **227 contact rows**.
-- The 47 contacts without email are kept in the separate `Sin correo (log)` tab.
+Counts are derived from the latest capture on every run:
+
+| Field | Live source |
+| --- | --- |
+| `SOURCE_DATA_ROWS` | 227 |
+| `SOURCE_CONTACT_ROWS` | 224 |
+| `SOURCE_EMAIL_ROWS` | 224 |
+| `UNSENDABLE_SOURCE_ROWS` | 3 |
+
+The 3 unsendable rows are account-only rows with no contact and no email (Mack Farms; North American Freight Forwarding Inc.; Ruhe Logistic SA de CV MExico). They stay candidates, are reported as `SOURCE_MISSING_CONTACT_EMAIL`, and are never fabricated or silently dropped.
+
+Validation is structural, with no expected count: the build, dispatch and Studio approvals fail closed with `SOURCE_EMPTY`, `SOURCE_STRUCTURE_INVALID` (a data row without an account) or `SOURCE_NO_EMAILS`.
+
+There is one candidate per source data row. Every distinct valid email is one independent recipient; a repeated email is reported as `DUPLICATE_SOURCE_CONTACT`. Distinct emails are never collapsed by account, company or domain.
 
 The pipeline also lost contacts in four ways, all now fixed:
 
@@ -30,10 +41,6 @@ The pipeline also lost contacts in four ways, all now fixed:
 - **Account-level stops:** contacts at CLOSED / SUPPRESSED / OWNER REQUIRED accounts were stopped. They are now kept.
 - **Account-wide frequency gate:** the competing-campaign gate was evaluated across the whole account. It is now contact-level.
 - **Stale source rows:** rows from older, longer captures were still read. Only the latest capture is used now.
-
-There is one candidate per source contact row, with no collapse by account, domain or company. The count must equal the Marketing-confirmed 231. Only a newly Marketing-confirmed count may change the expected number, recorded in the Script Property `CAMPANA_A_EXPECTED_SOURCE_CONTACTS`. If the count does not match, the build, dispatch and Studio approvals **fail closed** with `SOURCE_NOT_231`. Contacts are never fabricated or padded.
-
-With the current live tab (227 contacts), Campaign A is therefore **blocked** until Marketing either supplies the 4 missing contacts in the source or records a newly confirmed count.
 
 Contacts that exist only in `MKT_CONTACTS_SECURE` are not part of the authoritative audience. They are reported in `contactsSecureNotInSource` and are never queued.
 
@@ -94,7 +101,7 @@ The 109 historical SENT rows are never rewritten.
 
 ## Evidence
 
-- `tests/aura-campaign-execution-final.test.js` contains 19 regression cases.
+- `tests/aura-campaign-execution-final.test.js` contains 20 regression cases.
 - Full suite: 59/59 test files pass.
 - Browser visual QA ran against the real `index.html` with a fixture backend adapter. It covered Activation, Retention and Reactivation, on desktop (1440×900) and mobile (375×812):
   - The premium editorial system rendered with the hero photo, in ES, EN and PT.

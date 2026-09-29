@@ -611,28 +611,19 @@ function v6AuraCampanaAClearBuildCheckpoint_() {
 // random, so idempotency (jobId keying, checkpoint/resume, never duplicating a job) is
 // unaffected. Never invents an email: every email comes verbatim from exactly one of these two
 // real tables.
-// --- Authoritative source gate (execution unit = CONTACT / EMAIL) ------------------------------
-// Marketing confirmed the Campaign A audience as 231 CONTACTS. Every captured source row of the
-// LATEST capture is one contact record -- never collapsed by account/domain/company -- and the
-// pipeline fails closed (SOURCE_NOT_231) whenever the real source does not yield exactly that
-// many contact records. Contacts are never fabricated to reach the number. The expected count is
-// the confirmed 231 unless an operator records a new Marketing-confirmed count in the Script
-// Property below (same property-first pattern as CAMPANA_A_SOURCE_SPREADSHEET_ID).
+// --- Authoritative source: structural, dynamic validation (execution unit = CONTACT / EMAIL) ----
+// The source is the LATEST capture of 'Campana A - HA prioritaria'. Counts are always derived from
+// the captured data rows themselves -- never from the physical sheet row count and never from a
+// hardcoded expected number. Verified live source (2026-09-29): the tab spans A1:L231, rows 1-4
+// are title/summary/blank/header, leaving 227 data rows ("227 contactos en 65 cuentas"): 224 rows
+// with a contact and an email, and 3 account-only rows (no contact, no email) which are reported
+// as SOURCE_MISSING_CONTACT_EMAIL -- never fabricated, never silently dropped.
 //
-// Root cause found for "fewer than 231" (2026-09-29): the live tab 'Campana A - HA prioritaria'
-// spans A1:L231 -- 231 SHEET ROWS -- but rows 1-4 are the title, the summary line ("227 contactos
-// en 65 cuentas"), a blank row and the header row. The tab itself holds 227 contact rows; the 47
-// contacts without email across all campaigns live in the separate 'Sin correo (log)' tab. The
-// pipeline additionally lost contacts by (a) dropping every contact whose account row was
-// rejected at account level (missing AM owner -> no opportunity -> no scope), (b) stopping
-// contacts of CLOSED / SUPPRESSED / OWNER REQUIRED accounts, (c) evaluating the competing-campaign
-// frequency gate across the whole account, and (d) reading stale rows of older captures.
-var CAMPANA_A_EXPECTED_SOURCE_CONTACTS_ = 231;
-var CAMPANA_A_EXPECTED_SOURCE_CONTACTS_PROPERTY_ = 'CAMPANA_A_EXPECTED_SOURCE_CONTACTS';
-function v6AuraCampanaAExpectedSourceContacts_() {
-  var raw = Number(PropertiesService.getScriptProperties().getProperty(CAMPANA_A_EXPECTED_SOURCE_CONTACTS_PROPERTY_));
-  return raw > 0 && Math.floor(raw) === raw ? raw : CAMPANA_A_EXPECTED_SOURCE_CONTACTS_;
-}
+// Contacts were also lost downstream by (a) dropping every contact whose account row was rejected
+// at account level (missing AM owner -> no opportunity -> no scope), (b) stopping contacts of
+// CLOSED / SUPPRESSED / OWNER REQUIRED accounts, (c) evaluating the competing-campaign frequency
+// gate across the whole account, and (d) reading stale rows of older captures.
+//
 // MKT_AURA_CAMPANA_A_SOURCE_ROWS is keyed by sourceRow and never cleared, so a shorter new capture
 // would otherwise leave stale rows of an older, longer one behind. Only the most recent capture
 // (one shared capturedAt stamp per ingest) is the current source.
@@ -641,13 +632,32 @@ function v6AuraCampanaALatestSourceRows_(rows) {
   var latest = all.reduce(function (m, r) { var t = v6AuraEmailText_(r.capturedAt); return t > m ? t : m; }, '');
   return all.filter(function (r) { return v6AuraEmailText_(r.capturedAt) === latest; });
 }
+// Every campaign data row (account, contact and/or email present) of the latest capture.
 function v6AuraCampanaASourceContactRows_(rows) {
-  return v6AuraCampanaALatestSourceRows_(rows).filter(function (r) { return v6AuraEmailText_(r.email) || v6AuraEmailText_(r.contactName); });
+  return v6AuraCampanaALatestSourceRows_(rows).filter(function (r) {
+    return v6AuraEmailText_(r.accountName) || v6AuraEmailText_(r.contactName) || v6AuraEmailText_(r.email);
+  });
 }
-function v6AuraCampanaASourceGate_(sourceContactRows) {
-  var expected = v6AuraCampanaAExpectedSourceContacts_();
-  var actual = (sourceContactRows || v6AuraCampanaASourceContactRows_()).length;
-  return { ok: actual === expected, status: actual === expected ? 'SOURCE_OK' : 'SOURCE_NOT_' + expected, expected: expected, actual: actual };
+function v6AuraCampanaASourceStats_(dataRows) {
+  var rows = dataRows || v6AuraCampanaASourceContactRows_();
+  var contactRows = rows.filter(function (r) { return v6AuraEmailText_(r.contactName); }).length;
+  var emailRows = rows.filter(function (r) { return v6AuraEmailText_(r.email); }).length;
+  return {
+    SOURCE_DATA_ROWS: rows.length, SOURCE_CONTACT_ROWS: contactRows, SOURCE_EMAIL_ROWS: emailRows,
+    UNSENDABLE_SOURCE_ROWS: rows.length - emailRows,
+    missingContactEmail: rows.filter(function (r) { return !v6AuraEmailText_(r.email); }).map(function (r) {
+      return { sourceRow: r.sourceRow, accountName: v6AuraEmailText_(r.accountName), reason: 'SOURCE_MISSING_CONTACT_EMAIL' };
+    })
+  };
+}
+// Structural gate: a source exists, and every data row names its account (the join key for
+// contact-level governance). No count expectation of any kind.
+function v6AuraCampanaASourceGate_(dataRows) {
+  var rows = dataRows || v6AuraCampanaASourceContactRows_();
+  var stats = v6AuraCampanaASourceStats_(rows);
+  var withoutAccount = rows.filter(function (r) { return !v6AuraEmailText_(r.accountName); }).length;
+  var status = !rows.length ? 'SOURCE_EMPTY' : withoutAccount ? 'SOURCE_STRUCTURE_INVALID' : !stats.SOURCE_EMAIL_ROWS ? 'SOURCE_NO_EMAILS' : 'SOURCE_OK';
+  return Object.assign({ ok: status === 'SOURCE_OK', status: status, actual: rows.length, rowsWithoutAccount: withoutAccount }, stats);
 }
 
 // Account resolution for EVERY source contact, not only for accounts whose row produced an
@@ -741,6 +751,9 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
     var accountId = v6AuraCampanaASourceAccountId_(r.accountName, accountRealIdByName, accounts);
     var email = v6AuraEmailText_(r.email).toLowerCase();
     var key = accountId + '|' + email;
+    // Every DISTINCT valid email is one independent recipient: a repeated email is a duplicate
+    // regardless of account; distinct emails of the same account/company/domain never collapse.
+    var seenKey = email;
     var matched = email ? contactsSecureByAccountAndEmail[key] : null;
     if (accountId) sourceAccountIds[accountId] = true;
     var cand = {
@@ -752,14 +765,13 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
       doNotContact: matched ? v6AuraCampanaABool_(matched.doNotContact || matched.dnc) : false,
       emailStatus: matched ? v6AuraEmailText_(matched.emailStatus) : '',
       recipientSource: matched ? 'MERGED' : 'CAMPANA_A_SOURCE',
-      duplicateOf: email && seen[key] ? seen[key] : ''
+      duplicateOf: email && seen[seenKey] ? seen[seenKey] : ''
     };
-    if (email && !seen[key]) seen[key] = v6AuraEmailText_(r.sourceRow) || cand.contactId;
+    if (email && !seen[seenKey]) seen[seenKey] = v6AuraEmailText_(r.sourceRow) || cand.contactId;
     return cand;
   });
   var contactsSecureNotInSource = allContacts.filter(function (c) {
-    var k = v6AuraEmailText_(c.accountId) + '|' + v6AuraEmailText_(c.email).toLowerCase();
-    return sourceAccountIds[v6AuraEmailText_(c.accountId)] && !seen[k];
+    return sourceAccountIds[v6AuraEmailText_(c.accountId)] && !seen[v6AuraEmailText_(c.email).toLowerCase()];
   }).length;
 
   var exclusions = v6Rows_('MKT_EXCLUSIONS');
@@ -770,9 +782,9 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
     var reason = 'CLEAR';
     var status = v6AuraEmailText_(cand.emailStatus).toUpperCase();
     if (cand.duplicateOf) reason = 'DUPLICATE_SOURCE_CONTACT';
+    else if (!cand.email) reason = 'SOURCE_MISSING_CONTACT_EMAIL';
     else if (!cand.accountId) reason = 'SOURCE_ACCOUNT_MISSING';
     else if (cand.doNotContact) reason = 'DO_NOT_CONTACT';
-    else if (!cand.email) reason = 'EMAIL_MISSING';
     else if (!v6AuraEmailValid_(cand.email) || status === 'INVALID') reason = 'EMAIL_INVALID';
     else if (CAMPANA_A_HARD_BOUNCE_STATUSES_.indexOf(status) >= 0) reason = 'HARD_BOUNCE';
     else if (CAMPANA_A_NON_SENDABLE_STATUSES_.indexOf(status) >= 0) reason = 'EMAIL_NON_SENDABLE';
@@ -791,7 +803,7 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
   return {
     eligible: eligible, excluded: excluded, candidates: candidates,
     sourceContactsWithEmail: sourceRows.filter(function (r) { return v6AuraEmailText_(r.email); }).length,
-    sourceContacts: sourceRows.length, sourceGate: gate, sourceAccountIds: Object.keys(sourceAccountIds),
+    sourceContacts: sourceRows.length, sourceStats: v6AuraCampanaASourceStats_(sourceRows), sourceGate: gate, sourceAccountIds: Object.keys(sourceAccountIds),
     contactsSecureNotInSource: contactsSecureNotInSource
   };
 }
@@ -877,13 +889,14 @@ function v6AuraCampanaABuildQueueLocked_() {
   result.candidates = resolved.candidates.length;
   result.sourceContacts = resolved.sourceContacts;
   result.sourceContactsWithEmail = resolved.sourceContactsWithEmail;
+  result.sourceStats = resolved.sourceStats;
   result.contactsSecureNotInSource = resolved.contactsSecureNotInSource;
-  // Fail closed: the authoritative source must yield exactly the Marketing-confirmed contact
-  // count before anything is queued. Never padded, never partially built.
+  // Fail closed on a structurally invalid source (empty, rows without account, no emails). Counts
+  // are derived from the data rows; rows without email are reported, never fabricated.
   if (!resolved.sourceGate.ok) {
     result.status = resolved.sourceGate.status;
     profile.ELIGIBILITY_MS += Date.now() - tElig0;
-    v6AuraCampanaALog_('ELIGIBILITY_END (' + resolved.sourceGate.status + ': expected ' + resolved.sourceGate.expected + ', found ' + resolved.sourceGate.actual + ')');
+    v6AuraCampanaALog_('ELIGIBILITY_END (' + resolved.sourceGate.status + ': ' + resolved.sourceGate.actual + ' data rows, ' + resolved.sourceGate.rowsWithoutAccount + ' without account)');
     result.profile = profile;
     return result;
   }
@@ -1501,7 +1514,7 @@ function v6AuraCampanaARegenerateDryRun_() {
   profile.TOTAL_MS = Date.now() - tTotal0;
   var result = {
     runId: runId,
-    status: audit.sourceStatus === 'SOURCE_EMPTY_OR_NOT_FOUND' ? 'SOURCE_EMPTY_OR_NOT_FOUND' : /^SOURCE_NOT_/.test(String(build.status)) ? build.status : (build.status === 'CHECKPOINTED_TIME_BUDGET_EXCEEDED' ? 'CHECKPOINTED_TIME_BUDGET_EXCEEDED' : 'REGENERATE_COMPLETE'),
+    status: audit.sourceStatus === 'SOURCE_EMPTY_OR_NOT_FOUND' ? 'SOURCE_EMPTY_OR_NOT_FOUND' : /^SOURCE_(EMPTY|STRUCTURE_INVALID|NO_EMAILS)$/.test(String(build.status)) ? build.status : (build.status === 'CHECKPOINTED_TIME_BUDGET_EXCEEDED' ? 'CHECKPOINTED_TIME_BUDGET_EXCEEDED' : 'REGENERATE_COMPLETE'),
     sendMode: v6AuraSendMode_(), triggerStatus: triggerStatus, ingest: ingest, gmailReprocess: gmailReprocess, refreshOpportunities: refreshOpportunities, build: build, preflight: preflight, dispatch: dispatch, audit: audit,
     profile: profile
   };

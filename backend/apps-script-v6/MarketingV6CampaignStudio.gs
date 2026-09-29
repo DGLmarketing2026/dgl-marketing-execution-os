@@ -54,7 +54,7 @@ function v6CampaignStudioAudience_(campaign) {
   var counts={ES:0,EN:0,PT:0},unique={};
   resolved.eligible.forEach(function(r){var l=v6AuraCampanaAPreferredLanguage_(byContact[r.contactId]||{},byAccount[r.accountId]||{},r.rowCountry||countries[r.accountId]||'').language;counts[l]++;unique[r.accountId]=true;});
   var gate=resolved.sourceGate||{ok:true,status:'SOURCE_OK'};
-  return {audienceResolved:gate.ok&&resolved.eligible.length>0,sourceStatus:gate.status,sourceContacts:gate.actual,expectedSourceContacts:gate.expected,executionUnit:'CONTACT_EMAIL',eligibleContacts:resolved.eligible.length,eligibleAccounts:Object.keys(unique).length,excludedContacts:resolved.excluded.length,languageCounts:counts,requiredLanguages:['ES','EN','PT'].filter(function(l){return counts[l]>0;})};
+  return {audienceResolved:gate.ok&&resolved.eligible.length>0,sourceStatus:gate.status,sourceContacts:gate.actual,sourceDataRows:gate.SOURCE_DATA_ROWS,sourceContactRows:gate.SOURCE_CONTACT_ROWS,sourceEmailRows:gate.SOURCE_EMAIL_ROWS,unsendableSourceRows:gate.UNSENDABLE_SOURCE_ROWS,executionUnit:'CONTACT_EMAIL',eligibleContacts:resolved.eligible.length,eligibleAccounts:Object.keys(unique).length,excludedContacts:resolved.excluded.length,languageCounts:counts,requiredLanguages:['ES','EN','PT'].filter(function(l){return counts[l]>0;})};
 }
 function v6CampaignStudioVariantValid_(r) {
   if(r&&r.campaignId==='CMP-CAMPANA-A-HA-PRIORITARIA'&&(String(r.status)!=='APPROVED'||r.logoUrl!==V6_STUDIO_LOGO_||String(r.htmlBody).indexOf('src="'+V6_STUDIO_LOGO_+'"')<0||/stay close|staying close|seguimos cerca|relationship continuity|multiservicio|\{\{service\}\}/i.test([r.subject,r.preheader,r.htmlBody,r.textBody].join(' '))))return false;

@@ -105,11 +105,10 @@ function makeContext(opts) {
     });
     return { created: created, updated: updated };
   };
-  // Legacy fixtures (written before the contact-level 231-source rule) model Campaign A's
+  // Legacy fixtures (written before the contact-level source rule) model Campaign A's
   // contacts in MKT_CONTACTS_SECURE only. Unless a test seeds MKT_AURA_CAMPANA_A_SOURCE_ROWS
   // itself, those active contacts of Campaign A accounts ARE the explicit source (derived here,
-  // one row per contact), and the expected source count is the fixture's own size unless the test
-  // sets CAMPANA_A_EXPECTED_SOURCE_CONTACTS explicitly. Dedicated source-gate tests live in
+  // one row per contact). Dedicated source-structure tests live in
   // tests/aura-campaign-execution-final.test.js.
   var rawRows = ctx.v6Rows_;
   function derivedSourceRows() {
@@ -129,17 +128,6 @@ function makeContext(opts) {
     if (name === 'MKT_AURA_CAMPANA_A_SOURCE_ROWS' && !tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS) { bump(callCounts.v6Rows_, name); return derivedSourceRows(); }
     return rawRows(name);
   };
-  var realProps = ctx.PropertiesService.getScriptProperties();
-  ctx.PropertiesService = { getScriptProperties: function () { return {
-    getProperty: function (k) {
-      var v = realProps.getProperty(k);
-      if (k !== 'CAMPANA_A_EXPECTED_SOURCE_CONTACTS' || v !== null) return v;
-      var n = ctx.v6AuraCampanaASourceContactRows_().length;
-      return n ? String(n) : null;
-    },
-    setProperty: function (k, v) { realProps.setProperty(k, v); return this; },
-    deleteProperty: function (k) { realProps.deleteProperty(k); return this; }
-  }; } };
   ctx.v6EnsureContactRecipientSchema_ = function () { return { status: 'SCHEMA READY' }; };
   ctx.v6AuraCampanaAEnsureRunSummarySheet_ = function () { return { status: 'ALREADY_EXISTS' }; };
   // Same stub pattern as v6EnsureContactRecipientSchema_ above -- MarketingV6AuraCreativeApproval.gs's

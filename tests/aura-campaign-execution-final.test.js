@@ -1,6 +1,6 @@
 // AURA campaign execution (final) regression suite -- 2026-09-29.
-// Campaign A: execution unit = CONTACT / EMAIL, authoritative source = 231 contacts (fail closed
-// SOURCE_NOT_231), account-level states never suppress an explicit source contact, frequency is
+// Campaign A: execution unit = CONTACT / EMAIL, source counts derived dynamically from the data rows
+// (structural validation, no hardcoded count), account-level states never suppress an explicit source contact, frequency is
 // contact-level, duplicate audit is family-aware, the premium V5 visual systems render the governed
 // V6 creative, and ONE final governed HTML flows preview -> approval -> test draft -> DRY_RUN ->
 // dispatch. All Gmail/Sheets services are fakes: zero real emails.
@@ -24,8 +24,10 @@ function loadRealGovernance(ctx) {
   vm.runInContext(read('MarketingV6RecipientResolution'), ctx);
   Object.assign(ctx, keep);
 }
-// 231 real-shaped source contacts: 4 contacts per company (same domain), every 10th account has
-// no AM owner (rejected at account level by the report parser -> no opportunity row).
+// Real-shaped source mirroring the verified live tab: 224 contact rows (contact + email; 4
+// contacts per company on the same domain, every 10th account has no AM owner and is rejected at
+// account level by the report parser) plus 3 account-only rows with no contact and no email.
+const ACCOUNT_ONLY = ['Mack Farms', 'North American Freight Forwarding Inc.', 'Ruhe Logistic SA de CV MExico'];
 function sourceFixture(n) {
   const rows = [], accounts = [], opps = [];
   for (let k = 0; k < n; k++) {
@@ -36,17 +38,22 @@ function sourceFixture(n) {
     }
     rows.push({ sourceRow: 5 + k, accountName: name, amOwner: acc % 10 === 0 ? '' : 'Owner ' + acc, contactName: 'Contact ' + k, email: 'c' + k + '@acct' + acc + '.example', country: COUNTRIES[k % 3], capturedAt: '2026-09-29T10:00:00.000Z' });
   }
+  ACCOUNT_ONLY.forEach((name, i) => {
+    accounts.push({ accountId: 'ACC-ONLY-' + i, accountName: name });
+    opps.push(harness.gmailOpp('ACC-ONLY-' + i, name, 'Owner'));
+    rows.push({ sourceRow: 5 + n + i, accountName: name, amOwner: 'Owner', contactName: '', email: '', country: 'Mexico', capturedAt: '2026-09-29T10:00:00.000Z' });
+  });
   return { rows, accounts, opps };
 }
-// Contact-level hard safety and account-level states, all inside the 231 source contacts.
+// Contact-level hard safety and account-level states, all inside the source contacts.
 function campaignATables(n) {
-  const f = sourceFixture(n === undefined ? 231 : n);
+  const f = sourceFixture(n === undefined ? 224 : n);
   const cs = (k, extra) => Object.assign({ contactId: 'CS-' + k, accountId: 'ACC-A' + Math.floor(k / 4), firstName: 'Contact' + k, email: f.rows[k].email }, extra);
-  f.rows[3].email = 'not-an-email';
+  if (n !== 0) f.rows[3].email = 'not-an-email';
   return {
     MKT_AURA_CAMPANA_A_SOURCE_ROWS: f.rows.concat([{ sourceRow: 999, accountName: 'Stale Co', contactName: 'Old', email: 'old@stale.example', capturedAt: '2026-09-01T00:00:00.000Z' }]),
     MKT_ACCOUNTS: f.accounts, MKT_AURA_GMAIL_OPPORTUNITIES: f.opps,
-    MKT_CONTACTS_SECURE: [cs(0, { doNotContact: true }), cs(1, { emailStatus: 'BOUNCED' }), cs(2, { emailStatus: 'INVALID' }), cs(4), cs(8), cs(9)],
+    MKT_CONTACTS_SECURE: n === 0 ? [] : [cs(0, { doNotContact: true }), cs(1, { emailStatus: 'BOUNCED' }), cs(2, { emailStatus: 'INVALID' }), cs(4), cs(8), cs(9)],
     MKT_EXCLUSIONS: [
       { accountId: 'ACC-A1', contactId: 'CS-4', reasonCode: 'CONTACT_OPT_OUT', active: true },
       { accountId: 'ACC-A3', contactId: '', reasonCode: 'SUPPRESSED', active: true },
@@ -64,38 +71,60 @@ function campaignATables(n) {
 function campaignAContext(tables, opts) {
   const props = Object.assign({ AURA_SEND_MODE: 'DRY_RUN' }, (opts || {}).props);
   const ctx = harness.makeContext(Object.assign({ tables, props }, opts));
-  ctx.PropertiesService = harness.fakePropertiesService(props); // no fixture-size adapter: real 231 default
   loadRealGovernance(ctx);
   return ctx;
 }
 const jobs = tables => (tables.MKT_EMAIL_QUEUE || []).filter(j => j.playbookId === 'Activation');
+const BUILT = 218; // 224 email rows - DNC - hard bounce - 2 invalid - contact opt-out - contact frequency
 
 // ---- Source & contact-level execution -------------------------------------------------------
-test('source = 231 contact records and 231 candidates before true hard exclusions', () => {
+test('source counts are derived dynamically: 227 data / 224 contact / 224 email / 3 unsendable', () => {
   const tables = campaignATables(), ctx = campaignAContext(tables);
-  assert.equal(ctx.v6AuraCampanaAExpectedSourceContacts_(), 231);
+  assert.equal(typeof ctx.v6AuraCampanaAExpectedSourceContacts_, 'undefined', 'no hardcoded expected contact count');
+  assert.equal(typeof ctx.CAMPANA_A_EXPECTED_SOURCE_CONTACTS_, 'undefined');
   const gate = ctx.v6AuraCampanaASourceGate_();
-  assert.deepEqual([gate.ok, gate.actual, gate.status], [true, 231, 'SOURCE_OK'], 'stale rows of an older capture never count');
+  assert.deepEqual([gate.ok, gate.status, gate.SOURCE_DATA_ROWS, gate.SOURCE_CONTACT_ROWS, gate.SOURCE_EMAIL_ROWS, gate.UNSENDABLE_SOURCE_ROWS], [true, 'SOURCE_OK', 227, 224, 224, 3], 'stale rows of an older capture never count');
+  assert.deepEqual(gate.missingContactEmail.map(r => r.accountName), ACCOUNT_ONLY);
+  assert(gate.missingContactEmail.every(r => r.reason === 'SOURCE_MISSING_CONTACT_EMAIL'));
   const build = ctx.v6AuraCampanaABuildQueue_();
   assert.equal(build.status, 'QUEUE_BUILD_COMPLETE');
-  assert.equal(build.sourceContacts, 231);
-  assert.equal(build.candidates, 231, 'every source contact is exactly one candidate');
-  assert.equal(build.recipients + Object.values(build.excludedByReason).reduce((a, b) => a + b, 0), 231);
-  assert.deepEqual(JSON.parse(JSON.stringify(build.excludedByReason)), { DO_NOT_CONTACT: 1, HARD_BOUNCE: 1, EMAIL_INVALID: 2, EXCLUSION_CONTACT_OPT_OUT: 1, FREQUENCY_HIGHER_PRIORITY: 1 });
-  assert.equal(build.built, 225);
-  assert.equal(tables.MKT_AUDIENCES.length, 231, 'one audience record per source contact');
+  assert.deepEqual([build.sourceStats.SOURCE_DATA_ROWS, build.sourceStats.SOURCE_CONTACT_ROWS, build.sourceStats.SOURCE_EMAIL_ROWS, build.sourceStats.UNSENDABLE_SOURCE_ROWS], [227, 224, 224, 3]);
+  assert.equal(build.candidates, 227, 'every source data row is exactly one candidate');
+  assert.equal(build.recipients + Object.values(build.excludedByReason).reduce((a, b) => a + b, 0), 227);
+  assert.deepEqual(JSON.parse(JSON.stringify(build.excludedByReason)), { SOURCE_MISSING_CONTACT_EMAIL: 3, DO_NOT_CONTACT: 1, HARD_BOUNCE: 1, EMAIL_INVALID: 2, EXCLUSION_CONTACT_OPT_OUT: 1, FREQUENCY_HIGHER_PRIORITY: 1 });
+  assert.equal(build.built, BUILT);
+  assert.equal(tables.MKT_AUDIENCES.length, 227, 'one audience record per source data row');
+  assert.deepEqual(tables.MKT_AUDIENCES.filter(a => a.exclusionReason === 'SOURCE_MISSING_CONTACT_EMAIL').map(a => a.accountId).sort(), ['ACC-ONLY-0', 'ACC-ONLY-1', 'ACC-ONLY-2']);
+  assert(!jobs(tables).some(j => /^ACC-ONLY-/.test(j.accountId)), 'no email is ever fabricated');
 });
 
-test('source != 231 fails closed with SOURCE_NOT_231 and never pads or queues', () => {
-  const tables = campaignATables(227), ctx = campaignAContext(tables);
+test('source validation is structural, never a hardcoded count', () => {
+  const small = campaignATables(40), ctxSmall = campaignAContext(small);
+  const b = ctxSmall.v6AuraCampanaABuildQueue_();
+  assert.equal(b.status, 'QUEUE_BUILD_COMPLETE', 'any row count is valid when the structure is valid');
+  assert.deepEqual([b.sourceStats.SOURCE_DATA_ROWS, b.sourceStats.SOURCE_EMAIL_ROWS, b.sourceStats.UNSENDABLE_SOURCE_ROWS], [43, 40, 3]);
+  const broken = campaignATables();
+  broken.MKT_AURA_CAMPANA_A_SOURCE_ROWS[10].accountName = '';
+  const ctxBroken = campaignAContext(broken);
+  const bb = ctxBroken.v6AuraCampanaABuildQueue_();
+  assert.equal(bb.status, 'SOURCE_STRUCTURE_INVALID');
+  assert.equal((broken.MKT_EMAIL_QUEUE || []).length, 0);
+  assert.equal(ctxBroken.v6AuraCampanaADispatchBatch_().status, 'SOURCE_STRUCTURE_INVALID');
+  assert.equal(ctxBroken.v6AuraCampanaAAudit_().clean, false);
+  assert.equal(campaignAContext(campaignATables(0)).v6AuraCampanaASourceGate_().status, 'SOURCE_NO_EMAILS');
+  assert.equal(campaignAContext({ MKT_AURA_CAMPANA_A_SOURCE_ROWS: [] }).v6AuraCampanaASourceGate_().status, 'SOURCE_EMPTY');
+});
+
+test('every distinct valid email is one independent recipient', () => {
+  const tables = campaignATables(), ctx = campaignAContext(tables);
+  // Same email listed under two different accounts: one recipient, the repeat is reported.
+  tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS[50].email = tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS[60].email;
   const build = ctx.v6AuraCampanaABuildQueue_();
-  assert.equal(build.status, 'SOURCE_NOT_231');
-  assert.deepEqual([build.sourceGate.expected, build.sourceGate.actual], [231, 227]);
-  assert.equal(build.built, 0);
-  assert.equal((tables.MKT_EMAIL_QUEUE || []).length, 0);
-  assert.equal((tables.MKT_AUDIENCES || []).length, 0);
-  assert.equal(ctx.v6AuraCampanaADispatchBatch_().status, 'SOURCE_NOT_231');
-  assert.equal(ctx.v6AuraCampanaAAudit_().clean, false);
+  assert.equal(build.candidates, 227);
+  assert.equal(build.excludedByReason.DUPLICATE_SOURCE_CONTACT, 1);
+  const emails = jobs(tables).map(j => j.email);
+  assert.equal(new Set(emails).size, emails.length);
+  assert.equal(emails.length, BUILT - 1);
 });
 
 test('same-account contacts stay independent recipients (no collapse by account/domain/company)', () => {
@@ -182,9 +211,9 @@ test('duplicate source rows for the same contact are excluded, never double-queu
   const tables = campaignATables(), ctx = campaignAContext(tables);
   tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS[20].email = tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS[21].email;
   const build = ctx.v6AuraCampanaABuildQueue_();
-  assert.equal(build.candidates, 231);
+  assert.equal(build.candidates, 227);
   assert.equal(build.excludedByReason.DUPLICATE_SOURCE_CONTACT, 1);
-  assert.equal(tables.MKT_AUDIENCES.length, 231);
+  assert.equal(tables.MKT_AUDIENCES.length, 227);
 });
 
 // ---- Duplicate audit / history --------------------------------------------------------------
@@ -228,11 +257,11 @@ test('historical 109 SENT preserved byte-for-byte and repeated DRY_RUN build is 
   const ctx = campaignAContext(tables);
   const run = () => { const b = ctx.v6AuraCampanaABuildQueue_(); ctx.v6AuraCampanaAPreflight_(); ctx.v6AuraCampanaADispatchBatch_(); return b; };
   const first = run();
-  assert.equal(first.built, 225);
+  assert.equal(first.built, BUILT);
   const afterFirst = JSON.stringify(tables.MKT_EMAIL_QUEUE);
   const second = run();
   assert.equal(second.built, 0);
-  assert.equal(second.skippedExisting, 225);
+  assert.equal(second.skippedExisting, BUILT);
   assert.equal(JSON.stringify(tables.MKT_EMAIL_QUEUE), afterFirst, 'a repeated DRY_RUN changes nothing');
   assert.equal(JSON.stringify(tables.MKT_EMAIL_QUEUE.slice(0, 109)), history, 'historical 109 SENT rows unchanged');
   assert.equal(tables.MKT_EMAIL_QUEUE.filter(j => j.status === 'SENT').length, 109);
@@ -330,7 +359,7 @@ test('automatic language per contact (EN / ES / PT)', () => {
     assert.equal(j.preferredLanguage, { Brazil: 'PT', Mexico: 'ES', 'United States': 'EN' }[row.country]);
     assert.equal(j.languageSource, 'CAMPANA_A_TAB_COUNTRY');
   });
-  assert.equal(build.byLanguage.ES + build.byLanguage.EN + build.byLanguage.PT, 225);
+  assert.equal(build.byLanguage.ES + build.byLanguage.EN + build.byLanguage.PT, BUILT);
   assert(build.byLanguage.ES > 0 && build.byLanguage.EN > 0 && build.byLanguage.PT > 0);
 });
 
@@ -355,7 +384,7 @@ test('PREVIEW = GOVERNED = TEST DRAFT = DRY_RUN = DISPATCH HTML (checksums fail 
   }
   ctx.v6AuraCampanaABuildQueue_();
   const built = jobs(tables);
-  assert.equal(built.length, 225);
+  assert.equal(built.length, BUILT);
   for (const j of built) {
     const creative = tables.MKT_CAMPAIGN_CREATIVES.find(c => c.creativeId === j.creativeId);
     assert.equal(creative.htmlBody, preview[j.preferredLanguage]);
