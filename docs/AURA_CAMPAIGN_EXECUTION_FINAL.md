@@ -28,10 +28,10 @@ Counts are derived from the latest capture on every run:
 | `SOURCE_CONTACT_ROWS` | 224 |
 | `SOURCE_EMAIL_ROWS` | 224 |
 | `UNSENDABLE_SOURCE_ROWS` | 3 |
-| `UNIQUE_EMAILS` | derived on each run (not verified against the live file) |
-| `EXACT_DUPLICATE_EMAIL_ROWS` | derived on each run (not verified against the live file) |
+| `UNIQUE_EMAILS` | 221 |
+| `EXACT_DUPLICATE_EMAIL_ROWS` | 3 |
 
-The read-only editor function `RUN_AURA_CAMPANA_A_SOURCE_STATS` computes all of these from the live tab, with no writes and no sends.
+All values were verified against the live source on 2026-09-29 and are derived on every run, never hardcoded. The 3 exact-duplicate extra rows repeat 3 mailboxes (kept out of the repository), so there are 221 unique email candidates before other contact-level exclusions. The read-only editor function `RUN_AURA_CAMPANA_A_SOURCE_STATS` computes all of these from the live tab, with no writes and no sends.
 
 The 3 unsendable rows are account-only rows with no contact and no email (Mack Farms; North American Freight Forwarding Inc.; Ruhe Logistic SA de CV MExico). They stay candidates, are reported as `SOURCE_MISSING_CONTACT_EMAIL`, and are never fabricated or silently dropped. They never block the run: every valid row continues.
 
@@ -107,7 +107,7 @@ The 109 historical SENT rows are never rewritten.
 
 ## Evidence
 
-- `tests/aura-campaign-execution-final.test.js` contains 21 regression cases.
+- `tests/aura-campaign-execution-final.test.js` contains 22 regression cases.
 - Full suite: 59/59 test files pass.
 - Browser visual QA ran against the real `index.html` with a fixture backend adapter. It covered Activation, Retention and Reactivation, on desktop (1440×900) and mobile (375×812):
   - The premium editorial system rendered with the hero photo, in ES, EN and PT.

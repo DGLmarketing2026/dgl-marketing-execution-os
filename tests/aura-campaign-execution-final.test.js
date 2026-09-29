@@ -78,7 +78,7 @@ const jobs = tables => (tables.MKT_EMAIL_QUEUE || []).filter(j => j.playbookId =
 const BUILT = 218; // 224 email rows - DNC - hard bounce - 2 invalid - contact opt-out - contact frequency
 
 // ---- Source & contact-level execution -------------------------------------------------------
-test('real source facts: 227 data / 224 contact / 224 email / 3 unsendable / 224 unique emails, no whole-run failure', () => {
+test('structural fixture (no duplicates): 227 data / 224 contact / 224 email / 3 unsendable, no whole-run failure', () => {
   const tables = campaignATables(), ctx = campaignAContext(tables);
   assert.equal(typeof ctx.v6AuraCampanaAExpectedSourceContacts_, 'undefined', 'no hardcoded expected contact count');
   assert.equal(typeof ctx.CAMPANA_A_EXPECTED_SOURCE_CONTACTS_, 'undefined');
@@ -155,17 +155,56 @@ test('exact normalized email is the only dedupe: repeated mailbox sends once, di
   assert.equal(jobs(tables).filter(j => j.accountId === 'ACC-A20').length, 4);
 });
 
+// Verified live source facts (2026-09-29): 227 data rows, 224 contact/email rows, 221 unique
+// emails (3 exact-duplicate extra rows), 3 account-only rows. The real mailboxes are kept out of
+// the repository (no PII); the fixture reproduces the same shape: one repeat inside an account,
+// one repeat across two accounts (case/whitespace variant), one more repeat inside an account.
+function verifiedSourceTables() {
+  const tables = campaignATables();
+  const rows = tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS;
+  rows[101].email = rows[100].email;
+  rows[150].email = ' ' + rows[20].email.toUpperCase();
+  rows[201].email = rows[200].email;
+  return tables;
+}
+const VERIFIED_BUILT = 215; // 221 unique emails - DNC - hard bounce - 2 invalid - contact opt-out - contact frequency
+test('verified live source facts: 227 / 224 / 224 / 221 unique / 3 duplicate extra / 3 unsendable, no whole-run failure', () => {
+  const tables = verifiedSourceTables(), ctx = campaignAContext(tables);
+  const gate = ctx.v6AuraCampanaASourceGate_();
+  assert.deepEqual([gate.ok, gate.SOURCE_DATA_ROWS, gate.SOURCE_CONTACT_ROWS, gate.SOURCE_EMAIL_ROWS, gate.UNIQUE_EMAILS, gate.EXACT_DUPLICATE_EMAIL_ROWS, gate.UNSENDABLE_SOURCE_ROWS], [true, 227, 224, 224, 221, 3, 3]);
+  assert.deepEqual(gate.missingContactEmail.map(r => r.accountName), ACCOUNT_ONLY);
+  const build = ctx.v6AuraCampanaABuildQueue_();
+  assert.equal(build.status, 'QUEUE_BUILD_COMPLETE', 'the 3 account-only rows never block the campaign');
+  assert.equal(build.candidates, 227);
+  assert.equal(build.excludedByReason.SOURCE_MISSING_CONTACT_EMAIL, 3);
+  assert.equal(build.excludedByReason.DUPLICATE_SOURCE_EMAIL, 3);
+  const uniqueEmailCandidates = build.candidates - build.excludedByReason.SOURCE_MISSING_CONTACT_EMAIL - build.excludedByReason.DUPLICATE_SOURCE_EMAIL;
+  assert.equal(uniqueEmailCandidates, 221, 'unique email candidates before other contact-level exclusions');
+  assert.equal(build.built, VERIFIED_BUILT);
+  const emails = jobs(tables).map(j => j.email);
+  assert.equal(new Set(emails).size, emails.length, 'each mailbox receives once');
+  // Distinct emails under one account stay independent: ACC-A25 lost only its repeated row.
+  assert.equal(jobs(tables).filter(j => j.accountId === 'ACC-A25').length, 3);
+  assert.equal(jobs(tables).filter(j => j.accountId === 'ACC-A20').length, 4);
+  assert.equal(typeof ctx.v6AuraCampanaADuplicateEmailPolicy_, 'undefined', 'no duplicate-policy Script Property');
+  assert.equal(ctx.v6AuraCampanaADispatchBatch_().status, 'DISPATCH_COMPLETE');
+  assert.equal(jobs(tables).filter(j => j.status === 'DRY_RUN').length, VERIFIED_BUILT);
+  assert.equal(ctx.__sentEmails.length, 0);
+});
+
 test('read-only live source stats runner parses the real tab layout (231 physical rows)', () => {
   const header = ['Cuenta', 'Account Owner', 'Agente responsable (Sales Rep Actual)', 'Pais Billing', 'Pais Shipping', 'Contacto', 'Email', 'Posicion (Company position)', 'Titulo', 'Key Contact', 'Prioridad', 'Motivo campana'];
   const values = [['DGL Freight Broker -- Campana A'], ['14/09/2026 | 227 contactos en 65 cuentas'], [''], header];
   for (let k = 0; k < 224; k++) values.push(['Account ' + Math.floor(k / 4), 'Owner', 'Owner', 'United States', 'United States', 'Contact ' + k, 'c' + k + '@acct' + Math.floor(k / 4) + '.example', '', '', '', 'Normal', 'Campana A']);
+  // Same exact-duplicate shape as the verified source: 3 repeated mailboxes.
+  values[4 + 101][6] = values[4 + 100][6]; values[4 + 150][6] = values[4 + 20][6].toUpperCase(); values[4 + 201][6] = values[4 + 200][6];
   ACCOUNT_ONLY.forEach(name => values.push([name, 'Owner', 'Owner', '', '', '', '', '', '', '', 'Normal', 'Campana A']));
   const ctx = campaignAContext({}, { spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': values } } });
   const sheet = ctx.SpreadsheetApp.openById('x').getSheetByName('Campana A - HA prioritaria');
   sheet.getLastRow = () => values.length;
   ctx.SpreadsheetApp = { openById: () => ({ getSheetByName: () => sheet }) };
   const out = ctx.RUN_AURA_CAMPANA_A_SOURCE_STATS();
-  assert.deepEqual([out.physicalRows, out.SOURCE_DATA_ROWS, out.SOURCE_CONTACT_ROWS, out.SOURCE_EMAIL_ROWS, out.UNSENDABLE_SOURCE_ROWS, out.UNIQUE_EMAILS, out.EXACT_DUPLICATE_EMAIL_ROWS], [231, 227, 224, 224, 3, 224, 0]);
+  assert.deepEqual([out.physicalRows, out.SOURCE_DATA_ROWS, out.SOURCE_CONTACT_ROWS, out.SOURCE_EMAIL_ROWS, out.UNSENDABLE_SOURCE_ROWS, out.UNIQUE_EMAILS, out.EXACT_DUPLICATE_EMAIL_ROWS], [231, 227, 224, 224, 3, 221, 3]);
   assert.equal((ctx.__tables && ctx.__tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS || []).length, 0, 'read-only: nothing persisted');
 });
 
