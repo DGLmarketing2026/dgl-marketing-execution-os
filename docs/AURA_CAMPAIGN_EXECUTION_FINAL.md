@@ -28,7 +28,10 @@ Counts are derived from the latest capture on every run:
 | `SOURCE_CONTACT_ROWS` | 224 |
 | `SOURCE_EMAIL_ROWS` | 224 |
 | `UNSENDABLE_SOURCE_ROWS` | 3 |
-| `UNIQUE_EMAILS` | 224 |
+| `UNIQUE_EMAILS` | derived on each run (not verified against the live file) |
+| `EXACT_DUPLICATE_EMAIL_ROWS` | derived on each run (not verified against the live file) |
+
+The read-only editor function `RUN_AURA_CAMPANA_A_SOURCE_STATS` computes all of these from the live tab, with no writes and no sends.
 
 The 3 unsendable rows are account-only rows with no contact and no email (Mack Farms; North American Freight Forwarding Inc.; Ruhe Logistic SA de CV MExico). They stay candidates, are reported as `SOURCE_MISSING_CONTACT_EMAIL`, and are never fabricated or silently dropped. They never block the run: every valid row continues.
 
@@ -36,12 +39,7 @@ Validation is structural, with no expected count. An incomplete row is marked on
 
 There is one candidate per source data row, and distinct emails are never collapsed by account, company or domain.
 
-What happens when the same email address appears on more than one row is a separate recipient policy, set in the Script Property `CAMPANA_A_DUPLICATE_EMAIL_POLICY`:
-
-- `EXACT_EMAIL_ONCE` (default): one recipient per exact email address across the source.
-- `ONCE_PER_ACCOUNT_EMAIL`: one recipient per account and exact email, so the same address under two accounts gives two recipients.
-
-Repeated rows stay candidates and are reported as `DUPLICATE_SOURCE_EMAIL`.
+The only dedupe is the exact normalized email (trimmed, lower-cased): the same mailbox on several rows receives once, and the additional rows stay candidates, reported as `DUPLICATE_SOURCE_EMAIL`. This is fixed in code; no Script Property is involved.
 
 The pipeline also lost contacts in four ways, all now fixed:
 
@@ -109,7 +107,7 @@ The 109 historical SENT rows are never rewritten.
 
 ## Evidence
 
-- `tests/aura-campaign-execution-final.test.js` contains 20 regression cases.
+- `tests/aura-campaign-execution-final.test.js` contains 21 regression cases.
 - Full suite: 59/59 test files pass.
 - Browser visual QA ran against the real `index.html` with a fixture backend adapter. It covered Activation, Retention and Reactivation, on desktop (1440×900) and mobile (375×812):
   - The premium editorial system rendered with the hero photo, in ES, EN and PT.

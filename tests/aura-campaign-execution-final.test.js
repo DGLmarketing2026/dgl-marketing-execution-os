@@ -90,7 +90,7 @@ test('real source facts: 227 data / 224 contact / 224 email / 3 unsendable / 224
   const build = ctx.v6AuraCampanaABuildQueue_();
   assert.equal(build.status, 'QUEUE_BUILD_COMPLETE');
   assert.deepEqual([build.sourceStats.SOURCE_DATA_ROWS, build.sourceStats.SOURCE_CONTACT_ROWS, build.sourceStats.SOURCE_EMAIL_ROWS, build.sourceStats.UNSENDABLE_SOURCE_ROWS, build.sourceStats.UNIQUE_EMAILS], [227, 224, 224, 3, 224]);
-  assert.equal(build.duplicateEmailPolicy, 'EXACT_EMAIL_ONCE');
+  assert.equal(build.sourceStats.EXACT_DUPLICATE_EMAIL_ROWS, 0);
   assert.equal(build.candidates, 227, 'every source data row is exactly one candidate');
   assert.equal(build.recipients + Object.values(build.excludedByReason).reduce((a, b) => a + b, 0), 227);
   assert.deepEqual(JSON.parse(JSON.stringify(build.excludedByReason)), { SOURCE_MISSING_CONTACT_EMAIL: 3, DO_NOT_CONTACT: 1, HARD_BOUNCE: 1, EMAIL_INVALID: 2, EXCLUSION_CONTACT_OPT_OUT: 1, FREQUENCY_HIGHER_PRIORITY: 1 });
@@ -131,33 +131,42 @@ test('source validation is structural, never a hardcoded count', () => {
   assert.equal(campaignAContext({ MKT_AURA_CAMPANA_A_SOURCE_ROWS: [] }).v6AuraCampanaASourceGate_().status, 'SOURCE_EMPTY');
 });
 
-test('duplicate-email handling is an isolated, configurable recipient policy (not account dedupe)', () => {
-  // Default EXACT_EMAIL_ONCE: the same address listed under two accounts is one recipient; the
-  // repeated row stays a candidate, reported DUPLICATE_SOURCE_EMAIL.
+test('exact normalized email is the only dedupe: repeated mailbox sends once, distinct emails all receive', () => {
   const tables = campaignATables(), ctx = campaignAContext(tables);
-  tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS[50].email = tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS[60].email;
+  const rows = tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS;
+  // Same mailbox under two different accounts (case/whitespace differences are the same mailbox)
+  // and a repeat inside the same account.
+  rows[50].email = '  ' + rows[60].email.toUpperCase() + ' ';
+  rows[41].email = rows[40].email;
+  const stats = ctx.v6AuraCampanaASourceStats_();
+  assert.deepEqual([stats.SOURCE_EMAIL_ROWS, stats.UNIQUE_EMAILS, stats.EXACT_DUPLICATE_EMAIL_ROWS], [224, 222, 2]);
   const build = ctx.v6AuraCampanaABuildQueue_();
-  assert.equal(build.candidates, 227);
-  assert.equal(build.sourceStats.UNIQUE_EMAILS, 223);
-  assert.equal(build.excludedByReason.DUPLICATE_SOURCE_EMAIL, 1);
+  assert.equal(build.candidates, 227, 'repeated rows stay candidates');
+  assert.equal(build.excludedByReason.DUPLICATE_SOURCE_EMAIL, 2);
   const emails = jobs(tables).map(j => j.email);
-  assert.equal(new Set(emails).size, emails.length);
-  assert.equal(emails.length, BUILT - 1);
-  // ONCE_PER_ACCOUNT_EMAIL: the same address under two different accounts is two recipients.
-  const tables2 = campaignATables();
-  tables2.MKT_AURA_CAMPANA_A_SOURCE_ROWS[50].email = tables2.MKT_AURA_CAMPANA_A_SOURCE_ROWS[60].email;
-  const ctx2 = campaignAContext(tables2, { props: { CAMPANA_A_DUPLICATE_EMAIL_POLICY: 'ONCE_PER_ACCOUNT_EMAIL' } });
-  const build2 = ctx2.v6AuraCampanaABuildQueue_();
-  assert.equal(build2.duplicateEmailPolicy, 'ONCE_PER_ACCOUNT_EMAIL');
-  assert.equal(build2.excludedByReason.DUPLICATE_SOURCE_EMAIL, undefined);
-  assert.equal(build2.built, BUILT);
-  // Under either policy, the same address repeated within the SAME account is one recipient.
-  const tables3 = campaignATables();
-  tables3.MKT_AURA_CAMPANA_A_SOURCE_ROWS[41].email = tables3.MKT_AURA_CAMPANA_A_SOURCE_ROWS[40].email;
-  const build3 = campaignAContext(tables3, { props: { CAMPANA_A_DUPLICATE_EMAIL_POLICY: 'ONCE_PER_ACCOUNT_EMAIL' } }).v6AuraCampanaABuildQueue_();
-  assert.equal(build3.excludedByReason.DUPLICATE_SOURCE_EMAIL, 1);
+  assert.equal(new Set(emails).size, emails.length, 'each mailbox receives once');
+  assert.equal(emails.length, BUILT - 2);
+  // No configurable policy and no Script Property is involved.
+  assert.equal(typeof ctx.v6AuraCampanaADuplicateEmailPolicy_, 'undefined');
+  const withProp = campaignATables();
+  withProp.MKT_AURA_CAMPANA_A_SOURCE_ROWS[50].email = withProp.MKT_AURA_CAMPANA_A_SOURCE_ROWS[60].email;
+  assert.equal(campaignAContext(withProp, { props: { CAMPANA_A_DUPLICATE_EMAIL_POLICY: 'ONCE_PER_ACCOUNT_EMAIL' } }).v6AuraCampanaABuildQueue_().excludedByReason.DUPLICATE_SOURCE_EMAIL, 1);
   // Distinct emails of one company/domain are never collapsed.
-  assert.equal(jobs(tables2).filter(j => j.accountId === 'ACC-A20').length, 4);
+  assert.equal(jobs(tables).filter(j => j.accountId === 'ACC-A20').length, 4);
+});
+
+test('read-only live source stats runner parses the real tab layout (231 physical rows)', () => {
+  const header = ['Cuenta', 'Account Owner', 'Agente responsable (Sales Rep Actual)', 'Pais Billing', 'Pais Shipping', 'Contacto', 'Email', 'Posicion (Company position)', 'Titulo', 'Key Contact', 'Prioridad', 'Motivo campana'];
+  const values = [['DGL Freight Broker -- Campana A'], ['14/09/2026 | 227 contactos en 65 cuentas'], [''], header];
+  for (let k = 0; k < 224; k++) values.push(['Account ' + Math.floor(k / 4), 'Owner', 'Owner', 'United States', 'United States', 'Contact ' + k, 'c' + k + '@acct' + Math.floor(k / 4) + '.example', '', '', '', 'Normal', 'Campana A']);
+  ACCOUNT_ONLY.forEach(name => values.push([name, 'Owner', 'Owner', '', '', '', '', '', '', '', 'Normal', 'Campana A']));
+  const ctx = campaignAContext({}, { spreadsheetApp: { sheets: { 'Campana A - HA prioritaria': values } } });
+  const sheet = ctx.SpreadsheetApp.openById('x').getSheetByName('Campana A - HA prioritaria');
+  sheet.getLastRow = () => values.length;
+  ctx.SpreadsheetApp = { openById: () => ({ getSheetByName: () => sheet }) };
+  const out = ctx.RUN_AURA_CAMPANA_A_SOURCE_STATS();
+  assert.deepEqual([out.physicalRows, out.SOURCE_DATA_ROWS, out.SOURCE_CONTACT_ROWS, out.SOURCE_EMAIL_ROWS, out.UNSENDABLE_SOURCE_ROWS, out.UNIQUE_EMAILS, out.EXACT_DUPLICATE_EMAIL_ROWS], [231, 227, 224, 224, 3, 224, 0]);
+  assert.equal((ctx.__tables && ctx.__tables.MKT_AURA_CAMPANA_A_SOURCE_ROWS || []).length, 0, 'read-only: nothing persisted');
 });
 
 test('same-account contacts stay independent recipients (no collapse by account/domain/company)', () => {

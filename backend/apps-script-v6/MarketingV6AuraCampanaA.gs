@@ -643,10 +643,11 @@ function v6AuraCampanaASourceStats_(dataRows) {
   var contactRows = rows.filter(function (r) { return v6AuraEmailText_(r.contactName); }).length;
   var emailRows = rows.filter(function (r) { return v6AuraEmailText_(r.email); }).length;
   var unique = {};
-  rows.forEach(function (r) { var e = v6AuraEmailText_(r.email).toLowerCase(); if (e) unique[e] = true; });
+  rows.forEach(function (r) { var e = v6AuraCampanaANormalizeEmail_(r.email); if (e) unique[e] = true; });
   return {
     SOURCE_DATA_ROWS: rows.length, SOURCE_CONTACT_ROWS: contactRows, SOURCE_EMAIL_ROWS: emailRows,
     UNSENDABLE_SOURCE_ROWS: rows.length - emailRows, UNIQUE_EMAILS: Object.keys(unique).length,
+    EXACT_DUPLICATE_EMAIL_ROWS: emailRows - Object.keys(unique).length,
     missingContactEmail: rows.filter(function (r) { return !v6AuraEmailText_(r.email); }).map(function (r) {
       return { sourceRow: r.sourceRow, accountName: v6AuraEmailText_(r.accountName), reason: 'SOURCE_MISSING_CONTACT_EMAIL' };
     })
@@ -664,23 +665,12 @@ function v6AuraCampanaASourceGate_(dataRows) {
   return Object.assign({ ok: status === 'SOURCE_OK', status: status, actual: rows.length, rowsWithoutAccount: withoutAccount }, stats);
 }
 
-// --- Duplicate-email recipient policy (isolated, configurable) ---------------------------------
-// This is NOT account deduplication: distinct emails of the same account/company/domain are always
-// independent recipients. The policy only decides what happens when the SAME email address appears
-// on more than one source row:
-//   EXACT_EMAIL_ONCE (default): one recipient per exact email address across the whole source.
-//   ONCE_PER_ACCOUNT_EMAIL: one recipient per (account, exact email) -- the same address listed
-//     under two different accounts yields two recipients.
-// Later rows are kept as candidates and reported as DUPLICATE_SOURCE_EMAIL (never silently dropped).
-var CAMPANA_A_DUPLICATE_EMAIL_POLICY_PROPERTY_ = 'CAMPANA_A_DUPLICATE_EMAIL_POLICY';
-var CAMPANA_A_DUPLICATE_EMAIL_POLICIES_ = ['EXACT_EMAIL_ONCE', 'ONCE_PER_ACCOUNT_EMAIL'];
-function v6AuraCampanaADuplicateEmailPolicy_() {
-  var p = v6AuraEmailText_(PropertiesService.getScriptProperties().getProperty(CAMPANA_A_DUPLICATE_EMAIL_POLICY_PROPERTY_)).toUpperCase();
-  return CAMPANA_A_DUPLICATE_EMAIL_POLICIES_.indexOf(p) >= 0 ? p : 'EXACT_EMAIL_ONCE';
-}
-function v6AuraCampanaARecipientKey_(policy, accountId, email) {
-  return policy === 'ONCE_PER_ACCOUNT_EMAIL' ? accountId + '|' + email : email;
-}
+// --- Exact-email dedupe (deterministic, the ONLY source dedupe) ---------------------------------
+// Unit of execution = contact. Distinct email addresses of the same account/company/domain are
+// always independent recipients. The one and only dedupe: the exact same normalized email
+// (trimmed, lower-cased) appearing on several source rows is ONE mailbox and receives once; the
+// additional rows stay candidates, reported as DUPLICATE_SOURCE_EMAIL.
+function v6AuraCampanaANormalizeEmail_(email) { return v6AuraEmailText_(email).toLowerCase(); }
 
 // Account resolution for EVERY source contact, not only for accounts whose row produced an
 // opportunity: explicit source membership wins over account-level rejections (missing owner).
@@ -769,14 +759,12 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
   });
 
   var seen = {}, sourceAccountIds = {}, sourceEmails = {};
-  var duplicatePolicy = v6AuraCampanaADuplicateEmailPolicy_();
   var candidates = sourceRows.map(function (r) {
     var accountId = v6AuraCampanaASourceAccountId_(r.accountName, accountRealIdByName, accounts);
-    var email = v6AuraEmailText_(r.email).toLowerCase();
+    var email = v6AuraCampanaANormalizeEmail_(r.email);
     var key = accountId + '|' + email;
-    // Repeated emails are resolved ONLY by the duplicate-email recipient policy; distinct emails
-    // of the same account/company/domain never collapse.
-    var seenKey = v6AuraCampanaARecipientKey_(duplicatePolicy, accountId, email);
+    // Exact normalized email is the only dedupe key; distinct emails never collapse.
+    var seenKey = email;
     var matched = email ? contactsSecureByAccountAndEmail[key] : null;
     if (accountId) sourceAccountIds[accountId] = true;
     var cand = {
@@ -827,7 +815,7 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
   return {
     eligible: eligible, excluded: excluded, candidates: candidates,
     sourceContactsWithEmail: sourceRows.filter(function (r) { return v6AuraEmailText_(r.email); }).length,
-    sourceContacts: sourceRows.length, sourceStats: v6AuraCampanaASourceStats_(sourceRows), duplicateEmailPolicy: duplicatePolicy, sourceGate: gate, sourceAccountIds: Object.keys(sourceAccountIds),
+    sourceContacts: sourceRows.length, sourceStats: v6AuraCampanaASourceStats_(sourceRows), sourceGate: gate, sourceAccountIds: Object.keys(sourceAccountIds),
     contactsSecureNotInSource: contactsSecureNotInSource
   };
 }
@@ -914,7 +902,6 @@ function v6AuraCampanaABuildQueueLocked_() {
   result.sourceContacts = resolved.sourceContacts;
   result.sourceContactsWithEmail = resolved.sourceContactsWithEmail;
   result.sourceStats = resolved.sourceStats;
-  result.duplicateEmailPolicy = resolved.duplicateEmailPolicy;
   result.contactsSecureNotInSource = resolved.contactsSecureNotInSource;
   // Fail closed only when the source has nothing sendable (empty / no emails). Incomplete rows are
   // marked individually and every valid row continues; counts are derived from the data rows.
@@ -1550,6 +1537,18 @@ function v6AuraCampanaARegenerateDryRun_() {
   try { v6AuraCampanaAPersistRunSummary_(runId, result); } catch (err) { v6AuraCampanaALog_('RUN_SUMMARY_PERSIST_FAILED (' + String(err && err.message || err) + ')'); }
   v6AuraCampanaALog_('REGENERATE_END (runId=' + runId + ', TOTAL_MS=' + profile.TOTAL_MS + ')');
   return result;
+}
+// Read-only: computes the Campaign A source counts directly from the LIVE source tab (no writes,
+// no queue, no send), using the same capture parser and the same stats as the pipeline.
+function RUN_AURA_CAMPANA_A_SOURCE_STATS() {
+  var ss = SpreadsheetApp.openById(v6AuraCampanaAResolveSourceSpreadsheetId_());
+  var sheet = ss.getSheetByName(CAMPANA_A_SHEET_NAME_);
+  if (!sheet) return { status: 'TAB_NOT_FOUND' };
+  var parsed = v6AuraCampanaAParseSourceRows_(sheet.getDataRange().getValues());
+  var stats = v6AuraCampanaASourceStats_(parsed.rows);
+  var out = Object.assign({ status: parsed.status, physicalRows: sheet.getLastRow() }, stats);
+  try { console.log(JSON.stringify(out)); } catch (err) { /* logging must never mask the result */ }
+  return out;
 }
 // A human running this from the Apps Script editor has no other way to see the FINAL result once
 // the execution ends (the Cloud Logging entry for a given run is not always available/retained),
