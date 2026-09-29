@@ -192,6 +192,65 @@ test('verified live source facts: 227 / 224 / 224 / 221 unique / 3 duplicate ext
   assert.equal(ctx.__sentEmails.length, 0);
 });
 
+test('real failure RUN-CAMPANA-A-87C2A811: stale pre-PR14 Activation jobs are refreshed, SENT and history untouched', () => {
+  // Reproduce the production queue: Activation jobs built BEFORE PR #14 (no governed render
+  // contract, account-level stops) for the currently eligible contacts, in STOPPED / SKIPPED /
+  // DRY_RUN states, one legacy-id Activation job, one never-eligible stale PENDING job, one SENT
+  // Activation job, and the 109 historical Retention SENT rows keyed by the legacy id format.
+  const probe = verifiedSourceTables();
+  campaignAContext(probe).v6AuraCampanaABuildQueue_();
+  const current = jobs(probe);
+  assert.equal(current.length, VERIFIED_BUILT);
+  const statuses = ['STOPPED', 'SKIPPED', 'DRY_RUN'];
+  const stale = current.map((j, i) => {
+    const old = Object.assign({}, j, { status: statuses[i % 3], renderContract: '', accountStatusOverride: '', error: i % 3 === 1 ? 'FREQUENCY_HIGHER_PRIORITY' : '', htmlBody: '<p>pre-PR14 generic renderer ' + i + '</p>', subject: 'Old subject ' + i });
+    delete old.renderContract;
+    return old;
+  });
+  // One stale job under the legacy (pre-namespacing) id format (a contact without Retention history).
+  stale[150] = Object.assign({}, stale[150], { jobId: 'JOB:' + ID + ':' + stale[150].contactId + ':1' });
+  // One Activation job that was really SENT: immutable.
+  stale[7] = Object.assign({}, current[7], { status: 'SENT', processedAt: '2026-09-20T10:00:00.000Z', htmlBody: '<p>sent evidence</p>' });
+  // A stale PENDING Activation job for a contact the current logic excludes (DNC).
+  const dncJob = { jobId: 'JOB:' + ID + ':ACTIVATION:CS-0:1', campaignId: ID, accountId: 'ACC-A0', contactId: 'CS-0', email: 'c0@acct0.example', status: 'PENDING', playbookId: 'Activation', sequenceStep: 1 };
+  const history = [];
+  for (let i = 0; i < 109; i++) history.push({ jobId: 'JOB:' + ID + ':' + current[i].contactId + ':1', campaignId: ID, accountId: current[i].accountId, contactId: current[i].contactId, status: 'SENT', playbookId: 'Retention', sequenceStep: 1, subject: 'Historical ' + i, htmlBody: '<p>Immutable ' + i + '</p>' });
+  const tables = verifiedSourceTables();
+  tables.MKT_EMAIL_QUEUE = history.concat(stale, [dncJob]);
+  const historyBefore = JSON.stringify(history), sentBefore = JSON.stringify(stale[7]);
+  const ctx = campaignAContext(tables);
+
+  const first = ctx.v6AuraCampanaABuildQueue_();
+  assert.equal(first.status, 'QUEUE_BUILD_COMPLETE');
+  assert.equal(first.recipients, VERIFIED_BUILT, 'current eligible recipients are evaluated');
+  assert.equal(first.skippedSent, 1, 'a SENT Activation job is never rebuilt');
+  assert.equal(first.refreshed, VERIFIED_BUILT - 1, 'every stale never-SENT Activation job is refreshed');
+  assert.equal(first.built, VERIFIED_BUILT - 1);
+  assert.equal(first.retiredNoLongerEligible, 1);
+  const refreshed = tables.MKT_EMAIL_QUEUE.filter(j => j.playbookId === 'Activation' && j.previousStatus && j.status === 'PENDING');
+  assert.equal(refreshed.length, VERIFIED_BUILT - 1);
+  assert(refreshed.every(j => j.renderContract === 'GOVERNED_TOKEN_MERGE_V1' && !/pre-PR14/.test(j.htmlBody)));
+  assert.equal(tables.MKT_EMAIL_QUEUE.find(j => j.jobId === stale[150].jobId).status, 'PENDING', 'legacy-id stale job refreshed in place');
+  assert.equal(tables.MKT_EMAIL_QUEUE.filter(j => j.playbookId === 'Activation' && j.contactId === stale[150].contactId).length, 1, 'never duplicated');
+  assert.deepEqual([tables.MKT_EMAIL_QUEUE.find(j => j.jobId === dncJob.jobId).status, tables.MKT_EMAIL_QUEUE.find(j => j.jobId === dncJob.jobId).error], ['SUPPRESSED', 'REGENERATE_NO_LONGER_ELIGIBLE']);
+  assert.equal(JSON.stringify(tables.MKT_EMAIL_QUEUE.find(j => j.jobId === stale[7].jobId)), sentBefore, 'SENT evidence byte-for-byte unchanged');
+  assert.equal(JSON.stringify(tables.MKT_EMAIL_QUEUE.slice(0, 109)), historyBefore, 'historical 109 Retention SENT unchanged');
+  assert.equal(new Set(tables.MKT_EMAIL_QUEUE.map(j => j.jobId)).size, tables.MKT_EMAIL_QUEUE.length);
+
+  ctx.v6AuraCampanaAPreflight_();
+  const dispatch = ctx.v6AuraCampanaADispatchBatch_();
+  assert.equal(dispatch.dryRun, VERIFIED_BUILT - 1);
+  assert.equal(dispatch.skipped, 0, 'the family-aware duplicate audit does not skip against Retention history');
+  const afterFirst = JSON.stringify(tables.MKT_EMAIL_QUEUE);
+
+  // Repeated DRY_RUN: idempotent.
+  const second = ctx.v6AuraCampanaABuildQueue_();
+  assert.deepEqual([second.built, second.refreshed, second.retiredNoLongerEligible, second.skippedExisting], [0, 0, 0, VERIFIED_BUILT]);
+  ctx.v6AuraCampanaAPreflight_(); ctx.v6AuraCampanaADispatchBatch_();
+  assert.equal(JSON.stringify(tables.MKT_EMAIL_QUEUE), afterFirst);
+  assert.equal(ctx.__sentEmails.length, 0);
+});
+
 test('read-only live source stats runner parses the real tab layout (231 physical rows)', () => {
   const header = ['Cuenta', 'Account Owner', 'Agente responsable (Sales Rep Actual)', 'Pais Billing', 'Pais Shipping', 'Contacto', 'Email', 'Posicion (Company position)', 'Titulo', 'Key Contact', 'Prioridad', 'Motivo campana'];
   const values = [['DGL Freight Broker -- Campana A'], ['14/09/2026 | 227 contactos en 65 cuentas'], [''], header];

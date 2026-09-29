@@ -867,6 +867,40 @@ function v6AuraCampanaAJobAlreadyBuilt_(queueById, family, contactId, sequenceSt
   return !!legacy && v6AuraEmailText_(legacy.playbookId) === family;
 }
 
+// --- Regeneration of stale, never-SENT Activation jobs -----------------------------------------
+// Jobs built before the current logic (e.g. before PR #14: account-level stops, account-wide
+// frequency, no governed render contract) must not block a regenerate forever. An existing
+// ACTIVATION job for the same contact/step (new family-namespaced id, or a legacy-format id that
+// is itself Activation) is:
+//   - NEVER touched when it was SENT (real send evidence is immutable);
+//   - refreshed in place (same jobId, so no duplicate job) when it was never sent AND it predates
+//     the governed render contract, is in a retryable state, or differs materially from what the
+//     current logic builds now;
+//   - kept as-is when the current logic would build the same job (idempotent repeated DRY_RUN).
+// Retention/other-family rows are never read-matched here (family is part of identity).
+var CAMPANA_A_REFRESH_ALWAYS_STATUSES_ = ['SKIPPED', 'FAILED', 'BLOCKED', 'SUPPRESSED', 'REVIEW_REQUIRED'];
+var CAMPANA_A_REFRESH_COMPARE_FIELDS_ = ['email', 'subject', 'htmlBody', 'replyTo', 'preferredLanguage', 'creativeId', 'creativeVersion', 'creativeApprovalId', 'htmlChecksum', 'recipientContentChecksum', 'renderContract', 'accountStatusOverride', 'stopReasonStage', 'stopOverrideApplied', 'recipientSource'];
+function v6AuraCampanaAExistingActivationJob_(queueById, contactId, sequenceStep) {
+  var current = queueById[v6AuraCampanaAJobId_(CAMPANA_A_JOB_FAMILY_, contactId, sequenceStep)];
+  if (current) return current;
+  var legacy = queueById[v6AuraEmailJobId_(CAMPANA_A_CAMPAIGN_ID_, contactId, sequenceStep)];
+  return legacy && v6AuraEmailText_(legacy.playbookId) === CAMPANA_A_JOB_FAMILY_ ? legacy : null;
+}
+function v6AuraCampanaAJobWasSent_(job) {
+  return v6AuraEmailText_(job.status).toUpperCase() === 'SENT';
+}
+function v6AuraCampanaAStatusClass_(status) {
+  var s = v6AuraEmailText_(status).toUpperCase();
+  return (s === 'PENDING' || s === 'DRY_RUN') ? 'SENDABLE' : s;
+}
+function v6AuraCampanaAJobNeedsRefresh_(existing, fresh) {
+  if (v6AuraCampanaAJobWasSent_(existing)) return false;
+  if (v6AuraEmailText_(existing.renderContract) !== CAMPANA_A_RENDER_CONTRACT_) return true;
+  if (CAMPANA_A_REFRESH_ALWAYS_STATUSES_.indexOf(v6AuraEmailText_(existing.status).toUpperCase()) >= 0) return true;
+  if (v6AuraCampanaAStatusClass_(existing.status) !== v6AuraCampanaAStatusClass_(fresh.status)) return true;
+  return CAMPANA_A_REFRESH_COMPARE_FIELDS_.some(function (k) { return String(existing[k] == null ? '' : existing[k]) !== String(fresh[k] == null ? '' : fresh[k]); });
+}
+
 function v6AuraCampanaABuildQueue_() {return v6CampaignStudioLocked_(v6AuraCampanaABuildQueueLocked_);}
 function v6AuraCampanaABuildQueueLocked_() {
   var profile = { MATCH_MS: 0, LANGUAGE_MS: 0, ELIGIBILITY_MS: 0, COPY_MS: 0, QUEUE_WRITE_MS: 0 };
@@ -875,7 +909,7 @@ function v6AuraCampanaABuildQueueLocked_() {
   v6EnsureContactRecipientSchema_();
   var accounts = v6Rows_('MKT_ACCOUNTS');
   var setup = v6AuraCampanaAEnsureCampaignAndScope_(accounts);
-  var result = { status: setup.count ? 'QUEUE_BUILD_COMPLETE' : 'SOURCE_EMPTY_OR_NOT_FOUND', campaignId: CAMPANA_A_CAMPAIGN_ID_, accounts: setup.count, recipients: 0, built: 0, skippedExisting: 0, crossFamilyHistoricalIgnored: 0, skippedIneligible: 0, blockedNoReplyTo: 0, blockedCreative: 0, byLanguage: { ES: 0, EN: 0, PT: 0 } };
+  var result = { status: setup.count ? 'QUEUE_BUILD_COMPLETE' : 'SOURCE_EMPTY_OR_NOT_FOUND', campaignId: CAMPANA_A_CAMPAIGN_ID_, accounts: setup.count, recipients: 0, built: 0, skippedExisting: 0, skippedSent: 0, refreshed: 0, refreshedByPreviousStatus: {}, retiredNoLongerEligible: 0, crossFamilyHistoricalIgnored: 0, skippedIneligible: 0, blockedNoReplyTo: 0, blockedCreative: 0, byLanguage: { ES: 0, EN: 0, PT: 0 } };
   if (!setup.count) { profile.MATCH_MS = Date.now() - tMatch0; v6AuraCampanaALog_('MATCH_END (0 accounts, SOURCE_EMPTY_OR_NOT_FOUND)'); result.profile = profile; return result; }
 
   // recipients below are keyed by the REAL MKT_ACCOUNTS accountId (v6AuraCampanaAEnsureCampaignAndScope_
@@ -982,6 +1016,7 @@ function v6AuraCampanaABuildQueueLocked_() {
   v6AuraCampanaALog_('LANGUAGE_START (per-contact loop: language + eligibility(stop/override) + copy, ' + (recipients.length - startIndex) + ' of ' + recipients.length + ' recipients, resuming at index ' + startIndex + ')');
   var loopStart = Date.now();
   var pendingJobs = [];
+  var keptJobIds = {};
   var sequenceStep = 1;
   var i, checkpointed = false;
   for (i = startIndex; i < recipients.length; i++) {
@@ -990,7 +1025,9 @@ function v6AuraCampanaABuildQueueLocked_() {
     var r = recipients[i];
     var accountId = v6AuraEmailText_(r.accountId), contactId = v6AuraEmailText_(r.contactId);
     var jobId = v6AuraCampanaAJobId_(CAMPANA_A_JOB_FAMILY_, contactId, sequenceStep);
-    if (v6AuraCampanaAJobAlreadyBuilt_(existingIds, CAMPANA_A_JOB_FAMILY_, contactId, sequenceStep)) { result.skippedExisting++; continue; }
+    var existingJob = v6AuraCampanaAExistingActivationJob_(existingIds, contactId, sequenceStep);
+    if (existingJob) keptJobIds[v6AuraEmailText_(existingJob.jobId)] = true;
+    if (existingJob && v6AuraCampanaAJobWasSent_(existingJob)) { result.skippedExisting++; result.skippedSent++; continue; }
     if (existingIds[v6AuraEmailJobId_(CAMPANA_A_CAMPAIGN_ID_, contactId, sequenceStep)]) result.crossFamilyHistoricalIgnored++;
     if (!accountId || !contactId || !v6AuraEmailText_(r.email)) { result.skippedIneligible++; continue; }
 
@@ -1081,8 +1118,20 @@ function v6AuraCampanaABuildQueueLocked_() {
       recipientContentChecksum: v6AuraJobContentChecksum_(personalizedSubject, personalizedHtml)
     };
     profile.COPY_MS += Date.now() - tCopy0;
+    if (existingJob) {
+      if (!v6AuraCampanaAJobNeedsRefresh_(existingJob, job)) { result.skippedExisting++; continue; }
+      // Refresh in place: same jobId (never a second job for this contact), prior status kept
+      // for audit. Only reachable for a never-SENT Activation job.
+      job.jobId = v6AuraEmailText_(existingJob.jobId);
+      job.createdAt = v6AuraEmailText_(existingJob.createdAt) || now;
+      job.regeneratedAt = now;
+      job.previousStatus = v6AuraEmailText_(existingJob.status);
+      result.refreshed++;
+      result.refreshedByPreviousStatus[job.previousStatus || 'UNKNOWN'] = (result.refreshedByPreviousStatus[job.previousStatus || 'UNKNOWN'] || 0) + 1;
+    }
     pendingJobs.push(job);
-    existingIds[jobId] = job;
+    existingIds[job.jobId] = job;
+    keptJobIds[job.jobId] = true;
     result.built++;
     if (replyToBlocked) result.blockedNoReplyTo++;
   }
@@ -1090,6 +1139,19 @@ function v6AuraCampanaABuildQueueLocked_() {
   v6AuraCampanaALog_('ELIGIBILITY_END (per-contact stop/override check, +' + profile.ELIGIBILITY_MS + 'ms total including the earlier v6ResolveRecipients_ call)');
   v6AuraCampanaALog_('COPY_END (' + profile.COPY_MS + 'ms total, ' + result.built + ' jobs built)');
 
+  // A never-SENT Activation job still PENDING for a contact the current logic no longer queues
+  // (excluded, no longer in the source) must not dispatch later: retire it. Only on a complete
+  // pass (never on a checkpointed partial one); SENT and non-PENDING rows are left untouched.
+  if (!checkpointed && startIndex === 0) {
+    var retireAt = new Date().toISOString();
+    Object.keys(existingIds).forEach(function (id) {
+      var row = existingIds[id];
+      if (keptJobIds[id] || v6AuraEmailText_(row.campaignId) !== CAMPANA_A_CAMPAIGN_ID_ || v6AuraEmailText_(row.playbookId) !== CAMPANA_A_JOB_FAMILY_) return;
+      if (v6AuraEmailText_(row.status).toUpperCase() !== 'PENDING') return;
+      pendingJobs.push(Object.assign({}, row, { status: 'SUPPRESSED', error: 'REGENERATE_NO_LONGER_ELIGIBLE', processedAt: retireAt, previousStatus: 'PENDING' }));
+      result.retiredNoLongerEligible++;
+    });
+  }
   v6AuraCampanaALog_('QUEUE_WRITE_START (' + pendingJobs.length + ' new jobs)');
   var tWrite0 = Date.now();
   if (pendingJobs.length) v6BatchUpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], pendingJobs);
