@@ -441,7 +441,7 @@ test('Activation never inherits Reactivation copy (intake names, all languages, 
 });
 
 test('premium V5 visual systems work in governed V6 (no generic renderer regression)', () => {
-  const signatures = { 'editorial-white': 'width="58%"', 'split-hero': 'width="52%"', 'route-intelligence': 'ROUTE INTELLIGENCE', 'service-architecture': 'border-top:3px solid #77B82A', 'case-proof': 'CASE / PROOF', 'executive-minimal': 'DIRECT COMMERCIAL NOTE' };
+  const signatures = Object.fromEntries(['editorial-white', 'split-hero', 'route-intelligence', 'service-architecture', 'case-proof', 'executive-minimal'].map(id => [id, '<!--dgl-system:' + id + '-->']));
   Object.keys(Lib.CREATIVE_SYSTEMS).forEach(id => assert(signatures[id], 'every canonical system is covered: ' + id));
   for (const objective of ['Activation', 'Retention', 'Reactivation']) {
     const m = Studio.createModel(ctxFor(objective));
@@ -452,8 +452,13 @@ test('premium V5 visual systems work in governed V6 (no generic renderer regress
         assert(html.includes(signatures[id]), objective + ' ' + id + ' ' + language);
         assert(html.includes('border-radius'), 'premium container');
         assert(html.includes('src="' + Render.OFFICIAL_LOGO + '"'));
-        // case-proof is the canonical V5 proof layout: its NEXT STEP is text, not a button (unchanged design).
-        if (id !== 'case-proof') assert(/href="mailto:info@dglus\.com\?subject=/.test(html), objective + ' ' + id + ' CTA');
+        // Every system, including case-proof, carries a real mailto: CTA button.
+        assert(/href="mailto:info@dglus\.com\?subject=/.test(html), objective + ' ' + id + ' CTA');
+        // Email-safe premium markup from the reference bank: charset, phone stacking, no CSS
+        // overlays / script handlers, green rule, dark footer band with the site link.
+        assert(html.includes('<meta charset="utf-8">') && html.includes('@media only screen and (max-width:620px)') && html.includes('class="dgl-col'), id + ' responsive');
+        assert(!/position:\s*(absolute|relative)|onerror=|display:flex/.test(html), id + ' email-safe');
+        assert(html.includes('https://www.dglus.com') && html.includes('USA · MEXICO · CANADA'), id + ' footer/brand bar');
         assert(!/(src|href)="assets\//.test(html), 'absolute assets only');
         assert(!html.includes('Su aliado de transporte terrestre.') && !html.includes('padding:24px 36px;border-bottom:4px solid #77B82A'), 'old generic V6 renderer is gone');
         if (id !== 'executive-minimal') assert(/src="https:\/\/dglmarketing2026\.github\.io\/dgl-marketing-execution-os\/assets\/creative\//.test(html), 'photographic hero asset');
@@ -545,7 +550,7 @@ const legacyCheck = (async () => {
   assert.deepEqual([v.approved, v.dirty, v.legacyTemplate, v.legacyCreativeVersion], [false, true, 'editorial', 1]);
   assert.equal(studio.variantStatus(v), 'LEGACY DESIGN · NEW PREMIUM PREVIEW');
   const preview = studio.emailHtml(m, 'ES');
-  assert(preview.includes('width="52%"') && !preview.includes(legacyHtml), 'premium preview replaces the legacy display');
+  assert(preview.includes('<!--dgl-system:split-hero-->') && !preview.includes(legacyHtml), 'premium preview replaces the legacy display');
   assert.equal(revoked.length, 0, 'creative v1 is not revoked or overwritten');
   assert(mount.innerHTML.includes('Design selected automatically') && mount.innerHTML.includes('GROUND_CAPACITY_ASK'));
   passed++;
