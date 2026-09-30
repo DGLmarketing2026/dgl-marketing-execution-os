@@ -57,7 +57,9 @@ const MKT_HUB_SCHEMAS = {
   MKT_EMAIL_QUEUE: [
     'jobId','campaignId','audienceId','accountId','contactId','email','firstName',
     'company','service','subject','htmlBody','replyTo','status','gmailDraftId',
-    'createdAt','processedAt','error'
+    'createdAt','processedAt','error',
+    // Append-only: governed Campaign A job fields (PR #14 / #15). Existing columns never move.
+    'templateId','renderContract','accountStatusOverride','sourceRow','regeneratedAt','previousStatus'
   ]
 };
 
