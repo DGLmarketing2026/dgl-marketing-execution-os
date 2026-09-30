@@ -8,13 +8,16 @@ function v6CampaignStudioCanonicalA_() {
 // per-contact language (EN/ES/PT), the family's premium visual system, the family's own copy
 // and CTA, and contact/email execution. Campaign Studio and every governance gate stay in
 // place for preview, approval, audit and troubleshooting. Read-only: never writes.
+// The backend never fixes a design: Campaign Studio chooses from its whole design library for the
+// campaign context, renders it, and governance persists that exact creative for AURA to use.
+var AURA_CREATIVE_SYSTEM_AUTO_='CAMPAIGN_STUDIO_AUTO';
 var AURA_INTAKE_QUESTION_='WHAT TYPE OF CAMPAIGN IS THIS?';
 var AURA_INTAKE_AUTOMATION_={
-  ACTIVATION:{messageAngle:'Current Movement',ctaIntent:'Send Requirement',creativeSystem:'editorial-white'},
-  RETENTION:{messageAngle:'Stay Close',ctaIntent:'Reply',creativeSystem:'editorial-white'},
-  REACTIVATION:{messageAngle:'Previous Relationship',ctaIntent:'Generate Quote',creativeSystem:'editorial-white'},
-  QUOTED_NOT_BOOKED:{messageAngle:'Still Active',ctaIntent:'Recover Quote',creativeSystem:'executive-minimal'},
-  CROSS_SELL:{messageAngle:'Additional Capability',ctaIntent:'Generate Quote',creativeSystem:'service-architecture'}
+  ACTIVATION:{messageAngle:'Current Movement',ctaIntent:'Send Requirement'},
+  RETENTION:{messageAngle:'Stay Close',ctaIntent:'Reply'},
+  REACTIVATION:{messageAngle:'Previous Relationship',ctaIntent:'Generate Quote'},
+  QUOTED_NOT_BOOKED:{messageAngle:'Still Active',ctaIntent:'Recover Quote'},
+  CROSS_SELL:{messageAngle:'Additional Capability',ctaIntent:'Generate Quote'}
 };
 function v6AuraCampaignIntake_(payload){
   var raw=String((payload||{}).campaignType||'').trim();
@@ -23,7 +26,7 @@ function v6AuraCampaignIntake_(payload){
   if(!type)throw new Error('CAMPAIGN_TYPE_INVALID');
   var auto=AURA_INTAKE_AUTOMATION_[type];
   return {status:'INTAKE_RESOLVED',question:AURA_INTAKE_QUESTION_,options:AURA_CAMPAIGN_TYPES_.slice(),campaignType:type,manualQuestions:[AURA_INTAKE_QUESTION_],
-    automatic:{objective:AURA_CAMPAIGN_TYPE_OBJECTIVE_[type],campaignType:AURA_CAMPAIGN_TYPE_OBJECTIVE_[type],messageAngle:auto.messageAngle,ctaIntent:auto.ctaIntent,creativeSystem:auto.creativeSystem,
+    automatic:{objective:AURA_CAMPAIGN_TYPE_OBJECTIVE_[type],campaignType:AURA_CAMPAIGN_TYPE_OBJECTIVE_[type],messageAngle:auto.messageAngle,ctaIntent:auto.ctaIntent,creativeSystem:AURA_CREATIVE_SYSTEM_AUTO_,creativeSelection:'Campaign Studio selects from its existing design library by objective + campaignType + service + angle',
       language:'AUTO_PER_CONTACT',languages:['EN','ES','PT'],executionUnit:'CONTACT_EMAIL',copy:'FAMILY_ONLY',layout:'AUTO',cta:'AUTO'},
     governance:{campaignStudio:'PRESENT',creativeApproval:'REQUIRED',testDraftVerification:'REQUIRED',creativeSetApproval:'REQUIRED',sendMode:'UNCHANGED'}};
 }
@@ -69,7 +72,7 @@ function v6CampaignStudioContext_(payload) {
   if(id==='CMP-CAMPANA-A-HA-PRIORITARIA')Object.assign(c,v6CampaignStudioCanonicalA_());
   c.recipientMode=c.recipientMode||'GOVERNED_PRIVATE_AUDIENCE';
   c.intakeQuestion=AURA_INTAKE_QUESTION_;c.campaignFamily=typeof v6AuraNormalizeCampaignFamily_==='function'?v6AuraNormalizeCampaignFamily_(c.campaignType||c.objective):'';
-  c.creativeSystem=c.campaignFamily?AURA_INTAKE_AUTOMATION_[c.campaignFamily].creativeSystem:'';
+  c.creativeSystem=AURA_CREATIVE_SYSTEM_AUTO_;
   try{Object.assign(c,v6CampaignStudioAudience_(c));}catch(e){Object.assign(c,{audienceResolved:false,eligibleContacts:0,eligibleAccounts:0,excludedContacts:0,requiredLanguages:[],languageCounts:{ES:0,EN:0,PT:0}});}
   c.approvedCreativeVariants={};c.missingCreativeVariants=[];
   ['ES','EN','PT'].forEach(function(l){var r=v6AuraLatestApprovedCreativeForLanguage_(id,l);if(v6CampaignStudioVariantValid_(r)){c.approvedCreativeVariants[l]={creativeId:r.creativeId,creativeVersion:r.creativeVersion,approvalId:r.approvalId,htmlChecksum:r.htmlChecksum,contentChecksum:r.contentChecksum};}else if(c.requiredLanguages.indexOf(l)>=0)c.missingCreativeVariants.push(l);});

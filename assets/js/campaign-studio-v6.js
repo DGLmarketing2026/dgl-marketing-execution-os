@@ -11,7 +11,8 @@ const Lib=()=>g.DGL_CREATIVE_LIBRARY_V5,Render=()=>g.DGL_CREATIVE_RENDER_V5;
 const INTAKE_QUESTION="WHAT TYPE OF CAMPAIGN IS THIS?",INTAKE_OPTIONS=["ACTIVATION","RETENTION","REACTIVATION","QUOTED_NOT_BOOKED","CROSS_SELL"];
 const INTAKE_BY_OBJECTIVE={"Activation":"ACTIVATION","Retention":"RETENTION","Reactivation":"REACTIVATION","Quoted Not Booked":"QUOTED_NOT_BOOKED","Cross-Sell":"CROSS_SELL"};
 function objectiveOf(context){return Lib().normalizeObjective(context.objective||context.campaignType);}
-function autoSystem(context){return Render().systemFor(objectiveOf(context));}
+function selectionFor(context){return Render().selection({objective:objectiveOf(context),service:context.service,angle:context.messageAngle});}
+function autoSystem(context){return selectionFor(context).systemId;}
 function validSystem(id){return !!(id&&Lib().CREATIVE_SYSTEMS[id]);}
 let model=null,mount=null,epoch=0;
 function navigationId(){
@@ -20,7 +21,7 @@ function navigationId(){
   return "";
 }
 function createModel(context){
-  const m={context:Object.freeze({...context}),language:(context.requiredLanguages||[])[0]||"ES",layout:validSystem(context.creativeSystem)?context.creativeSystem:autoSystem(context),variants:{},brand:null,busy:false,error:"",pendingRevokes:new Set()};
+  const m={context:Object.freeze({...context}),language:(context.requiredLanguages||[])[0]||"ES",layout:autoSystem(context),selection:selectionFor(context),variants:{},brand:null,busy:false,error:"",pendingRevokes:new Set()};
   LANGUAGES.forEach(language=>{
     const approved=context.approvedCreativeVariants?.[language];
     m.variants[language]={copy:g.DGL_COPY_ENGINE_V5.generate({objective:objectiveOf(context),service:context.service,angle:context.messageAngle,language,qnbWindow:context.qnbWindow,ctaIntent:context.campaignId==="CMP-CAMPANA-A-HA-PRIORITARIA"?"Send Requirement":g.DGL_CREATIVE_LIBRARY_V5?.OBJECTIVES?.[context.objective]?.defaultCta}),dirty:!approved,testDraftStatus:context.testDraftStatus?.[language]||(approved?"APPROVED / TEST DRAFT REQUIRED":"UNAPPROVED"),approved:!!approved,...(approved||{})};
@@ -90,7 +91,7 @@ async function run(action){
     }
   }catch(e){m.error=e.message||String(e);}finally{m.busy=false;if(model===m)draw();}
 }
-function variantStatus(v){return v.testDraftStatus==="STALE AFTER EDIT"?"STALE AFTER EDIT":!v.approved?"UNAPPROVED":v.testDraftStatus==="TEST DRAFT VERIFIED"?"TEST DRAFT VERIFIED":"APPROVED / TEST DRAFT REQUIRED";}
+function variantStatus(v){if(v.legacyTemplate&&!v.approved)return "LEGACY DESIGN · NEW PREMIUM PREVIEW";return v.testDraftStatus==="STALE AFTER EDIT"?"STALE AFTER EDIT":!v.approved?"UNAPPROVED":v.testDraftStatus==="TEST DRAFT VERIFIED"?"TEST DRAFT VERIFIED":"APPROVED / TEST DRAFT REQUIRED";}
 function canApproveSet(m){
   const c=m.context;return c.audienceResolved&&c.requiredLanguages?.length>0&&c.requiredLanguages.every(l=>{
     const v=m.variants[l],e=c.testDraftVerifications?.[l];
@@ -110,7 +111,7 @@ function draw(){
   const m=model;if(!mount||!m)return;const c=m.context,v=m.variants[m.language];
   mount.innerHTML='<div class="page-head"><div><div class="eyebrow">GOVERNED CAMPAIGN STUDIO</div><h2>'+E(c.campaignName)+'</h2><p>Private backend strategy · Creative fields only</p></div><button class="btn" data-picker>SELECT CAMPAIGN</button></div>'+
     '<section class="card card-pad"><dl style="display:flex;flex-wrap:wrap;gap:24px">'+["objective","service","audienceId","playbookId","messageAngle","language"].map(k=>'<div><dt>'+E(k)+'</dt><dd style="margin:8px 0;font-weight:bold">'+E(c[k])+'</dd></div>').join("")+'</dl><p>'+E(c.eligibleContacts)+' eligible contacts · '+E(c.eligibleAccounts)+' unique accounts · '+E(c.excludedContacts)+' excluded contacts</p><p>Creative set: '+E(c.creativeSetStatus)+' · Required: '+E((c.requiredLanguages||[]).join(" / "))+'</p></section>'+
-    '<section class="card card-pad" style="margin-top:20px" data-intake><h3>Campaign intake</h3><p><strong>'+E(INTAKE_QUESTION)+'</strong> <span class="badge" data-intake-answer>'+E(INTAKE_BY_OBJECTIVE[objectiveOf(c)]||"UNANSWERED")+'</span></p><p><small>Options: '+E(INTAKE_OPTIONS.join(" · "))+'</small></p><p><small>Automatic: language per contact (EN / ES / PT) · visual system '+E((Lib().CREATIVE_SYSTEMS[autoSystem(c)]||{}).name||"")+' · '+E(objectiveOf(c))+' copy and CTA · execution unit contact / email</small></p></section>'+
+    '<section class="card card-pad" style="margin-top:20px" data-intake><h3>Campaign intake</h3><p><strong>'+E(INTAKE_QUESTION)+'</strong> <span class="badge" data-intake-answer>'+E(INTAKE_BY_OBJECTIVE[objectiveOf(c)]||"UNANSWERED")+'</span></p><p><small>Options: '+E(INTAKE_OPTIONS.join(" · "))+'</small></p><p><small>Automatic: language per contact (EN / ES / PT) · visual system '+E((Lib().CREATIVE_SYSTEMS[autoSystem(c)]||{}).name||"")+' · '+E(objectiveOf(c))+' copy and CTA · execution unit contact / email</small></p><p data-design-selection><small>Design selected automatically: <strong>'+E((Lib().CREATIVE_SYSTEMS[m.selection.systemId]||{}).name||"")+'</strong> ('+E(m.selection.rule)+') — '+E(m.selection.reason)+'</small></p></section>'+
     '<section class="card card-pad" style="margin-top:20px"><h3>Creative System</h3><div style="display:flex;gap:12px;flex-wrap:wrap">'+Object.values(Lib().CREATIVE_SYSTEMS).map(sys=>'<button class="btn '+(m.layout===sys.id?'btn-primary':'')+'" data-layout="'+E(sys.id)+'" aria-pressed="'+(m.layout===sys.id)+'" style="white-space:normal;max-width:100%" '+(m.busy?'disabled':'')+'>'+E(sys.name)+(sys.id===autoSystem(c)?' · AUTO':'')+'<br><small>'+E(sys.use)+'</small></button>').join("")+'</div></section>'+
     '<div role="tablist" aria-label="Creative language" style="display:flex;gap:12px;margin:24px 0;flex-wrap:wrap">'+LANGUAGES.map(l=>'<button class="btn '+(m.language===l?'btn-primary':'')+'" role="tab" aria-selected="'+(m.language===l)+'" data-language="'+l+'" style="white-space:normal;max-width:100%" '+(m.busy?'disabled':'')+'>'+l+'<br><small>'+E(variantStatus(m.variants[l]))+'</small></button>').join("")+'</div>'+
     '<p data-variant-status></p><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:24px"><fieldset style="border:0;padding:0" '+(m.busy?'disabled':'')+'>'+FIELDS.map(k=>'<label style="display:block;margin-bottom:14px">'+E(k)+'<textarea data-copy="'+k+'" style="display:block;width:100%;min-height:65px;padding:12px;box-sizing:border-box">'+E(v.copy[k])+'</textarea></label>').join("")+'</fieldset><iframe data-preview title="'+m.language+' email preview" sandbox="" style="width:100%;height:820px;border:1px solid #ddd;background:white"></iframe></div>'+
@@ -138,7 +139,12 @@ async function render(container,explicitId){
     for(const l of LANGUAGES){
       const v=model.variants[l];if(!v.approved)continue;
       const record=await api().getLatestApprovedCreative(id,l);if(ticket!==epoch)return;
-      if(record?.creativeId===v.creativeId){if(validSystem(record.templateId))model.layout=record.templateId;v.storedHtml=record.htmlBody;v.storedText=record.textBody;v.copy.subjectA=record.subject;v.copy.preheader=record.preheader;if(record.creativeCopy){try{v.copy=JSON.parse(record.creativeCopy);}catch(_){}}}
+      // An approved creative persisted by a retired renderer (templateId not in the design
+      // library, e.g. the old generic "editorial") is shown as legacy: the premium preview from
+      // the automatic selection is displayed instead. Nothing is revoked or overwritten; approving
+      // the new preview creates a new version that supersedes it.
+      if(record?.creativeId===v.creativeId&&!validSystem(record.templateId)){v.approved=false;v.dirty=true;v.legacyTemplate=String(record.templateId||"");v.legacyCreativeVersion=record.creativeVersion;continue;}
+      if(record?.creativeId===v.creativeId){model.layout=record.templateId;v.storedHtml=record.htmlBody;v.storedText=record.textBody;v.copy.subjectA=record.subject;v.copy.preheader=record.preheader;if(record.creativeCopy){try{v.copy=JSON.parse(record.creativeCopy);}catch(_){}}}
       else{v.approved=false;v.dirty=true;}
     }
     draw();

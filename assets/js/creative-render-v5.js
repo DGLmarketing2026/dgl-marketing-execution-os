@@ -35,11 +35,13 @@
     </div>`;
   }
 
-  // Automatic visual-system selection: the existing objective -> recommended system mapping.
-  function systemFor(objective){
-    const o=Lib().OBJECTIVES[Lib().normalizeObjective?Lib().normalizeObjective(objective):objective];
-    return o?o.recommendedSystem:"editorial-white";
+  // Automatic visual-system selection from the existing design library (creative-library-v5.js
+  // selectSystem): objective + campaignType + service + angle -> system, with the reason. Accepts
+  // a campaign context object, or a bare objective (then only objective-level rules apply).
+  function selection(context){
+    return Lib().selectSystem(typeof context==="object"&&context?context:{objective:context});
   }
+  function systemFor(context){return selection(context).systemId;}
 
   // s: {creativeSystem,objective,service,angle,lane,heroUrl,logoUrl,serviceDisplay?}
   // c: {subjectA,preheader,headline,body,body2,cta}
@@ -166,5 +168,5 @@
     </table></td></tr></table></body></html>`;
   }
 
-  global.DGL_CREATIVE_RENDER_V5={render,systemFor,brandHeader,assetPath,heroAsset,absUrl,OFFICIAL_LOGO,BASE_URL};
+  global.DGL_CREATIVE_RENDER_V5={render,systemFor,selection,brandHeader,assetPath,heroAsset,absUrl,OFFICIAL_LOGO,BASE_URL};
 })(window);
