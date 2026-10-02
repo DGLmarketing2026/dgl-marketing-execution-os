@@ -368,7 +368,11 @@ function auraProcessEmailQueue(limit) {
   var mode = v6AuraSendMode_();
   var lim = Math.max(1, Math.min(Number(limit || AURA_EMAIL_DISPATCH_DEFAULT_LIMIT_), AURA_EMAIL_DISPATCH_MAX_LIMIT_));
   var senderName = v6AuraEmailSenderName_();
-  var jobs = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) { return v6AuraEmailText_(r.status).toUpperCase() === 'PENDING'; }).slice(0, lim);
+  // Campaign A is dispatched ONLY by its dedicated governed batch (v6AuraCampanaADispatchBatch_,
+  // under the script lock, with the governed render check): the shared hourly dispatcher never
+  // picks its PENDING jobs, so a concurrent tick can never send or double-send them.
+  var campanaAId = (typeof CAMPANA_A_CAMPAIGN_ID_ !== 'undefined') ? CAMPANA_A_CAMPAIGN_ID_ : 'CMP-CAMPANA-A-HA-PRIORITARIA';
+  var jobs = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) { return v6AuraEmailText_(r.status).toUpperCase() === 'PENDING' && v6AuraEmailText_(r.campaignId) !== campanaAId; }).slice(0, lim);
 
   var counts = { sent: 0, failed: 0, suppressed: 0, skipped: 0, stopped: 0, reviewRequired: 0, dryRun: 0, blockedCreative: 0 };
   var touchedCampaigns = {};

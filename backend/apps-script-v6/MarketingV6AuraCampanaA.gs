@@ -1671,3 +1671,148 @@ function RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN() {
   } catch (err) { /* logging must never mask the real result */ }
   return result;
 }
+
+// --- Governed GO LIVE (human-triggered only) ---------------------------------------------------
+// The validated Campaign A jobs stay DRY_RUN after a successful REGENERATE DRY_RUN, and the
+// dispatcher only selects PENDING jobs, so switching AURA_SEND_MODE to LIVE alone would send 0.
+// This is the ONE explicit path from a validated DRY_RUN to real sends. It:
+//   1. works only for CMP-CAMPANA-A-HA-PRIORITARIA, current family (Reactivation);
+//   2. reads the latest successful DRY_RUN run summary: EXPECTED = its dispatch DRY_RUN count
+//      (the jobs that passed every dispatch check and would have been sent);
+//   3. re-validates every DRY_RUN job of the current family against the CURRENT approved creative
+//      set (creative id/version/approval/checksums, governed render contract, exact token-merged
+//      HTML), email, reply-to, contact exclusions, account engagement stop, already-SENT
+//      duplicates and contact-level frequency;
+//   4. promotes to PENDING only if the validated count equals EXPECTED (otherwise ABORT, nothing
+//      promoted, nothing sent, AURA_SEND_MODE stays DRY_RUN);
+//   5. re-runs the existing preflight; anything short of readyForLive with the exact count
+//      reverts the promotion and ABORTS;
+//   6. only then switches AURA_SEND_MODE to LIVE and dispatches through the existing governed
+//      Campaign A batch dispatcher (exact stored personalized HTML -- never re-rendered);
+//   7. ALWAYS returns AURA_SEND_MODE to DRY_RUN in finally, even if a recipient fails;
+//   8. persists one MKT_AURA_CAMPANA_A_GO_LIVE_LOG row per attempt.
+// SENT jobs are never candidates, so a rerun never resends (the count check then aborts).
+var CAMPANA_A_GO_LIVE_LOG_SCHEMA_ = ['goLiveRunId', 'startedAt', 'finishedAt', 'status', 'abortReason', 'campaignId', 'family', 'sourceRunId',
+  'expected', 'candidates', 'validated', 'promoted', 'preflightWouldSend', 'preflightSuppressed', 'preflightReadyForLive',
+  'sent', 'failed', 'suppressed', 'skipped', 'stopped', 'blockedCreative', 'creativeIds', 'creativeVersions', 'sendModeAfter', 'invalidByReasonJson'];
+function v6AuraCampanaAEnsureGoLiveLogSheet_() { return v6AcqEnsureSheet_('MKT_AURA_CAMPANA_A_GO_LIVE_LOG', CAMPANA_A_GO_LIVE_LOG_SCHEMA_); }
+function v6AuraCampanaAGoLiveValidateJob_(job, ctx) {
+  var accountId = v6AuraEmailText_(job.accountId), contactId = v6AuraEmailText_(job.contactId);
+  if (v6AuraEmailText_(job.campaignId) !== CAMPANA_A_CAMPAIGN_ID_) return 'CAMPAIGN_MISMATCH';
+  if (v6AuraEmailText_(job.playbookId) !== CAMPANA_A_JOB_FAMILY_) return 'FAMILY_MISMATCH';
+  if (v6AuraEmailText_(job.renderContract) !== CAMPANA_A_RENDER_CONTRACT_) return 'RENDER_CONTRACT_INVALID';
+  if (!v6AuraEmailValid_(job.email)) return 'EMAIL_INVALID';
+  if (!job.replyTo || !v6AuraEmailValid_(job.replyTo)) return 'REPLY_TO_INVALID';
+  var creativeCheck = v6AuraValidateCreativeOrBlock_(job, ctx.setGate);
+  if (creativeCheck.blocked) return 'CREATIVE_' + creativeCheck.error;
+  var render = v6AuraCampanaAVerifyGovernedRender_(job, ctx.creativeRows);
+  if (render.blocked) return render.error;
+  if (v6AuraCampanaAContactExclusion_(ctx.exclusions, accountId, contactId, job.email, ctx.now)) return 'ACTIVE_EXCLUSION';
+  var pipelineRow = ctx.pipelineByAccountId[accountId], stage = pipelineRow ? String(pipelineRow.currentStage || '').toUpperCase() : '';
+  if (v6AuraCampanaAEngagementStage_(stage) && !(v6AuraEmailText_(job.stopOverrideApplied) === 'YES' && v6AuraEmailText_(job.stopReasonStage).toUpperCase() === stage)) return 'ACCOUNT_ENGAGEMENT_STOP';
+  if (ctx.sentKeys[v6AuraJobDuplicateKey_(job)]) return 'ALREADY_SENT_DUPLICATE';
+  if (ctx.sentEmails[v6AuraEmailText_(job.email).toLowerCase()]) return 'EMAIL_ALREADY_SENT_THIS_CAMPAIGN_FAMILY';
+  var frequency = v6AuraCampanaAContactFrequency_({ accountId: accountId, contactId: contactId }, ctx.ledgerIndex, job.playbookId);
+  if (!frequency.eligible) return 'FREQUENCY_' + v6AuraEmailText_(frequency.status).toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+  return '';
+}
+function v6AuraCampanaAGoLive_() { return v6CampaignStudioLocked_(v6AuraCampanaAGoLiveLocked_); }
+function v6AuraCampanaAGoLiveLocked_() {
+  var runId = 'GOLIVE-CAMPANA-A-' + Utilities.getUuid().slice(0, 8).toUpperCase();
+  var out = { goLiveRunId: runId, startedAt: new Date().toISOString(), finishedAt: '', status: 'ABORTED', abortReason: '', campaignId: CAMPANA_A_CAMPAIGN_ID_, family: CAMPANA_A_JOB_FAMILY_, sourceRunId: '',
+    expected: 0, candidates: 0, validated: 0, promoted: 0, preflightWouldSend: 0, preflightSuppressed: 0, preflightReadyForLive: false,
+    sent: 0, failed: 0, suppressed: 0, skipped: 0, stopped: 0, blockedCreative: 0, creativeIds: '', creativeVersions: '', sendModeAfter: '', invalidByReason: {} };
+  var promotedJobs = [];
+  auraDisableLiveSending();
+  try {
+    // 1-2. Latest successful DRY_RUN.
+    var summary = v6AuraCampanaALatestRunSummary_();
+    if (!summary.found) { out.abortReason = 'NO_DRY_RUN_SUMMARY'; return out; }
+    out.sourceRunId = v6AuraEmailText_(summary.runId);
+    if (v6AuraEmailText_(summary.status) !== 'REGENERATE_COMPLETE' || v6AuraEmailText_(summary.sendMode).toUpperCase() !== 'DRY_RUN') { out.abortReason = 'LATEST_DRY_RUN_NOT_SUCCESSFUL:' + v6AuraEmailText_(summary.status); return out; }
+    if (Number(summary.dispatchFailed || 0) > 0) { out.abortReason = 'LATEST_DRY_RUN_HAD_FAILURES'; return out; }
+    out.expected = Number(summary.dispatchDryRun || 0);
+    if (!(out.expected > 0)) { out.abortReason = 'LATEST_DRY_RUN_WOULD_SEND_ZERO'; return out; }
+    // 3-4. Governance gates.
+    var setGate = v6CampaignStudioSetGate_(CAMPANA_A_CAMPAIGN_ID_);
+    if (setGate.blocked) { out.abortReason = 'CREATIVE_SET_NOT_APPROVED'; return out; }
+    var sourceGate = v6AuraCampanaASourceGate_();
+    if (!sourceGate.ok) { out.abortReason = 'SOURCE_GATE_' + sourceGate.status; return out; }
+    var queue = v6Rows_('MKT_EMAIL_QUEUE');
+    // A concurrent shared dispatcher tick must not find other PENDING work while LIVE is on.
+    var otherPending = queue.filter(function (r) { return v6AuraEmailText_(r.status).toUpperCase() === 'PENDING'; });
+    if (otherPending.length) { out.abortReason = 'PENDING_JOBS_ALREADY_IN_QUEUE:' + otherPending.length; return out; }
+    var ctx = {
+      setGate: setGate, creativeRows: v6Rows_('MKT_CAMPAIGN_CREATIVES'), exclusions: v6Rows_('MKT_EXCLUSIONS'),
+      ledgerIndex: v6AuraCampanaALedgerIndex_(v6Rows_('MKT_FREQUENCY_LEDGER')), pipelineByAccountId: {}, sentKeys: {}, sentEmails: {}, now: new Date()
+    };
+    v6Rows_('MKT_ACCOUNT_PIPELINE').forEach(function (r) { ctx.pipelineByAccountId[v6AuraEmailText_(r.accountId)] = r; });
+    queue.forEach(function (r) {
+      if (v6AuraEmailText_(r.status).toUpperCase() !== 'SENT') return;
+      ctx.sentKeys[v6AuraJobDuplicateKey_(r)] = true;
+      if (v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && v6AuraEmailText_(r.playbookId) === CAMPANA_A_JOB_FAMILY_) ctx.sentEmails[v6AuraEmailText_(r.email).toLowerCase()] = true;
+    });
+    var candidates = queue.filter(function (r) { return v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && v6AuraEmailText_(r.playbookId) === CAMPANA_A_JOB_FAMILY_ && v6AuraEmailText_(r.status).toUpperCase() === 'DRY_RUN'; });
+    out.candidates = candidates.length;
+    var validated = [], seenEmails = {}, ids = {}, versions = {};
+    candidates.forEach(function (job) {
+      var reason = v6AuraCampanaAGoLiveValidateJob_(job, ctx);
+      var email = v6AuraEmailText_(job.email).toLowerCase();
+      if (!reason && seenEmails[email]) reason = 'DUPLICATE_EMAIL_IN_BATCH';
+      if (reason) { out.invalidByReason[reason] = (out.invalidByReason[reason] || 0) + 1; return; }
+      seenEmails[email] = true; ids[job.creativeId] = true; versions[String(job.creativeVersion)] = true;
+      validated.push(job);
+    });
+    out.validated = validated.length;
+    out.creativeIds = Object.keys(ids).join(','); out.creativeVersions = Object.keys(versions).join(',');
+    if (validated.length !== out.expected) { out.abortReason = 'VALIDATED_COUNT_MISMATCH:' + validated.length + '!=' + out.expected; return out; }
+    // 5. Promote exactly the validated jobs.
+    var promotedAt = new Date().toISOString();
+    promotedJobs = validated.map(function (job) { return Object.assign({}, job, { status: 'PENDING', previousStatus: 'DRY_RUN', processedAt: '', error: '', goLiveRunId: runId, promotedAt: promotedAt }); });
+    v6BatchUpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], promotedJobs);
+    out.promoted = promotedJobs.length;
+    // 6. Existing preflight, after promotion.
+    var preflight = v6AuraCampanaAPreflight_();
+    out.preflightWouldSend = preflight.wouldSend; out.preflightSuppressed = preflight.suppressedByPreflight; out.preflightReadyForLive = !!preflight.readyForLive;
+    if (!preflight.readyForLive || preflight.wouldSend !== out.expected || preflight.suppressedByPreflight !== 0) {
+      out.abortReason = 'PREFLIGHT_NOT_READY:' + preflight.wouldSend + '/' + out.expected + ' suppressed=' + preflight.suppressedByPreflight;
+      return out;
+    }
+    // 7-8. LIVE only now; the existing governed dispatcher sends the exact stored HTML.
+    auraEnableLiveSending();
+    var dispatch;
+    try {
+      dispatch = v6AuraCampanaADispatchBatch_();
+    } finally {
+      auraDisableLiveSending();
+    }
+    out.sent = dispatch.sent || 0; out.failed = dispatch.failed || 0; out.suppressed = dispatch.suppressed || 0;
+    out.skipped = dispatch.skipped || 0; out.stopped = dispatch.stopped || 0; out.blockedCreative = dispatch.blockedCreative || 0;
+    out.status = out.failed || out.suppressed || out.skipped || out.stopped || out.blockedCreative || out.sent !== out.expected ? 'COMPLETE_WITH_EXCEPTIONS' : 'COMPLETE';
+    promotedJobs = [];
+    return out;
+  } catch (err) {
+    out.status = 'ERROR'; out.abortReason = String(err && err.message || err);
+    return out;
+  } finally {
+    // Never leave LIVE on; never leave a promoted job PENDING after an abort.
+    try { auraDisableLiveSending(); } catch (_) { }
+    if (promotedJobs.length) {
+      try {
+        var stillPending = {};
+        v6Rows_('MKT_EMAIL_QUEUE').forEach(function (r) { if (v6AuraEmailText_(r.status).toUpperCase() === 'PENDING') stillPending[v6AuraEmailText_(r.jobId)] = true; });
+        var revert = promotedJobs.filter(function (j) { return stillPending[j.jobId]; }).map(function (j) { return Object.assign({}, j, { status: 'DRY_RUN', goLiveRevertedAt: new Date().toISOString() }); });
+        if (revert.length) v6BatchUpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], revert);
+      } catch (_) { }
+    }
+    out.sendModeAfter = v6AuraSendMode_();
+    out.finishedAt = new Date().toISOString();
+    try {
+      v6AuraCampanaAEnsureGoLiveLogSheet_();
+      var row = {}; CAMPANA_A_GO_LIVE_LOG_SCHEMA_.forEach(function (k) { row[k] = out[k] == null ? '' : out[k]; });
+      row.invalidByReasonJson = JSON.stringify(out.invalidByReason); row.preflightReadyForLive = out.preflightReadyForLive ? 'YES' : 'NO';
+      v6UpsertByKey_('MKT_AURA_CAMPANA_A_GO_LIVE_LOG', ['goLiveRunId'], row);
+    } catch (_) { }
+    try { console.log('[AURA CAMPANA A GO LIVE] ' + JSON.stringify({ STATUS: out.status, ABORT_REASON: out.abortReason, EXPECTED: out.expected, PROMOTED: out.promoted, PREFLIGHT_WOULD_SEND: out.preflightWouldSend, SENT: out.sent, FAILED: out.failed, SUPPRESSED: out.suppressed, SKIPPED: out.skipped, CREATIVE_ID: out.creativeIds, CREATIVE_VERSION: out.creativeVersions, SEND_MODE_AFTER: out.sendModeAfter })); } catch (_) { }
+  }
+}

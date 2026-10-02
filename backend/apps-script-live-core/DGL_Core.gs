@@ -2571,8 +2571,13 @@ function RUN_AURA_WORDPRESS_QA() {
   }
 }
 
+// The ONLY human-triggered real-send entry point for Campaign A: the governed GO LIVE
+// (v6AuraCampanaAGoLive_, MarketingV6AuraCampanaA.gs) -- promotes exactly the validated DRY_RUN
+// jobs of the current family, re-runs preflight, sends through the governed Campaign A
+// dispatcher and always restores AURA_SEND_MODE to DRY_RUN. The legacy pre-governance real-send
+// path (v6AuraProcessCampaignQueue_ with simulate:false) is no longer reachable from here.
 function RUN_AURA_CAMPANA_A_GO_LIVE() {
-  return v6AuraProcessCampaignQueue_(CAMPANA_A_CAMPAIGN_ID_, { simulate: false });
+  return v6AuraCampanaAGoLive_();
 }
 
 function RUN_AURA_CAMPANA_A_GO_LIVE_TEST() {
