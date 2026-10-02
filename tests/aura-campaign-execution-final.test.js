@@ -441,7 +441,7 @@ test('Activation never inherits Reactivation copy (intake names, all languages, 
 });
 
 test('premium V5 visual systems work in governed V6 (no generic renderer regression)', () => {
-  const signatures = { 'editorial-white': 'width="58%"', 'split-hero': 'width="52%"', 'route-intelligence': 'ROUTE INTELLIGENCE', 'service-architecture': 'border-top:3px solid #77B82A', 'case-proof': 'CASE / PROOF', 'executive-minimal': 'DIRECT COMMERCIAL NOTE' };
+  const signatures = Object.fromEntries(['editorial-white', 'split-hero', 'route-intelligence', 'service-architecture', 'case-proof', 'executive-minimal'].map(id => [id, '<!--dgl-system:' + id + '-->']));
   Object.keys(Lib.CREATIVE_SYSTEMS).forEach(id => assert(signatures[id], 'every canonical system is covered: ' + id));
   for (const objective of ['Activation', 'Retention', 'Reactivation']) {
     const m = Studio.createModel(ctxFor(objective));
@@ -452,8 +452,13 @@ test('premium V5 visual systems work in governed V6 (no generic renderer regress
         assert(html.includes(signatures[id]), objective + ' ' + id + ' ' + language);
         assert(html.includes('border-radius'), 'premium container');
         assert(html.includes('src="' + Render.OFFICIAL_LOGO + '"'));
-        // case-proof is the canonical V5 proof layout: its NEXT STEP is text, not a button (unchanged design).
-        if (id !== 'case-proof') assert(/href="mailto:info@dglus\.com\?subject=/.test(html), objective + ' ' + id + ' CTA');
+        // Every system, including case-proof, carries a real mailto: CTA button.
+        assert(/href="mailto:info@dglus\.com\?subject=/.test(html), objective + ' ' + id + ' CTA');
+        // Email-safe premium markup from the reference bank: charset, phone stacking, no CSS
+        // overlays / script handlers, green rule, dark footer band with the site link.
+        assert(html.includes('<meta charset="utf-8">') && html.includes('@media only screen and (max-width:620px)') && html.includes('class="dgl-col'), id + ' responsive');
+        assert(!/position:\s*(absolute|relative)|onerror=|display:flex/.test(html), id + ' email-safe');
+        assert(html.includes('https://www.dglus.com') && html.includes('USA · MEXICO · CANADA'), id + ' footer/brand bar');
         assert(!/(src|href)="assets\//.test(html), 'absolute assets only');
         assert(!html.includes('Su aliado de transporte terrestre.') && !html.includes('padding:24px 36px;border-bottom:4px solid #77B82A'), 'old generic V6 renderer is gone');
         if (id !== 'executive-minimal') assert(/src="https:\/\/dglmarketing2026\.github\.io\/dgl-marketing-execution-os\/assets\/creative\//.test(html), 'photographic hero asset');
@@ -464,32 +469,93 @@ test('premium V5 visual systems work in governed V6 (no generic renderer regress
   // The V6 creative is the shared renderer's output -- one renderer, not a second design.
   const m = Studio.createModel(ctxFor('Activation'));
   const c = m.variants.ES.copy;
-  assert.equal(Studio.emailHtml(m, 'ES'), Render.render({ creativeSystem: 'editorial-white', objective: 'Activation', service: 'Multiservicio', angle: 'Current Movement', lane: '', heroUrl: '', logoUrl: Render.OFFICIAL_LOGO, serviceDisplay: 'DGL Ground Solutions' }, c, { ctaSubject: 'Requerimiento terrestre' }));
+  assert.equal(Studio.emailHtml(m, 'ES'), Render.render({ creativeSystem: 'split-hero', objective: 'Activation', service: 'Multiservicio', angle: 'Current Movement', lane: '', heroUrl: '', logoUrl: Render.OFFICIAL_LOGO, serviceDisplay: 'DGL Ground Solutions' }, c, { ctaSubject: 'Requerimiento terrestre' }));
 });
 
-test('automatic premium layout selection and the single intake question', () => {
-  const expected = { Activation: 'editorial-white', Retention: 'editorial-white', Reactivation: 'editorial-white', 'Quoted Not Booked': 'executive-minimal', 'Cross-Sell': 'service-architecture' };
-  for (const [objective, system] of Object.entries(expected)) {
-    assert.equal(Studio.createModel(ctxFor(objective)).layout, system, objective);
-    assert.equal(Render.systemFor(objective), system);
+test('automatic design selection uses the whole library by objective + campaignType + service + angle', () => {
+  // Every canonical visual system stays available in Campaign Studio.
+  assert.deepEqual(Object.keys(Lib.CREATIVE_SYSTEMS), ['editorial-white', 'split-hero', 'route-intelligence', 'service-architecture', 'case-proof', 'executive-minimal']);
+  const cases = [
+    [{ objective: 'Activation', service: 'Multiservicio', angle: 'Current Movement' }, 'split-hero', 'GROUND_CAPACITY_ASK'],
+    [{ objective: 'ACTIVATION', service: 'FTL', angle: 'Current Movement' }, 'split-hero', 'GROUND_CAPACITY_ASK'],
+    [{ objective: 'Activation', service: 'Cross Border', angle: 'Current Movement' }, 'route-intelligence', 'LANE_OR_CORRIDOR'],
+    [{ objective: 'Activation', service: 'Multiservicio', angle: 'Relationship Update' }, 'editorial-white', 'OBJECTIVE_RECOMMENDED'],
+    [{ objective: 'Retention', service: 'FTL', angle: 'Stay Close' }, 'editorial-white', 'OBJECTIVE_RECOMMENDED'],
+    [{ objective: 'Reactivation', service: 'FTL', angle: 'Previous Relationship' }, 'editorial-white', 'OBJECTIVE_RECOMMENDED'],
+    [{ objective: 'Reactivation', service: 'LTL', angle: 'Ready to Quote' }, 'split-hero', 'GROUND_CAPACITY_ASK'],
+    [{ objective: 'Quoted Not Booked', service: 'FTL', angle: 'Still Active' }, 'executive-minimal', 'QNB_DIRECT_NOTE'],
+    [{ campaignType: 'CROSS_SELL', service: 'FTL', angle: 'Additional Capability' }, 'service-architecture', 'CAPABILITY_EXPANSION'],
+    [{ objective: 'Relationship Renewal', service: 'FTL', angle: 'Planning Ahead' }, 'case-proof', 'PROOF_RENEWAL'],
+    [{ objective: 'Lane Campaign', service: 'Drayage', angle: 'Port Capacity' }, 'route-intelligence', 'LANE_OR_CORRIDOR']
+  ];
+  const used = new Set();
+  for (const [context, system, rule] of cases) {
+    const sel = Lib.selectSystem(context);
+    assert.deepEqual([sel.systemId, sel.rule], [system, rule], JSON.stringify(context));
+    assert(sel.reason.length > 20, 'every selection explains why');
+    assert.equal(Render.systemFor(context), system);
+    used.add(system);
   }
+  assert.equal(used.size, 6, 'different campaign contexts produce every design in the library');
+  // Governed Studio V6 uses the same selection for its automatic design.
+  assert.equal(Studio.createModel(ctxFor('Activation')).layout, 'split-hero');
+  assert.equal(Studio.createModel(ctxFor('Activation')).selection.rule, 'GROUND_CAPACITY_ASK');
+  assert.equal(Studio.createModel(ctxFor('Activation', { service: 'Cross Border' })).layout, 'route-intelligence', 'Activation is not pinned to one template');
+  assert.equal(Studio.createModel(ctxFor('Retention')).layout, 'editorial-white');
   assert.equal(Studio.createModel(ctxFor('Quoted Not Booked', { objective: 'QUOTED_NOT_BOOKED' })).layout, 'executive-minimal');
+  assert.equal(Studio.createModel(ctxFor('Cross-Sell')).layout, 'service-architecture');
+  // A backend context never pins the design.
+  assert.equal(Studio.createModel(ctxFor('Activation', { creativeSystem: 'editorial-white' })).layout, 'split-hero');
+  // Marketing can still pick any system manually in Campaign Studio.
+  const m = Studio.createModel(ctxFor('Activation'));
+  m.layout = 'case-proof';
+  assert(Studio.emailHtml(m, 'EN').includes('CASE / PROOF'));
+});
+
+test('the single intake question; the backend never fixes a design', () => {
   assert.equal(Studio.INTAKE_QUESTION, 'WHAT TYPE OF CAMPAIGN IS THIS?');
   assert.deepEqual(Array.from(Studio.INTAKE_OPTIONS), ['ACTIVATION', 'RETENTION', 'REACTIVATION', 'QUOTED_NOT_BOOKED', 'CROSS_SELL']);
   const ctx = campaignAContext({});
-  const backendSystems = { ACTIVATION: 'editorial-white', RETENTION: 'editorial-white', REACTIVATION: 'editorial-white', QUOTED_NOT_BOOKED: 'executive-minimal', CROSS_SELL: 'service-architecture' };
-  for (const [type, system] of Object.entries(backendSystems)) {
+  for (const type of ['ACTIVATION', 'RETENTION', 'REACTIVATION', 'QUOTED_NOT_BOOKED', 'CROSS_SELL']) {
     const plan = ctx.v6AuraCampaignIntake_({ campaignType: type.toLowerCase().replace(/_/g, ' ') });
     assert.equal(plan.campaignType, type);
     assert.deepEqual(Array.from(plan.manualQuestions), ['WHAT TYPE OF CAMPAIGN IS THIS?'], 'the ONLY manual campaign-level question');
-    assert.equal(plan.automatic.creativeSystem, system);
-    assert.equal(plan.automatic.creativeSystem, Render.systemFor(plan.automatic.objective), 'backend and frontend agree');
+    assert.equal(plan.automatic.creativeSystem, 'CAMPAIGN_STUDIO_AUTO', 'Campaign Studio chooses from its library');
     assert.deepEqual([plan.automatic.language, plan.automatic.executionUnit, plan.automatic.layout, plan.automatic.copy, plan.automatic.cta], ['AUTO_PER_CONTACT', 'CONTACT_EMAIL', 'AUTO', 'FAMILY_ONLY', 'AUTO']);
     assert.equal(plan.governance.campaignStudio, 'PRESENT');
   }
   assert.throws(() => ctx.v6AuraCampaignIntake_({}), /CAMPAIGN_TYPE_REQUIRED/);
   assert.throws(() => ctx.v6AuraCampaignIntake_({ campaignType: 'Nurture blast' }), /CAMPAIGN_TYPE_INVALID/);
 });
+
+const legacyCheck = (async () => {
+  // An approved creative persisted by the retired generic renderer (templateId 'editorial') is
+  // shown as legacy with the premium preview; nothing is revoked or overwritten.
+  const window = browser();
+  const studio = window.DGL_CAMPAIGN_STUDIO_V6;
+  const legacyHtml = '<p>old generic editorial</p>';
+  const context = ctxFor('Activation', { campaignId: ID, approvedCreativeVariants: { ES: { creativeId: ID + ':CREATIVE:1', creativeVersion: 1 } } });
+  const revoked = [];
+  window.DGL_MARKETING_BACKEND_ADAPTER_V55 = {
+    isConnected: () => true,
+    campaignStudioContext: async () => context,
+    getLatestApprovedCreative: async () => ({ creativeId: ID + ':CREATIVE:1', creativeVersion: 1, templateId: 'editorial', htmlBody: legacyHtml, subject: 'x' }),
+    revokeApprovedCreative: async id => revoked.push(id)
+  };
+  const mount = { innerHTML: '', querySelector: () => ({ onclick: null, textContent: '' }), querySelectorAll: () => [] };
+  await studio.render(mount, ID);
+  const m = studio.getState();
+  assert.equal(m.layout, 'split-hero');
+  const v = m.variants.ES;
+  assert.deepEqual([v.approved, v.dirty, v.legacyTemplate, v.legacyCreativeVersion], [false, true, 'editorial', 1]);
+  assert.equal(studio.variantStatus(v), 'LEGACY DESIGN · NEW PREMIUM PREVIEW');
+  const preview = studio.emailHtml(m, 'ES');
+  assert(preview.includes('<!--dgl-system:split-hero-->') && !preview.includes(legacyHtml), 'premium preview replaces the legacy display');
+  assert.equal(revoked.length, 0, 'creative v1 is not revoked or overwritten');
+  assert(mount.innerHTML.includes('Design selected automatically') && mount.innerHTML.includes('GROUND_CAPACITY_ASK'));
+  passed++;
+  console.log('aura-campaign-execution-final: legacy generic creative shown as legacy, never overwritten: PASS');
+})();
 
 test('automatic language per contact (EN / ES / PT)', () => {
   const tables = campaignATables(), ctx = campaignAContext(tables);
@@ -517,7 +583,7 @@ test('PREVIEW = GOVERNED = TEST DRAFT = DRY_RUN = DISPATCH HTML (checksums fail 
     const record = ctx.v6AuraApproveCreative_({ campaignId: ID, language, subject: v.copy.subjectA, preheader: v.copy.preheader, htmlBody: preview[language], textBody: [v.copy.headline, v.copy.body, v.copy.body2, v.copy.cta].join('\n\n'), templateId: model.layout, logoUrl: Render.OFFICIAL_LOGO, approvedBy: 'Marketing', creativeCopy: v.copy });
     const stored = tables.MKT_CAMPAIGN_CREATIVES.find(r => r.creativeId === record.creativeId);
     assert.equal(stored.htmlBody, preview[language], 'GOVERNED == PREVIEW (stored verbatim)');
-    assert.equal(stored.templateId, 'editorial-white');
+    assert.equal(stored.templateId, 'split-hero', 'the automatically selected premium system is persisted');
     ctx.GmailApp.createDraft = (to, subject, text, opts) => ({ getId: () => 'DRAFT-' + language, getMessage: () => ({ getBody: () => opts.htmlBody }) });
     const draft = ctx.v6AuraVerifyAndCreateTestDraft_({ campaignId: ID, draft: { language, subject: stored.subject, htmlBody: preview[language] } });
     assert.equal(draft.match, true, 'TEST DRAFT == GOVERNED');
@@ -567,4 +633,4 @@ test('real emails sent by this suite: 0 (fake transport only, DRY_RUN default)',
   assert.equal(ctx.__sentEmails.length, 0);
 });
 
-console.log('aura-campaign-execution-final: ALL ' + passed + ' PASS');
+legacyCheck.then(() => console.log('aura-campaign-execution-final: ALL ' + passed + ' PASS'), err => { console.error(err); process.exit(1); });

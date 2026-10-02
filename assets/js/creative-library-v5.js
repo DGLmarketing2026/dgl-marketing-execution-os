@@ -208,5 +208,34 @@
     return INTAKE_OBJECTIVES[key]||objective;
   }
 
-  global.DGL_CREATIVE_LIBRARY_V5={VERSION,CREATIVE_SYSTEMS,OBJECTIVES,SERVICES,CTA,resolveAsset,normalizeObjective};
+  // Automatic design selection from the EXISTING library: objective + campaignType + service +
+  // angle -> creative system, with the reason. Every system stays available; this only picks the
+  // best fit for the campaign context, falling back to the objective's recommended system.
+  // Ordered rules, first match wins.
+  const GROUND_CAPACITY_SERVICES=["FTL","LTL","Drayage","Multiservicio","Reefer","Intermodal"];
+  const CAPACITY_ASK_ANGLES=["Current Movement","Ready to Quote","Capacity Available","Seasonal Window"];
+  const SELECTION_RULES=[
+    {id:"QNB_DIRECT_NOTE",system:"executive-minimal",when:c=>c.objective==="Quoted Not Booked",
+      reason:"Quoted Not Booked is a low-promotion follow-up on an existing quote: direct commercial note."},
+    {id:"LANE_OR_CORRIDOR",system:"route-intelligence",when:c=>c.objective==="Lane Campaign"||c.service==="Cross Border"||c.angle==="Lane Opportunity"||c.angle==="Cross-Border Corridor"||c.angle==="Port Capacity",
+      reason:"The message is about a lane, corridor or port: the route is the visual and commercial argument."},
+    {id:"CAPABILITY_EXPANSION",system:"service-architecture",when:c=>c.objective==="Cross-Sell",
+      reason:"Cross-Sell introduces additional capabilities: hero plus service modules."},
+    {id:"PROOF_RENEWAL",system:"case-proof",when:c=>c.objective==="Relationship Renewal",
+      reason:"Relationship renewal is argued with evidence: problem, solution, result."},
+    {id:"GROUND_CAPACITY_ASK",system:"split-hero",when:c=>["Activation","Reactivation","Service Campaign"].includes(c.objective)&&GROUND_CAPACITY_SERVICES.includes(c.service)&&CAPACITY_ASK_ANGLES.includes(c.angle),
+      reason:"The ask is for a current/next ground movement on FTL / LTL / Drayage capacity: copy and logistics visual side by side with strong ground-capacity presence."},
+    {id:"SERVICE_CAMPAIGN",system:"split-hero",when:c=>c.objective==="Service Campaign",
+      reason:"Service campaigns lead with the service and its capacity."}
+  ];
+  function selectSystem(context={}){
+    const c={objective:normalizeObjective(context.objective||context.campaignType),service:String(context.service||"").trim(),angle:String(context.angle||context.messageAngle||"").trim()};
+    const rule=SELECTION_RULES.find(r=>r.when(c)&&CREATIVE_SYSTEMS[r.system]);
+    if(rule)return {systemId:rule.system,rule:rule.id,reason:rule.reason,context:c};
+    const recommended=(OBJECTIVES[c.objective]||{}).recommendedSystem;
+    const systemId=CREATIVE_SYSTEMS[recommended]?recommended:"editorial-white";
+    return {systemId,rule:"OBJECTIVE_RECOMMENDED",reason:"Relationship-led message: the objective's recommended editorial composition.",context:c};
+  }
+
+  global.DGL_CREATIVE_LIBRARY_V5={VERSION,CREATIVE_SYSTEMS,OBJECTIVES,SERVICES,CTA,resolveAsset,normalizeObjective,selectSystem,SELECTION_RULES};
 })(window);
