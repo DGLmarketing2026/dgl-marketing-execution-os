@@ -30,7 +30,7 @@
   const MARKETS="USA · MEXICO · CANADA";
   function systemMarker(id){return `<!--dgl-system:${id}-->`;}
   function doc(id,bg,pre,inner){
-    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media only screen and (max-width:620px){.dgl-col{display:block!important;width:100%!important;box-sizing:border-box!important}.dgl-hero{width:100%!important;height:auto!important}.dgl-pad{padding-left:22px!important;padding-right:22px!important}.dgl-h1{font-size:28px!important;line-height:1.12!important}.dgl-hide-m{display:none!important}.dgl-divider{border-left:0!important;border-top:1px solid ${C.line}!important}}</style></head><body style="margin:0;padding:0;background:${bg}">${systemMarker(id)}
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>@media only screen and (max-width:620px){.dgl-col{display:block!important;width:100%!important;box-sizing:border-box!important}.dgl-hero{width:100%!important;height:auto!important}.dgl-pad{padding-left:22px!important;padding-right:22px!important}.dgl-h1{font-size:28px!important;line-height:1.12!important}.dgl-hide-m{display:none!important}.dgl-divider{border-left:0!important;border-top:1px solid ${C.line}!important}.dgl-btn{white-space:normal!important;padding:14px 16px!important}.dgl-cardpad{padding:18px 16px!important}}</style></head><body style="margin:0;padding:0;background:${bg}">${systemMarker(id)}
       <div style="display:none;max-height:0;overflow:hidden">${esc(pre)}</div>
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="${bg}"><tr><td align="center" style="padding:28px 10px">
       <table role="presentation" width="680" cellspacing="0" cellpadding="0" style="width:100%;max-width:680px;border-radius:16px;overflow:hidden">${inner}</table>
@@ -63,14 +63,14 @@
   }
   function paragraph(text,color,size=15,margin="18px 0 0"){return text?`<p style="font-family:${FONT};font-size:${size}px;line-height:1.7;color:${color};margin:${margin}">${esc(text)}</p>`:"";}
   function button(cta,ctaHref,dark){
-    return `<table role="presentation" cellspacing="0" cellpadding="0"><tr><td bgcolor="${C.green}" style="border-radius:8px;background:${C.green}"><a href="${ctaHref}" style="display:inline-block;padding:15px 22px;font-family:${FONT};font-size:12px;letter-spacing:.6px;white-space:nowrap;font-weight:900;color:${dark?"#071005":"#071005"};text-decoration:none;text-transform:uppercase">${esc(cta)} &rarr;</a></td></tr></table>`;
+    return `<table role="presentation" cellspacing="0" cellpadding="0"><tr><td bgcolor="${C.green}" style="border-radius:8px;background:${C.green}"><a class="dgl-btn" href="${ctaHref}" style="display:inline-block;padding:15px 22px;font-family:${FONT};font-size:12px;letter-spacing:.6px;white-space:nowrap;font-weight:900;color:${dark?"#071005":"#071005"};text-decoration:none;text-transform:uppercase">${esc(cta)} &rarr;</a></td></tr></table>`;
   }
   // Bordered CTA card: kicker + question line on the left, green button on the right.
   function ctaCard(label,line,cta,ctaHref,dark){
     const bg=dark?"#0E131C":C.navy,border=dark?"#2F4A1C":C.navy;
     return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="${bg}" style="background:${bg};border:1px solid ${border};border-radius:12px"><tr>
-      <td class="dgl-col" style="padding:22px 24px;font-family:${FONT};vertical-align:middle">${kicker(label,C.greenText)}<div style="font-size:16px;line-height:1.4;font-weight:800;color:#FFFFFF;margin-top:6px">${esc(line)}</div></td>
-      <td class="dgl-col" align="right" style="padding:22px 24px;vertical-align:middle">${button(cta,ctaHref,dark)}</td>
+      <td class="dgl-col dgl-cardpad" style="padding:22px 24px;font-family:${FONT};vertical-align:middle">${kicker(label,C.greenText)}<div style="font-size:16px;line-height:1.4;font-weight:800;color:#FFFFFF;margin-top:6px">${esc(line)}</div></td>
+      <td class="dgl-col dgl-cardpad" align="right" style="padding:22px 24px;vertical-align:middle">${button(cta,ctaHref,dark)}</td>
     </tr></table>`;
   }
   // Service / proof strip: equal columns, green top accent, thin vertical dividers.

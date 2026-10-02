@@ -90,7 +90,7 @@ function v6CampaignStudioContext_(payload) {
   c.creativeSetApprovalId=c.creativeSetStatus==='APPROVED'?durable.approvalId:'';
   c.approvalStatus=c.creativeSetStatus==='APPROVED'?'APPROVED':'PENDING';return c;
 }
-function v6CampaignStudioList_(){return {campaigns:v6Rows_('MKT_CAMPAIGNS').map(function(r){var c=r.campaignId==='CMP-CAMPANA-A-HA-PRIORITARIA'?v6CampaignStudioCanonicalA_():r;return {campaignId:c.campaignId,campaignName:c.campaignName};})};}
+function v6CampaignStudioList_(){return {campaigns:v6Rows_('MKT_CAMPAIGNS').map(function(r){var c=r.campaignId==='CMP-CAMPANA-A-HA-PRIORITARIA'?v6CampaignStudioCanonicalA_():r;return {campaignId:c.campaignId,campaignName:c.campaignName,objective:c.objective||c.campaignType||r.objective||r.campaignType||'',service:c.service||r.service||'',amOwner:r.amOwner||r.owner||r.accountManager||'',status:c.status||r.status||''};})};}
 function v6CampaignStudioApproveSet_(payload){return v6CampaignStudioLocked_(function(){return v6CampaignStudioApproveSetLocked_(payload);});}
 function v6CampaignStudioApproveSetLocked_(payload){
   var c=v6CampaignStudioContext_(payload);
