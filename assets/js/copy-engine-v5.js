@@ -58,6 +58,17 @@
     "Service Reminder":{en:{subjectA:"{{firstName}}, DGL remains available for {{service}}",subjectB:"{{company}} | {{service}} support from DGL",preheader:"DGL remains available for upcoming {{service}} requirements.",headline:"DGL IS STILL AVAILABLE FOR YOUR {{service}} MOVES.",body:"DGL remains available to support {{company}} with upcoming {{service}} movements and coordinated ground capacity.",body2:"When a requirement comes up, send the details and we will review coverage, timing and pricing."},es:{subjectA:"{{firstName}}, DGL sigue disponible para {{service}}",subjectB:"{{company}} | apoyo {{service}} de DGL",preheader:"DGL sigue disponible para sus próximos requerimientos {{service}}.",headline:"DGL SIGUE DISPONIBLE PARA SUS MOVIMIENTOS {{service}}.",body:"DGL sigue disponible para apoyar a {{company}} con próximos movimientos {{service}} y capacidad terrestre coordinada.",body2:"Cuando surja un requerimiento, envíenos los detalles y revisamos cobertura, fechas y tarifa."},pt:{subjectA:"{{firstName}}, a DGL segue disponível para {{service}}",subjectB:"{{company}} | apoio em {{service}} da DGL",preheader:"A DGL segue disponível para os próximos requerimentos de {{service}}.",headline:"A DGL SEGUE DISPONÍVEL PARA SEUS EMBARQUES DE {{service}}.",body:"A DGL segue disponível para apoiar a {{company}} com os próximos embarques de {{service}} e capacidade terrestre coordenada.",body2:"Quando surgir um requerimento, envie os detalhes e revisamos cobertura, prazos e tarifa."}}
   };
 
+  const GENERIC_SERVICES=["","Multiservicio"];
+  const NEUTRAL={
+    en:[[/any {{service}} moves/g,"any ground moves"],[/next {{service}} move/g,"next ground move"],[/upcoming {{service}} moves/g,"upcoming ground moves"],[/{{service}} (moves|move|movements|shipment|requirements)/g,"ground $1"],[/ ?{{service}}/g,""]],
+    es:[[/movimientos {{service}}/g,"movimientos terrestres"],[/movimiento {{service}}/g,"movimiento terrestre"],[/ ?{{service}}/g,""]],
+    pt:[[/embarques de {{service}}/g,"embarques terrestres"],[/embarque {{service}}/g,"embarque terrestre"],[/embarques {{service}}/g,"embarques terrestres"],[/ ?{{service}}/g,""]]
+  };
+  function neutralize(x,lg){
+    const rules=NEUTRAL[lg]||NEUTRAL.es,out={};
+    Object.keys(x).forEach(k=>{let v=x[k];if(typeof v==="string")rules.forEach(([re,to])=>{v=v.replace(re,to);});out[k]=v;});
+    return out;
+  }
   function generate(s){
     s={...s,objective:L().normalizeObjective?L().normalizeObjective(s.objective):s.objective};
     const lg=language(s),service=svc(s),serviceName=service?.name||s.service||"DGL";
@@ -77,7 +88,13 @@
     else if(s.objective==="Service Campaign"){
       x={...(SERVICE_CAMPAIGN[s.angle]||SERVICE_CAMPAIGN["Capacity Available"])[lg]};
       if(!x.headline)x.headline=lg==="en"?service.headlineEN:lg==="pt"?(service.headlinePT||service.headlineEN):service.headlineES;
-    }else x=(REACTIVATION[s.angle]||REACTIVATION["Previous Relationship"])[lg];
+    }else{
+      x=(REACTIVATION[s.angle]||REACTIVATION["Previous Relationship"])[lg];
+      // Multi-service reactivation (no specific service, e.g. Campaign A, 90+ days without
+      // load): the same Reactivation copy, made service-neutral -- the literal service name and
+      // the {{service}} token never reach the customer.
+      if(GENERIC_SERVICES.includes(String(s.service||"").trim()))x=neutralize(x,lg);
+    }
     return Object.fromEntries(Object.entries({...x,cta:cta(s,lg),serviceProof:service.proof,serviceLabel:service.label}).map(([k,v])=>[k,Array.isArray(v)?v.map(clean):clean(v)]));
   }
   global.DGL_COPY_ENGINE_V5={generate};

@@ -1,6 +1,9 @@
 /** Private context and cell-level campaign updates; never returns recipient PII. */
 function v6CampaignStudioCanonicalA_() {
-  return {campaignId:'CMP-CAMPANA-A-HA-PRIORITARIA',campaignName:'Activation Prioritaria - Campana A (HA)',campaignType:'Activation',objective:'Activation',service:'Multiservicio',scopeId:'SCOPE-CAMPANA-A-HA-PRIORITARIA',audienceId:'SCOPE-CAMPANA-A-HA-PRIORITARIA',playbookId:'ACTIVATION_ACCOUNT',messageAngle:'Current Movement',language:'MULTILINGUAL',status:'AUTO_ACTIVE'};
+  // Campaign A is REACTIVATION: the authoritative source tab states "Campana A -- Reactivacion HA
+  // prioritaria (90+ dias sin carga)". Multiservicio is internal service context only; the
+  // customer-facing copy is service-neutral.
+  return {campaignId:'CMP-CAMPANA-A-HA-PRIORITARIA',campaignName:'Reactivacion HA prioritaria - Campana A',campaignType:'Reactivation',objective:'Reactivation',service:'Multiservicio',scopeId:'SCOPE-CAMPANA-A-HA-PRIORITARIA',audienceId:'SCOPE-CAMPANA-A-HA-PRIORITARIA',playbookId:'REACTIVATION_ACCOUNT',messageAngle:'Previous Relationship',language:'MULTILINGUAL',status:'AUTO_ACTIVE'};
 }
 // --- AURA campaign intake ------------------------------------------------------------------
 // For a newly received Sheet/report the ONLY campaign-level question Marketing answers is the
@@ -48,7 +51,7 @@ function v6CampaignStudioAudience_(campaign) {
   if(campaign.campaignId==='CMP-CAMPANA-A-HA-PRIORITARIA'){
     var map=v6AuraCampanaAAccountMap_(),ids={};
     Object.keys(map).forEach(function(hash){var r=map[hash],id=v6AuraCampanaARealAccountId_(hash,r.accountName,accounts);ids[id]=true;names[r.accountName]=id;});
-    resolved=v6AuraCampanaAResolveRecipients_(Object.keys(ids),names,'Activation');
+    resolved=v6AuraCampanaAResolveRecipients_(Object.keys(ids),names,CAMPANA_A_JOB_FAMILY_);
     resolved.candidates.forEach(function(r){if(r.rowCountry&&!countries[r.accountId])countries[r.accountId]=r.rowCountry;});
   }else{
     var rows=v6Rows_('MKT_AUDIENCES').filter(function(r){return r.campaignId===campaign.campaignId&&r.recordType==='RECIPIENT';});

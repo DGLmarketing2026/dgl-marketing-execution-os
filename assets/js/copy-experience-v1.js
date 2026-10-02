@@ -224,6 +224,13 @@
     // Campaign A copy). copyFor() has no Activation branch, so without this guard Activation fell
     // through to the Reactivation template and injected the service name ("Multiservicio"),
     // which the governed backend rejects (ACTIVATION_COPY_INVALID).
+    // Multi-service Reactivation (no specific service): keep the engine's service-neutral
+    // Reactivation copy instead of this module's service-specific "new lane" template, which
+    // would print the internal service name ("Multiservicio") to the customer.
+    if (s && s.objective === "Reactivation" && ["", "Multiservicio"].includes(String(s.service || "").trim())) {
+      if (!old.subjectA) throw new Error("REACTIVATION_COPY_UNAVAILABLE");
+      return { ...old, languageCode: lang };
+    }
     if (s && s.objective === "Activation") {
       // Fail closed: Activation never falls through to the Reactivation template.
       if (!old.subjectA) throw new Error("ACTIVATION_COPY_UNAVAILABLE");

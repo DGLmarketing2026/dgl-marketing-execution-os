@@ -42,8 +42,8 @@ const preserved=['createdAt','foreignFormula','foreignField','approvalSetId','ap
 assert.deepEqual(preserved.map(k=>tables.MKT_CAMPAIGNS[0][k]),['2020-original','=1+2','keep','keep-set','keep-date','keep-approval']);
 const writes=cellWrites;ctx.v6AuraCampanaAEnsureCampaignAndScope_();assert.equal(cellWrites,writes);
 let context=ctx.v6CampaignStudioContext_({campaignId:id});
-assert.equal(context.objective,'Activation');assert.equal(context.service,'Multiservicio');
-assert.equal(context.playbookId,'ACTIVATION_ACCOUNT');assert.equal(context.audienceId,'SCOPE-CAMPANA-A-HA-PRIORITARIA');
+assert.equal(context.objective,'Reactivation');assert.equal(context.service,'Multiservicio');
+assert.equal(context.playbookId,'REACTIVATION_ACCOUNT');assert.equal(context.audienceId,'SCOPE-CAMPANA-A-HA-PRIORITARIA');
 assert.equal(context.language,'MULTILINGUAL');assert.deepEqual(Array.from(context.requiredLanguages),langs);
 assert.equal(context.eligibleContacts,3);assert(!JSON.stringify(context).includes('@'));assert(!JSON.stringify(context).includes('private0'));
 assert.equal(ctx.v6AuraCampanaABuildQueue_().built,0);assert.equal(ctx.v6AuraCampanaADispatchBatch_().processed,0);
@@ -167,7 +167,7 @@ for(const l of ['Portuguese','Português','pt-BR','pt','PT'])assert.equal(ctx.v6
  assert.equal(m.variants.EN.copy.subjectA,english);assert.equal(m.variants.PT.copy.subjectA,portuguese);
  await studio.changeLayout(m,'executive-minimal');assert(langs.every(l=>!m.variants[l].approved));assert.deepEqual(revoked,['es','en','pt']);
  const fresh=studio.createModel(context);
- for(const l of langs){const html=studio.emailHtml(fresh,l);assert(html.includes('mailto:info@dglus.com'));assert(html.includes(ctx.V6_STUDIO_LOGO_));assert(!/Retention|Reactivation|Stay Close|Multiservicio|qaBrand/.test(html));assert(html.includes('width="680"'));assert(html.includes(l==='ES'?'ENVIAR REQUERIMIENTO':l==='PT'?'ENVIAR REQUERIMENTO':'SEND A REQUIREMENT'));}
+ for(const l of langs){const html=studio.emailHtml(fresh,l);assert(html.includes('mailto:info@dglus.com'));assert(html.includes(ctx.V6_STUDIO_LOGO_));assert(!/Retention|Reactivation|Stay Close|Multiservicio|qaBrand/.test(html));assert(html.includes('width="680"'));assert(html.includes(l==='ES'?'ENVIAR MOVIMIENTO':l==='PT'?'ENVIAR EMBARQUE':'SEND A SHIPMENT'),'Campaign A Reactivation CTA');}
 
  // Family regression: canonical objective, copy and CTA remain those of each family.
  for(const objective of ['Retention','Reactivation','Quoted Not Booked']){
