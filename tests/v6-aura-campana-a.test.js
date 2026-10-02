@@ -245,9 +245,9 @@ function gmailOpp(accountId, accountName, amOwner, sheetName) {
   assert.equal(build.built, 2, 'both contacts of the same account must each get their own job');
   var jobs = tables.MKT_EMAIL_QUEUE.filter(function (j) { return j.accountId === 'ACC-1'; });
   assert.equal(jobs.length, 2);
-  assert(jobs.every(j=>j.playbookId==='Activation'), 'future jobs must stay Activation');
-  assert.equal(tables.MKT_CAMPAIGNS[0].campaignType, 'Activation');
-  assert.equal(tables.MKT_CAMPAIGNS[0].objective, 'Activation');
+  assert(jobs.every(j=>j.playbookId==='Reactivation'), 'Campaign A jobs are Reactivation (source tab family)');
+  assert.equal(tables.MKT_CAMPAIGNS[0].campaignType, 'Reactivation');
+  assert.equal(tables.MKT_CAMPAIGNS[0].objective, 'Reactivation');
   assert.notEqual(jobs[0].contactId, jobs[1].contactId);
   console.log('campana-a test 3 (multiple eligible contacts of the same account are never collapsed to one job): PASS');
 })();
@@ -829,11 +829,11 @@ function campanaASheetValuesWithContacts(dataRows) {
   // (c) Stale RESPONDED, but from the SAME family (Activation -- Campana A's own family) -> NOT
   // overridden.
   var sameFamily = scenario(
-    { currentStage: 'RESPONDED', responseAt: oldDate, campaignId: 'CMP-OLD-ACTIVATION' },
-    { campaignId: 'CMP-OLD-ACTIVATION', objective: 'Activation' }
+    { currentStage: 'RESPONDED', responseAt: oldDate, campaignId: 'CMP-OLD-REACTIVATION' },
+    { campaignId: 'CMP-OLD-REACTIVATION', objective: 'Reactivation' }
   );
   assert.equal(sameFamily.status, 'STOPPED', 'a still-active Activation-family response must never be overridden by this rule');
-  assert.equal(sameFamily.stopOverrideReason, 'SAME_FAMILY_ACTIVATION_STILL_ACTIVE');
+  assert.equal(sameFamily.stopOverrideReason, 'SAME_FAMILY_REACTIVATION_STILL_ACTIVE');
 
   // (d) CLOSED / SUPPRESSED is an ACCOUNT-level status (2026-09-29 rule): explicit Campaign A
   // source membership takes precedence, so the contact is not stopped; the account status is

@@ -65,7 +65,7 @@ function campaignATables(n) {
       { accountId: 'ACC-A7', currentStage: 'CAMPAIGN ACTIVE', campaignId: ID }
     ],
     MKT_FREQUENCY_LEDGER: [{ accountId: 'ACC-A2', contactId: 'CS-8', activeCampaignId: 'CMP-OTHER-QNB', lastCampaignType: 'QNB', lastMarketingTouchAt: new Date(Date.now() - 20 * 86400000).toISOString(), touches30d: 1 }],
-    MKT_CAMPAIGNS: [{ campaignId: ID, campaignType: 'Activation', objective: 'Activation' }]
+    MKT_CAMPAIGNS: [{ campaignId: ID, campaignType: 'Reactivation', objective: 'Reactivation' }]
   };
 }
 function campaignAContext(tables, opts) {
@@ -74,7 +74,9 @@ function campaignAContext(tables, opts) {
   loadRealGovernance(ctx);
   return ctx;
 }
-const jobs = tables => (tables.MKT_EMAIL_QUEUE || []).filter(j => j.playbookId === 'Activation');
+// Campaign A family is REACTIVATION (source tab: "Campana A -- Reactivacion HA prioritaria").
+const FAMILY = 'Reactivation';
+const jobs = tables => (tables.MKT_EMAIL_QUEUE || []).filter(j => j.playbookId === FAMILY);
 const BUILT = 218; // 224 email rows - DNC - hard bounce - 2 invalid - contact opt-out - contact frequency
 
 // ---- Source & contact-level execution -------------------------------------------------------
@@ -211,12 +213,14 @@ test('real failure RUN-CAMPANA-A-87C2A811: stale pre-PR14 Activation jobs are re
   stale[150] = Object.assign({}, stale[150], { jobId: 'JOB:' + ID + ':' + stale[150].contactId + ':1' });
   // One Activation job that was really SENT: immutable.
   stale[7] = Object.assign({}, current[7], { status: 'SENT', processedAt: '2026-09-20T10:00:00.000Z', htmlBody: '<p>sent evidence</p>' });
-  // A stale PENDING Activation job for a contact the current logic excludes (DNC).
-  const dncJob = { jobId: 'JOB:' + ID + ':ACTIVATION:CS-0:1', campaignId: ID, accountId: 'ACC-A0', contactId: 'CS-0', email: 'c0@acct0.example', status: 'PENDING', playbookId: 'Activation', sequenceStep: 1 };
+  // A stale PENDING same-family job for a contact the current logic excludes (DNC), and a stale
+  // PENDING pre-correction ACTIVATION job: neither may ever dispatch.
+  const dncJob = { jobId: 'JOB:' + ID + ':REACTIVATION:CS-0:1', campaignId: ID, accountId: 'ACC-A0', contactId: 'CS-0', email: 'c0@acct0.example', status: 'PENDING', playbookId: FAMILY, sequenceStep: 1 };
+  const oldActivation = { jobId: 'JOB:' + ID + ':ACTIVATION:' + current[20].contactId + ':1', campaignId: ID, accountId: current[20].accountId, contactId: current[20].contactId, email: current[20].email, status: 'PENDING', playbookId: 'Activation', sequenceStep: 1, htmlBody: '<p>old activation</p>' };
   const history = [];
   for (let i = 0; i < 109; i++) history.push({ jobId: 'JOB:' + ID + ':' + current[i].contactId + ':1', campaignId: ID, accountId: current[i].accountId, contactId: current[i].contactId, status: 'SENT', playbookId: 'Retention', sequenceStep: 1, subject: 'Historical ' + i, htmlBody: '<p>Immutable ' + i + '</p>' });
   const tables = verifiedSourceTables();
-  tables.MKT_EMAIL_QUEUE = history.concat(stale, [dncJob]);
+  tables.MKT_EMAIL_QUEUE = history.concat(stale, [dncJob, oldActivation]);
   const historyBefore = JSON.stringify(history), sentBefore = JSON.stringify(stale[7]);
   const ctx = campaignAContext(tables);
 
@@ -227,11 +231,14 @@ test('real failure RUN-CAMPANA-A-87C2A811: stale pre-PR14 Activation jobs are re
   assert.equal(first.refreshed, VERIFIED_BUILT - 1, 'every stale never-SENT Activation job is refreshed');
   assert.equal(first.built, VERIFIED_BUILT - 1);
   assert.equal(first.retiredNoLongerEligible, 1);
-  const refreshed = tables.MKT_EMAIL_QUEUE.filter(j => j.playbookId === 'Activation' && j.previousStatus && j.status === 'PENDING');
+  assert.equal(first.retiredOtherFamily, 1, 'a pre-correction ACTIVATION PENDING job is retired, never reused');
+  const oldAfter = tables.MKT_EMAIL_QUEUE.find(j => j.jobId === oldActivation.jobId);
+  assert.deepEqual([oldAfter.status, oldAfter.error, oldAfter.playbookId, oldAfter.htmlBody], ['SUPPRESSED', 'CAMPAIGN_FAMILY_CHANGED_TO_REACTIVATION', 'Activation', '<p>old activation</p>']);
+  const refreshed = tables.MKT_EMAIL_QUEUE.filter(j => j.playbookId === FAMILY && j.previousStatus && j.status === 'PENDING');
   assert.equal(refreshed.length, VERIFIED_BUILT - 1);
   assert(refreshed.every(j => j.renderContract === 'GOVERNED_TOKEN_MERGE_V1' && !/pre-PR14/.test(j.htmlBody)));
   assert.equal(tables.MKT_EMAIL_QUEUE.find(j => j.jobId === stale[150].jobId).status, 'PENDING', 'legacy-id stale job refreshed in place');
-  assert.equal(tables.MKT_EMAIL_QUEUE.filter(j => j.playbookId === 'Activation' && j.contactId === stale[150].contactId).length, 1, 'never duplicated');
+  assert.equal(tables.MKT_EMAIL_QUEUE.filter(j => j.playbookId === FAMILY && j.contactId === stale[150].contactId).length, 1, 'never duplicated');
   assert.deepEqual([tables.MKT_EMAIL_QUEUE.find(j => j.jobId === dncJob.jobId).status, tables.MKT_EMAIL_QUEUE.find(j => j.jobId === dncJob.jobId).error], ['SUPPRESSED', 'REGENERATE_NO_LONGER_ELIGIBLE']);
   assert.equal(JSON.stringify(tables.MKT_EMAIL_QUEUE.find(j => j.jobId === stale[7].jobId)), sentBefore, 'SENT evidence byte-for-byte unchanged');
   assert.equal(JSON.stringify(tables.MKT_EMAIL_QUEUE.slice(0, 109)), historyBefore, 'historical 109 Retention SENT unchanged');
@@ -575,7 +582,7 @@ test('PREVIEW = GOVERNED = TEST DRAFT = DRY_RUN = DISPATCH HTML (checksums fail 
   const ctx = campaignAContext(tables, { noDefaultCreative: true });
   const png = Array.from(fs.readFileSync(path.join(root, 'assets/brand/dgl-logo-white.png')));
   ctx.UrlFetchApp = { fetch: () => ({ getResponseCode: () => 200, getBlob: () => ({ getBytes: () => png }) }) };
-  const model = Studio.createModel(ctxFor('Activation', { campaignId: ID }));
+  const model = Studio.createModel(ctxFor('Reactivation', { campaignId: ID, service: 'Multiservicio' }));
   const preview = {};
   for (const language of LANGS) {
     const v = model.variants[language];
@@ -583,7 +590,7 @@ test('PREVIEW = GOVERNED = TEST DRAFT = DRY_RUN = DISPATCH HTML (checksums fail 
     const record = ctx.v6AuraApproveCreative_({ campaignId: ID, language, subject: v.copy.subjectA, preheader: v.copy.preheader, htmlBody: preview[language], textBody: [v.copy.headline, v.copy.body, v.copy.body2, v.copy.cta].join('\n\n'), templateId: model.layout, logoUrl: Render.OFFICIAL_LOGO, approvedBy: 'Marketing', creativeCopy: v.copy });
     const stored = tables.MKT_CAMPAIGN_CREATIVES.find(r => r.creativeId === record.creativeId);
     assert.equal(stored.htmlBody, preview[language], 'GOVERNED == PREVIEW (stored verbatim)');
-    assert.equal(stored.templateId, 'split-hero', 'the automatically selected premium system is persisted');
+    assert.equal(stored.templateId, 'editorial-white', 'the automatically selected premium system is persisted');
     ctx.GmailApp.createDraft = (to, subject, text, opts) => ({ getId: () => 'DRAFT-' + language, getMessage: () => ({ getBody: () => opts.htmlBody }) });
     const draft = ctx.v6AuraVerifyAndCreateTestDraft_({ campaignId: ID, draft: { language, subject: stored.subject, htmlBody: preview[language] } });
     assert.equal(draft.match, true, 'TEST DRAFT == GOVERNED');

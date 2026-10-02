@@ -24,7 +24,7 @@ function createModel(context){
   const m={context:Object.freeze({...context}),language:(context.requiredLanguages||[])[0]||"ES",layout:autoSystem(context),selection:selectionFor(context),variants:{},brand:null,busy:false,error:"",pendingRevokes:new Set()};
   LANGUAGES.forEach(language=>{
     const approved=context.approvedCreativeVariants?.[language];
-    m.variants[language]={copy:g.DGL_COPY_ENGINE_V5.generate({objective:objectiveOf(context),service:context.service,angle:context.messageAngle,language,qnbWindow:context.qnbWindow,ctaIntent:context.campaignId==="CMP-CAMPANA-A-HA-PRIORITARIA"?"Send Requirement":g.DGL_CREATIVE_LIBRARY_V5?.OBJECTIVES?.[context.objective]?.defaultCta}),dirty:!approved,testDraftStatus:context.testDraftStatus?.[language]||(approved?"APPROVED / TEST DRAFT REQUIRED":"UNAPPROVED"),approved:!!approved,...(approved||{})};
+    m.variants[language]={copy:g.DGL_COPY_ENGINE_V5.generate({objective:objectiveOf(context),service:context.service,angle:context.messageAngle,language,qnbWindow:context.qnbWindow,ctaIntent:g.DGL_CREATIVE_LIBRARY_V5?.OBJECTIVES?.[objectiveOf(context)]?.defaultCta}),dirty:!approved,testDraftStatus:context.testDraftStatus?.[language]||(approved?"APPROVED / TEST DRAFT REQUIRED":"UNAPPROVED"),approved:!!approved,...(approved||{})};
   });return m;
 }
 function selectLanguage(m,language){if(!LANGUAGES.includes(language))throw Error("Unsupported language");m.language=language;}

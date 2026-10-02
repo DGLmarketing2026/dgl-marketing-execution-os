@@ -497,7 +497,7 @@ function v6AuraCampanaAEnsureCampaignAndScope_(preloadedAccounts) {
   v6CampaignStudioPatchCampaign_(CAMPANA_A_CAMPAIGN_ID_, v6CampaignStudioCanonicalA_(), true);
   v6AuraEnsureCampaignScope_({
     scopeId: CAMPANA_A_SCOPE_ID_, campaignId: CAMPANA_A_CAMPAIGN_ID_,
-    opportunityType: 'Activation', campaignType: 'Activation', accountIds: accountIds, batchWrite: true
+    opportunityType: CAMPANA_A_JOB_FAMILY_, campaignType: CAMPANA_A_JOB_FAMILY_, accountIds: accountIds, batchWrite: true
   });
   return { accountIds: accountIds, count: accountIds.length, accountMap: accountMap, realIdByHashId: realIdByHashId, accountRealIdByName: accountRealIdByName, sourceContactRows: sourceContactRows };
 }
@@ -531,7 +531,7 @@ function v6AuraCampanaAStopOverrideCheck_(currentStage, pipelineRow, preloadedCa
   if (currentStage === 'CLOSED / SUPPRESSED') return { overridable: false, reason: 'HARD_STOP_CLOSED_SUPPRESSED' };
   if (CAMPANA_A_STALE_OVERRIDE_ELIGIBLE_STAGES_.indexOf(currentStage) < 0) return { overridable: false, reason: 'STAGE_NOT_ELIGIBLE_FOR_OVERRIDE' };
   var priorFamily = v6AuraCampanaAPriorCampaignFamily_(v6AuraEmailText_(p.campaignId), preloadedCampaigns);
-  if (priorFamily === 'ACTIVATION') return { overridable: false, reason: 'SAME_FAMILY_ACTIVATION_STILL_ACTIVE' };
+  if (priorFamily === CAMPANA_A_JOB_FAMILY_.toUpperCase()) return { overridable: false, reason: 'SAME_FAMILY_' + CAMPANA_A_JOB_FAMILY_.toUpperCase() + '_STILL_ACTIVE' };
   if (!priorFamily) return { overridable: false, reason: 'PRIOR_CAMPAIGN_FAMILY_UNKNOWN' };
   var at = v6AuraEmailText_(p.responseAt || p.enteredStageAt);
   var atDate = at ? new Date(at) : null;
@@ -838,12 +838,24 @@ function v6AuraCampanaAResolveRecipients_(accountIds, accountRealIdByName, campa
 // rewritten by the batch upsert. A legacy-format row is still honored as "already built" ONLY when
 // it is itself the same family (a pre-namespacing Activation job), so no Activation contact is
 // ever queued twice.
-var CAMPANA_A_JOB_FAMILY_ = 'Activation';
+// Campaign A family (2026-10-02 correction): REACTIVATION, per the source tab itself
+// ("Campana A -- Reactivacion HA prioritaria (90+ dias sin carga)"). Jobs are namespaced by family
+// (JOB:<campaignId>:REACTIVATION:<contactId>:<step>), so earlier never-SENT ACTIVATION jobs are never
+// reused: they stay as stale evidence, are never dispatched, and SENT history is never touched.
+var CAMPANA_A_JOB_FAMILY_ = 'Reactivation';
+// Service-neutral customer copy: no service token is ever injected for Campaign A.
 var CAMPANA_A_ACTIVATION_SERVICE_ = '';
 // ONE final governed HTML: the approved creative (the exact Campaign Studio preview HTML, verified
 // against the Gmail test draft) + literal token merge only. Dispatch re-derives this merge from
 // the stored creative and blocks on any byte drift -- no second renderer, no copy regeneration.
 var CAMPANA_A_RENDER_CONTRACT_ = 'GOVERNED_TOKEN_MERGE_V1';
+// Only jobs of the CURRENT Campaign A family are ever preflighted or dispatched. A job of another
+// family (e.g. a never-SENT ACTIVATION job built before the Reactivation correction) is stale
+// evidence; a job without a stored family keeps the previous behavior.
+function v6AuraCampanaACurrentFamilyJob_(job) {
+  var family = v6AuraEmailText_((job || {}).playbookId);
+  return !family || family.toUpperCase() === CAMPANA_A_JOB_FAMILY_.toUpperCase();
+}
 function v6AuraCampanaAGovernedRender_(creative, job) {
   var vars = { firstName: v6AuraEmailText_(job.firstName), company: v6AuraEmailText_(job.company), service: v6AuraEmailText_(job.service), lane: '' };
   return { subject: v6AuraCampanaASubject_(creative.subject, vars), htmlBody: v6AuraCreativePersonalize_(creative.htmlBody, vars) };
@@ -909,7 +921,7 @@ function v6AuraCampanaABuildQueueLocked_() {
   v6EnsureContactRecipientSchema_();
   var accounts = v6Rows_('MKT_ACCOUNTS');
   var setup = v6AuraCampanaAEnsureCampaignAndScope_(accounts);
-  var result = { status: setup.count ? 'QUEUE_BUILD_COMPLETE' : 'SOURCE_EMPTY_OR_NOT_FOUND', campaignId: CAMPANA_A_CAMPAIGN_ID_, accounts: setup.count, recipients: 0, built: 0, skippedExisting: 0, skippedSent: 0, refreshed: 0, refreshedByPreviousStatus: {}, retiredNoLongerEligible: 0, crossFamilyHistoricalIgnored: 0, skippedIneligible: 0, blockedNoReplyTo: 0, blockedCreative: 0, byLanguage: { ES: 0, EN: 0, PT: 0 } };
+  var result = { status: setup.count ? 'QUEUE_BUILD_COMPLETE' : 'SOURCE_EMPTY_OR_NOT_FOUND', campaignId: CAMPANA_A_CAMPAIGN_ID_, accounts: setup.count, recipients: 0, built: 0, skippedExisting: 0, skippedSent: 0, refreshed: 0, refreshedByPreviousStatus: {}, retiredNoLongerEligible: 0, retiredOtherFamily: 0, crossFamilyHistoricalIgnored: 0, skippedIneligible: 0, blockedNoReplyTo: 0, blockedCreative: 0, byLanguage: { ES: 0, EN: 0, PT: 0 } };
   if (!setup.count) { profile.MATCH_MS = Date.now() - tMatch0; v6AuraCampanaALog_('MATCH_END (0 accounts, SOURCE_EMPTY_OR_NOT_FOUND)'); result.profile = profile; return result; }
 
   // recipients below are keyed by the REAL MKT_ACCOUNTS accountId (v6AuraCampanaAEnsureCampaignAndScope_
@@ -929,7 +941,7 @@ function v6AuraCampanaABuildQueueLocked_() {
   v6AuraCampanaALog_('ELIGIBILITY_START (dedicated tab-primary resolver: DNC/email/exclusion/frequency)');
   var tElig0 = Date.now();
   var accountRealIdByName = setup.accountRealIdByName || {};
-  var resolved = v6AuraCampanaAResolveRecipients_(setup.accountIds, accountRealIdByName, 'Activation', accounts, setup.sourceContactRows);
+  var resolved = v6AuraCampanaAResolveRecipients_(setup.accountIds, accountRealIdByName, CAMPANA_A_JOB_FAMILY_, accounts, setup.sourceContactRows);
   var recipients = resolved.eligible;
   result.sourceGate = resolved.sourceGate;
   result.candidates = resolved.candidates.length;
@@ -990,7 +1002,7 @@ function v6AuraCampanaABuildQueueLocked_() {
 
   var replyTo = v6AuraEmailCanonicalReplyTo_();
   var replyToBlocked = !replyTo;
-  var policyApproved = (typeof v6AuraPolicyApproved_ === 'function') ? v6AuraPolicyApproved_('Activation') : true;
+  var policyApproved = (typeof v6AuraPolicyApproved_ === 'function') ? v6AuraPolicyApproved_(CAMPANA_A_JOB_FAMILY_) : true;
   // Iniciativa 2 -- Campana A supports ES/EN/PT per-recipient language selection from ONE
   // campaignId (CAMPANA_A_CAMPAIGN_ID_), so unlike the single-language Retention family, the
   // approved creative must be looked up PER LANGUAGE, not once for the whole campaign.
@@ -1146,10 +1158,14 @@ function v6AuraCampanaABuildQueueLocked_() {
     var retireAt = new Date().toISOString();
     Object.keys(existingIds).forEach(function (id) {
       var row = existingIds[id];
-      if (keptJobIds[id] || v6AuraEmailText_(row.campaignId) !== CAMPANA_A_CAMPAIGN_ID_ || v6AuraEmailText_(row.playbookId) !== CAMPANA_A_JOB_FAMILY_) return;
+      if (keptJobIds[id] || v6AuraEmailText_(row.campaignId) !== CAMPANA_A_CAMPAIGN_ID_) return;
       if (v6AuraEmailText_(row.status).toUpperCase() !== 'PENDING') return;
-      pendingJobs.push(Object.assign({}, row, { status: 'SUPPRESSED', error: 'REGENERATE_NO_LONGER_ELIGIBLE', processedAt: retireAt, previousStatus: 'PENDING' }));
-      result.retiredNoLongerEligible++;
+      var sameFamily = v6AuraEmailText_(row.playbookId) === CAMPANA_A_JOB_FAMILY_;
+      // A PENDING job of another family (pre-correction ACTIVATION) can never be sent as part of
+      // the Reactivation campaign; a same-family PENDING job no longer queued is retired too.
+      if (!sameFamily && !v6AuraEmailText_(row.playbookId)) return;
+      pendingJobs.push(Object.assign({}, row, { status: 'SUPPRESSED', error: sameFamily ? 'REGENERATE_NO_LONGER_ELIGIBLE' : 'CAMPAIGN_FAMILY_CHANGED_TO_' + CAMPANA_A_JOB_FAMILY_.toUpperCase(), processedAt: retireAt, previousStatus: 'PENDING' }));
+      if (sameFamily) result.retiredNoLongerEligible++; else result.retiredOtherFamily++;
     });
   }
   v6AuraCampanaALog_('QUEUE_WRITE_START (' + pendingJobs.length + ' new jobs)');
@@ -1211,7 +1227,7 @@ function v6AuraCampanaAStoppedBreakdown_() {
 // undetermined state.
 function v6AuraCampanaAPreflight_() {
   v6AuraCampanaALog_('PREFLIGHT_START');
-  var jobs = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) { return v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && r.status === 'PENDING'; });
+  var jobs = v6Rows_('MKT_EMAIL_QUEUE').filter(function (r) { return v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && r.status === 'PENDING' && v6AuraCampanaACurrentFamilyJob_(r); });
   var exclusions = v6Rows_('MKT_EXCLUSIONS');
   var wouldSend = 0, suppressedNow = 0, byLanguage = { ES: 0, EN: 0, PT: 0 }, issues = [], toSuppress = [];
   jobs.forEach(function (job) {
@@ -1263,7 +1279,7 @@ function v6AuraCampanaADispatchBatchLocked_() {
   if (!sourceGate.ok) return { status: sourceGate.status, processed: 0, sent: 0, built: 0, sourceGate: sourceGate };
   var senderName = v6AuraEmailSenderName_();
   var allQueueJobs = v6Rows_('MKT_EMAIL_QUEUE');
-  var jobs = allQueueJobs.filter(function (r) { return v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && v6AuraEmailText_(r.status).toUpperCase() === 'PENDING'; });
+  var jobs = allQueueJobs.filter(function (r) { return v6AuraEmailText_(r.campaignId) === CAMPANA_A_CAMPAIGN_ID_ && v6AuraEmailText_(r.status).toUpperCase() === 'PENDING' && v6AuraCampanaACurrentFamilyJob_(r); });
   var counts = { sent: 0, failed: 0, suppressed: 0, skipped: 0, stopped: 0, reviewRequired: 0, dryRun: 0, blockedCreative: 0 };
   if (!jobs.length) { v6AuraCampanaALog_('DISPATCH_END (0 pending jobs)'); return { status: 'DISPATCH_COMPLETE', sendMode: mode, rounds: 0, processed: 0, sent: 0, failed: 0, suppressed: 0, skipped: 0, stopped: 0, reviewRequired: 0, dryRun: 0, blockedCreative: 0 }; }
 

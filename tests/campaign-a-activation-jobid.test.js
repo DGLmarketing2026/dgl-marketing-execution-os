@@ -9,7 +9,9 @@ vm.runInContext(fs.readFileSync(path.join(root, 'tests/v6-aura-campana-a.test.js
 
 const ID = 'CMP-CAMPANA-A-HA-PRIORITARIA', LANGS = ['ES', 'EN', 'PT'];
 const legacyId = contactId => 'JOB:' + ID + ':' + contactId + ':1';
-const activationId = contactId => 'JOB:' + ID + ':ACTIVATION:' + contactId + ':1';
+// Campaign A family is now REACTIVATION (source tab); the namespacing guarantees are unchanged.
+const FAMILY = 'Reactivation';
+const activationId = contactId => 'JOB:' + ID + ':REACTIVATION:' + contactId + ':1';
 
 // Real-shaped historical queue: 109 SENT + 152 STOPPED + 1 FAILED, all Retention, all keyed by the
 // legacy id format -- and the three current Activation recipients (C0..C2) are among the SENT rows.
@@ -43,7 +45,7 @@ const statusCounts = rows => rows.reduce((m, r) => (m[r.status] = (m[r.status] |
   assert.equal(build.built, 3, 'Activation must no longer be skipped because of historical Retention jobIds');
   assert.equal(build.skippedExisting, 0);
   assert.equal(build.crossFamilyHistoricalIgnored, 3);
-  const activation = tables.MKT_EMAIL_QUEUE.filter(j => j.playbookId === 'Activation');
+  const activation = tables.MKT_EMAIL_QUEUE.filter(j => j.playbookId === FAMILY);
   assert.deepEqual(activation.map(j => j.jobId).sort(), ['C0', 'C1', 'C2'].map(activationId));
   assert.deepEqual(activation.map(j => j.preferredLanguage).sort(), ['EN', 'ES', 'PT']);
   assert.equal(historical(tables), before, 'historical Retention rows must be byte-for-byte unchanged');
@@ -58,25 +60,25 @@ const statusCounts = rows => rows.reduce((m, r) => (m[r.status] = (m[r.status] |
   const tables = fixtureTables(), before = historical(tables);
   const ctx = harness.makeContext({ tables, props: PROPS() });
   ctx.v6AuraCampanaABuildQueue_();
-  const afterFirst = JSON.stringify(tables.MKT_EMAIL_QUEUE.filter(j => j.playbookId === 'Activation').map(j => j.jobId).sort());
+  const afterFirst = JSON.stringify(tables.MKT_EMAIL_QUEUE.filter(j => j.playbookId === FAMILY).map(j => j.jobId).sort());
   const length = tables.MKT_EMAIL_QUEUE.length;
   const second = ctx.v6AuraCampanaABuildQueue_();
   const third = ctx.v6AuraCampanaABuildQueue_();
   assert.equal(second.built, 0); assert.equal(second.skippedExisting, 3);
   assert.equal(third.built, 0); assert.equal(third.skippedExisting, 3);
   assert.equal(tables.MKT_EMAIL_QUEUE.length, length, 'repeated builds must never add rows');
-  assert.equal(JSON.stringify(tables.MKT_EMAIL_QUEUE.filter(j => j.playbookId === 'Activation').map(j => j.jobId).sort()), afterFirst);
+  assert.equal(JSON.stringify(tables.MKT_EMAIL_QUEUE.filter(j => j.playbookId === FAMILY).map(j => j.jobId).sort()), afterFirst);
   assert.equal(new Set(tables.MKT_EMAIL_QUEUE.map(j => j.jobId)).size, tables.MKT_EMAIL_QUEUE.length, 'jobIds stay unique');
   assert.equal(historical(tables), before);
-  assert.equal(ctx.v6AuraCampanaAJobId_('Activation', 'C0', 1), activationId('C0'));
-  assert.equal(ctx.v6AuraCampanaAJobId_('Activation', 'C0', 1), ctx.v6AuraCampanaAJobId_('Activation', 'C0', 1));
-  assert.notEqual(ctx.v6AuraCampanaAJobId_('Activation', 'C0', 1), ctx.v6AuraEmailJobId_(ID, 'C0', 1));
+  assert.equal(ctx.v6AuraCampanaAJobId_(FAMILY, 'C0', 1), activationId('C0'));
+  assert.equal(ctx.v6AuraCampanaAJobId_(FAMILY, 'C0', 1), ctx.v6AuraCampanaAJobId_(FAMILY, 'C0', 1));
+  assert.notEqual(ctx.v6AuraCampanaAJobId_(FAMILY, 'C0', 1), ctx.v6AuraEmailJobId_(ID, 'C0', 1));
   console.log('campana-a jobid test 2 (repeated Activation builds are idempotent, never duplicate): PASS');
 })();
 
 // 3. A pre-namespacing Activation job (legacy id, playbookId Activation) still counts as built.
 (function legacyActivationHonoredTest() {
-  const legacyActivation = { jobId: legacyId('C3'), campaignId: ID, accountId: 'ACC-1', contactId: 'C3', status: 'PENDING', playbookId: 'Activation', sequenceStep: 1 };
+  const legacyActivation = { jobId: legacyId('C3'), campaignId: ID, accountId: 'ACC-1', contactId: 'C3', status: 'PENDING', playbookId: FAMILY, sequenceStep: 1 };
   const tables = fixtureTables([legacyActivation]);
   tables.MKT_CONTACTS_SECURE.push({ contactId: 'C3', accountId: 'ACC-1', firstName: 'Person', email: 'private3@example.test', preferredLanguage: 'EN' });
   const ctx = harness.makeContext({ tables, props: PROPS() });
@@ -85,7 +87,7 @@ const statusCounts = rows => rows.reduce((m, r) => (m[r.status] = (m[r.status] |
   // IN PLACE under its own legacy jobId -- never duplicated under a second id.
   assert.equal(build.built, 4);
   assert.equal(build.refreshed, 1);
-  const c3 = tables.MKT_EMAIL_QUEUE.filter(j => j.contactId === 'C3' && j.playbookId === 'Activation');
+  const c3 = tables.MKT_EMAIL_QUEUE.filter(j => j.contactId === 'C3' && j.playbookId === FAMILY);
   assert.equal(c3.length, 1);
   assert.equal(c3[0].jobId, legacyId('C3'));
   assert.equal(c3[0].renderContract, 'GOVERNED_TOKEN_MERGE_V1');
@@ -114,7 +116,7 @@ const statusCounts = rows => rows.reduce((m, r) => (m[r.status] = (m[r.status] |
   build = ctx.v6AuraCampanaABuildQueue_();
   assert.equal(build.built, 1);
   assert.equal(build.blockedCreative, 2);
-  assert.deepEqual(tables.MKT_EMAIL_QUEUE.filter(j => j.playbookId === 'Activation').map(j => j.preferredLanguage), ['ES']);
+  assert.deepEqual(tables.MKT_EMAIL_QUEUE.filter(j => j.playbookId === FAMILY).map(j => j.preferredLanguage), ['ES']);
   assert.equal(ctx.__sentEmails.length, 0);
   console.log('campana-a jobid test 4 (missing set approval / per-language creative fails closed): PASS');
 })();
