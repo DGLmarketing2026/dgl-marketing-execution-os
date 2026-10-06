@@ -56,7 +56,12 @@ function handleMarketingV55Api_(e, method) {
 // and must never be a second way to trigger a real send.
 'v6AuraEmailPerformanceJob', 'v6AuraEmailPerformance', 'v6AuraRetentionDashboard', 'v6AuraCampanaAAudit', 'v6AuraCampanaAMatchReport',
 'v6AuraCampanaAStoppedBreakdown', 'v6AuraExecutionReport', 'v6AuraAutomaticReportStatus',
-'v6AuraCampanaALatestRunSummary',
+'v6AuraCampanaALatestRunSummary', 'v6AuraCommandCenter',
+// AURA Agent Runtime (MarketingV6AuraAgentRuntime.gs). v6AuraAgentDecide records a human approval
+// decision only; v6AuraAgentRunNow runs one cycle whose external actions are always blocked in V1
+// (EXTERNAL_EXECUTION_DISABLED_PHASE_V1); v6AuraAgentActivate installs the hourly agent trigger.
+// None of them writes a queue row or calls GmailApp.send*.
+'v6AuraAgentDecide', 'v6AuraAgentRunNow', 'v6AuraAgentActivate',
 // Iniciativa 2 -- Campaign Studio's own Approve Creative action (MarketingV6AuraCreativeApproval.gs).
 // This persists CONTENT Marketing already designed and is about to display back to itself in the
 // same Studio -- exactly the same "Marketing executes HOW" category as v55CreateCampaign/
@@ -104,7 +109,14 @@ case 'v6AuraCampanaAStoppedBreakdown':
 case 'v6AuraExecutionReport':
 case 'v6AuraAutomaticReportStatus':
 case 'v6AuraCampanaALatestRunSummary':
+case 'v6AuraCommandCenter':
   result = routeMarketingV6_(action, req);
+  break;
+case 'v6AuraAgentDecide':
+case 'v6AuraAgentRunNow':
+case 'v6AuraAgentActivate':
+  result = routeMarketingV6_(action, req);
+  mktV55Audit_(action === 'v6AuraAgentDecide' ? 'AURA_AGENT_DECISION' : action === 'v6AuraAgentRunNow' ? 'AURA_AGENT_RUN' : 'AURA_AGENT_ACTIVATE', req, 'COMPLETED', result);
   break;
 case 'v6CampaignStudioTestDraft':
   result = routeMarketingV6_(action, req);

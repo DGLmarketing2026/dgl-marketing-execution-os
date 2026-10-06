@@ -91,10 +91,10 @@ function v6AuraEmailKpiScopes_(rows,queue,campaigns,tracking){
   function add(t,r){if(r.sendStatus==='SENT')t.sent++;if(r.sendStatus==='FAILED')t.failed++;if(r.bounceStatus)t.bounced++;if(r.replied)t.replied++;if(t.opened!=null&&r.opened)t.opened++;if(t.clicked!=null&&r.clicked)t.clicked++;}
   rows.forEach(function(r){
     if(!r.campaignId)return;
-    var c=byCampaign[r.campaignId]||(byCampaign[r.campaignId]={campaignId:r.campaignId,currentFamily:currentFamily[r.campaignId]||'',latestRunId:'',allTime:blank(),currentFamilyRun:blank(),historical:blank(),currentRun:blank(),historicalFamilies:{}});
+    var c=byCampaign[r.campaignId]||(byCampaign[r.campaignId]={campaignId:r.campaignId,currentFamily:currentFamily[r.campaignId]||'',latestRunId:'',lastSentAt:'',allTime:blank(),currentFamilyRun:blank(),historical:blank(),currentRun:blank(),historicalFamilies:{}});
     var q=jobById[r.jobId]||{},fam=String(q.playbookId||r.sentFamily||'');
     if(q.goLiveRunId&&String(q.goLiveRunId)>c.latestRunId&&r.sendStatus==='SENT')c.latestRunId=String(q.goLiveRunId);
-    add(c.allTime,r);
+    add(c.allTime,r);if(r.sentAt&&String(r.sentAt)>c.lastSentAt)c.lastSentAt=String(r.sentAt);
     if(c.currentFamily&&fam.toUpperCase()===c.currentFamily.toUpperCase())add(c.currentFamilyRun,r);
     else if(r.sendStatus==='SENT'){add(c.historical,r);c.historicalFamilies[fam||'UNKNOWN']=(c.historicalFamilies[fam||'UNKNOWN']||0)+1;}
   });
