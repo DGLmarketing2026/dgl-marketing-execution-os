@@ -1,7 +1,7 @@
 
 (function(global){
   "use strict";
-  const VERSION="5.3.4";
+  const VERSION="5.4.0";
 
   const CREATIVE_SYSTEMS={
     "editorial-white":{
@@ -237,5 +237,69 @@
     return {systemId,rule:"OBJECTIVE_RECOMMENDED",reason:"Relationship-led message: the objective's recommended editorial composition.",context:c};
   }
 
-  global.DGL_CREATIVE_LIBRARY_V5={VERSION,CREATIVE_SYSTEMS,OBJECTIVES,SERVICES,CTA,resolveAsset,normalizeObjective,selectSystem,SELECTION_RULES};
+  // ---- Creative Intelligence registry ---------------------------------------------------------
+  // Every creative decision is described on ten explicit dimensions so AURA can reason about,
+  // compare and extend treatments. Systems and selection rules above stay the source of truth;
+  // this layer describes HOW each system is executed and is extensible via registerTreatment.
+  const CREATIVE_DIMENSIONS=["CREATIVE_SYSTEM","LAYOUT_FAMILY","CONTENT_HIERARCHY","IMAGE_STRATEGY","CTA_STRATEGY","SERVICE_CONTEXT","CAMPAIGN_OBJECTIVE","AUDIENCE_CONTEXT","LANGUAGE","MOBILE_RULES"];
+  // Shared mobile contract of creative-render-v5 (@media max-width:620px), measured at 375 / 390 /
+  // 430 px for all six systems: no horizontal overflow, CTA tap target >= 44px, body >= 14px.
+  const MOBILE_BASE=["columns stack to one column at <= 620px","no horizontal overflow at 375 / 390 / 430 px","CTA label wraps instead of overflowing; tap target >= 44px tall","headline 28px; body copy >= 14px (11px only for service tags)","hero images fluid (width 100%, height auto), aspect ratio preserved","brand logo keeps its aspect ratio"];
+  const CREATIVE_TREATMENTS={
+    "editorial-white":{LAYOUT_FAMILY:"EDITORIAL_SINGLE_COLUMN",CONTENT_HIERARCHY:["brand header","dominant headline","integrated photo","two short paragraphs","primary CTA","signature footer"],IMAGE_STRATEGY:"Integrated service photograph inside the editorial column; supports, never replaces, the message.",CTA_STRATEGY:{type:"SINGLE_PRIMARY",placement:"after body",defaultCta:"Send Requirement"},MOBILE_RULES:MOBILE_BASE},
+    "split-hero":{LAYOUT_FAMILY:"SPLIT_HERO",CONTENT_HIERARCHY:["brand header","split hero: copy | logistics visual","capacity statement","primary CTA","footer"],IMAGE_STRATEGY:"Strong ground-capacity visual (truck / dock / yard) in a 50/50 or 60/40 split.",CTA_STRATEGY:{type:"SINGLE_PRIMARY",placement:"inside copy column",defaultCta:"Generate Quote"},MOBILE_RULES:MOBILE_BASE.concat(["split stacks: copy first, visual second"])},
+    "route-intelligence":{LAYOUT_FAMILY:"ROUTE_NARRATIVE",CONTENT_HIERARCHY:["brand header","lane / corridor headline","route visual","lane facts","primary CTA","footer"],IMAGE_STRATEGY:"Route, corridor or port as the visual argument.",CTA_STRATEGY:{type:"SINGLE_PRIMARY",placement:"after lane facts",defaultCta:"Send Requirement"},MOBILE_RULES:MOBILE_BASE.concat(["lane facts stack vertically"])},
+    "service-architecture":{LAYOUT_FAMILY:"HERO_PLUS_MODULES",CONTENT_HIERARCHY:["brand header","hero","service modules","benefits","primary CTA","footer"],IMAGE_STRATEGY:"Hero image plus iconography per service module.",CTA_STRATEGY:{type:"SINGLE_PRIMARY",placement:"after modules",defaultCta:"Review Service"},MOBILE_RULES:MOBILE_BASE.concat(["service modules become a single-column list"])},
+    "case-proof":{LAYOUT_FAMILY:"PROBLEM_SOLUTION_RESULT",CONTENT_HIERARCHY:["brand header","problem","solution","result / proof","primary CTA","footer"],IMAGE_STRATEGY:"Evidence-first: operational photo supporting the result block.",CTA_STRATEGY:{type:"SINGLE_PRIMARY",placement:"after result",defaultCta:"Meeting"},MOBILE_RULES:MOBILE_BASE.concat(["proof blocks stack in reading order"])},
+    "executive-minimal":{LAYOUT_FAMILY:"EXECUTIVE_NOTE",CONTENT_HIERARCHY:["brand header","short personal note","quote reference","reply CTA","signature"],IMAGE_STRATEGY:"No hero image: a low-promotion personal note.",CTA_STRATEGY:{type:"REPLY_FIRST",placement:"inline after note",defaultCta:"Recover Quote"},MOBILE_RULES:MOBILE_BASE}
+  };
+  // Every CTA is functional (mailto: DGL reply address with subject, or an approved https: link)
+  // and trackable (AURA tracking rewrites approved mailto:/https: CTAs at governed render).
+  const CTA_CONTRACT={functional:"mailto: or https: only, never '#'",trackable:"approved CTA href -> HMAC-tokenized AURA redirect (when tracking is enabled)"};
+  function registerTreatment(systemId,treatment){
+    const id=String(systemId||"").trim(),t=treatment||{};
+    const required=["LAYOUT_FAMILY","CONTENT_HIERARCHY","IMAGE_STRATEGY","CTA_STRATEGY","MOBILE_RULES"];
+    const missing=required.filter(k=>t[k]==null||(Array.isArray(t[k])&&!t[k].length));
+    if(!id||missing.length)return {ok:false,error:"TREATMENT_INCOMPLETE",missing};
+    if(!CREATIVE_SYSTEMS[id])return {ok:false,error:"UNKNOWN_CREATIVE_SYSTEM"};
+    CREATIVE_TREATMENTS[id]=Object.assign({},t);return {ok:true,systemId:id};
+  }
+  // Reference ingestion hook: records a reference (e.g. a visual from a reference bank) and the
+  // dimensions an analyst or model has ACTUALLY extracted from it. Nothing is inferred: a
+  // reference without supplied analysis stays PENDING_ANALYSIS and influences nothing.
+  const REFERENCES=[];
+  function registerReference(ref){
+    const r=ref||{},id=String(r.referenceId||"").trim();
+    if(!id)return {ok:false,error:"REFERENCE_ID_REQUIRED"};
+    const analysis=r.analysis&&typeof r.analysis==="object"?r.analysis:null;
+    const unknown=analysis?Object.keys(analysis).filter(k=>CREATIVE_DIMENSIONS.indexOf(k)<0):[];
+    if(unknown.length)return {ok:false,error:"UNKNOWN_DIMENSIONS",unknown};
+    const record={referenceId:id,source:String(r.source||""),systemId:CREATIVE_SYSTEMS[r.systemId]?r.systemId:"",status:analysis&&Object.keys(analysis).length?"ANALYZED":"PENDING_ANALYSIS",analysis:analysis||{},registeredAt:new Date().toISOString()};
+    const i=REFERENCES.findIndex(x=>x.referenceId===id);if(i<0)REFERENCES.push(record);else REFERENCES[i]=record;
+    return {ok:true,reference:record};
+  }
+  function listReferences(){return REFERENCES.map(r=>Object.assign({},r));}
+  function resolveTreatment(context={}){
+    const sel=selectSystem(context),t=CREATIVE_TREATMENTS[sel.systemId]||CREATIVE_TREATMENTS["editorial-white"];
+    const objective=sel.context.objective||"",service=sel.context.service||"Multiservicio",lang=String(context.language||"EN").toUpperCase().slice(0,2);
+    const ctaKey=context.cta&&CTA[context.cta]?context.cta:((OBJECTIVES[objective]||{}).defaultCta||t.CTA_STRATEGY.defaultCta);
+    const labels=CTA[ctaKey]||CTA["Send Requirement"];
+    const refs=REFERENCES.filter(r=>r.status==="ANALYZED"&&r.systemId===sel.systemId).map(r=>r.referenceId);
+    return {
+      CREATIVE_SYSTEM:{id:sel.systemId,name:(CREATIVE_SYSTEMS[sel.systemId]||{}).name,rule:sel.rule,reason:sel.reason},
+      LAYOUT_FAMILY:t.LAYOUT_FAMILY,
+      CONTENT_HIERARCHY:t.CONTENT_HIERARCHY.slice(),
+      IMAGE_STRATEGY:t.IMAGE_STRATEGY,
+      CTA_STRATEGY:Object.assign({},t.CTA_STRATEGY,{ctaKey,label:labels[lang.toLowerCase()]||labels.en,contract:CTA_CONTRACT}),
+      SERVICE_CONTEXT:{service,angle:sel.context.angle||""},
+      CAMPAIGN_OBJECTIVE:objective,
+      AUDIENCE_CONTEXT:{segment:String((context.audience||{}).segment||context.segment||""),relationship:String((context.audience||{}).relationship||""),accountTier:String((context.audience||{}).accountTier||"")},
+      LANGUAGE:["EN","ES","PT"].indexOf(lang)>=0?lang:"EN",
+      MOBILE_RULES:t.MOBILE_RULES.slice(),
+      references:refs
+    };
+  }
+
+  global.DGL_CREATIVE_LIBRARY_V5={VERSION,CREATIVE_SYSTEMS,OBJECTIVES,SERVICES,CTA,resolveAsset,normalizeObjective,selectSystem,SELECTION_RULES,
+    CREATIVE_DIMENSIONS,CREATIVE_TREATMENTS,resolveTreatment,registerTreatment,registerReference,listReferences};
 })(window);
