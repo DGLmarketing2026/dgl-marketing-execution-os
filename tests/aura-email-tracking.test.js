@@ -109,5 +109,13 @@ test('governed Campaign A render includes tracking and dispatch verification re-
   assert.equal(g.v6AuraCampanaAVerifyGovernedRender_(Object.assign({},job,{htmlBody:r.htmlBody.replace('c=1','c=0')}),[creative]).error,'GOVERNED_HTML_DRIFT');
   const plain=g.v6AuraCampanaAGovernedRender_(creative,Object.assign({},job,{trackingBaseUrl:''}));
   assert(!plain.htmlBody.includes('aura_t'),'tracking off = untouched governed merge');
+  const sent=Object.assign({},job,{status:'SENT',trackingBaseUrl:''});
+  assert.equal(g.v6AuraCampanaAJobNeedsRefresh_(sent,Object.assign({},job,{trackingBaseUrl:BASE})),false,'enabling tracking never rewrites a SENT Campaign A job');
+  assert.equal(g.v6AuraCampanaAJobNeedsRefresh_(Object.assign({},sent,{status:'DRY_RUN'}),Object.assign({},job,{trackingBaseUrl:BASE})),true,'unsent jobs pick up tracking on rebuild');
+});
+test('web app routes tracking first and keeps the existing router for everything else',()=>{
+  const core=fs.readFileSync('backend/apps-script-live-core/DGL_Core.gs','utf8'),body=core.slice(core.indexOf('function doGet(e)'));
+  assert(body.indexOf('v6AuraTrackingHandle_(e)')>=0&&body.indexOf('v6AuraTrackingHandle_(e)')<body.indexOf('handleMarketingV55Api_'));
+  assert.equal((core.match(/function doGet(/g)||[]).length,1);
 });
 console.log(checks+'/'+checks+' tracking checks passed');
