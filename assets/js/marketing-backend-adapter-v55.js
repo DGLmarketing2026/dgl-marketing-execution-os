@@ -79,7 +79,29 @@
     if(result&&Object.prototype.hasOwnProperty.call(result,"result"))return result.result;
     return result;
   }
+  // Request metrics (in memory only): lets the UI and QA measure request counts and latency.
+  const metrics={requests:0,cacheHits:0,dedupeHits:0,byAction:{},last:[]};
   function jsonp(action,payload,requiresToken=true){
+    metrics.requests++;metrics.byAction[action]=(metrics.byAction[action]||0)+1;
+    const started=Date.now();
+    return jsonpRaw(action,payload,requiresToken).then(v=>{metrics.last=[{action,ms:Date.now()-started,ok:true},...metrics.last].slice(0,30);return v;},e=>{metrics.last=[{action,ms:Date.now()-started,ok:false},...metrics.last].slice(0,30);throw e;});
+  }
+  // Read cache: in-flight de-duplication + short in-memory TTL for read-only actions. Never
+  // persisted (no localStorage/sessionStorage) and cleared by every mutation and disconnect.
+  const readCache=new Map(),inflight=new Map();
+  function clearReadCache(){readCache.clear();}
+  function read(action,payload,ttlMs=30000){
+    const key=action+"|"+JSON.stringify(payload===undefined?null:payload),hit=readCache.get(key);
+    if(ttlMs>0&&hit&&Date.now()-hit.at<ttlMs){metrics.cacheHits++;return Promise.resolve(hit.value);}
+    if(inflight.has(key)){metrics.dedupeHits++;return inflight.get(key);}
+    const p=jsonp(action,payload).then(value=>{readCache.set(key,{at:Date.now(),value});return value;}).finally(()=>inflight.delete(key));
+    inflight.set(key,p);return p;
+  }
+  async function readOrThrow(action,payload,ttlMs){
+    try{return await read(action,payload,ttlMs);}
+    catch(error){const c=classifyError(error);if(c.kind==="AUTH"){clearToken();setState(STATES.AUTH_ERROR,c.text);}throw new Error(c.text);}
+  }
+  function jsonpRaw(action,payload,requiresToken=true){
     return new Promise((resolve,reject)=>{
       if(requiresToken&&!token()){reject(new Error("Private backend token required"));return;}
       const callback=`__dglV55Jsonp_${Date.now()}_${++requestSequence}`,script=document.createElement("script");
@@ -113,8 +135,17 @@
     }
   }
 
-  async function refresh(){
+  async function refresh(options){
     if(!token())throw new Error("Private backend token required");
+    // After a mutation on an already-authenticated session only the datasets are re-read:
+    // the auth probe and the AURA report health check are not repeated (5 -> 3 requests).
+    if(options&&options.datasetsOnly&&state===STATES.PRIVATE_BACKEND){
+      const [r,c,a]=await Promise.allSettled([read("v55Requests",{},0),read("v55Campaigns",{},0),read("v55Activity",{},0)]);
+      if(r.status==="fulfilled")requests=arrayFrom(r.value,["requests","records"]).map(normalizeRequest);
+      if(c.status==="fulfilled")campaigns=arrayFrom(c.value,["campaigns","records"]).map(normalizeCampaign);
+      if(a.status==="fulfilled")activity=arrayFrom(a.value,["activity","records"]);
+      emit();return getConnectionState();
+    }
     // V6/AURA is the connection authority: a live Marketing OS only needs
     // one authenticated V6 read to prove the backend and the token are both
     // good. Legacy V5.5 datasets are optional context fetched afterward —
@@ -134,10 +165,10 @@
     diag.lastErrorCode="";diag.lastErrorMessage="";
 
     const [r,c,a,report]=await Promise.allSettled([
-      jsonp("v55Requests",{}),
-      jsonp("v55Campaigns",{}),
-      jsonp("v55Activity",{}),
-      jsonp("v6AuraExecutionReport",{})
+      read("v55Requests",{},0),
+      read("v55Campaigns",{},0),
+      read("v55Activity",{},0),
+      read("v6AuraExecutionReport",{},60000)
     ]);
     requests=r.status==="fulfilled"?arrayFrom(r.value,["requests","records"]).map(normalizeRequest):[];
     campaigns=c.status==="fulfilled"?arrayFrom(c.value,["campaigns","records"]).map(normalizeCampaign):[];
@@ -162,7 +193,7 @@
   }
 
   function disconnect(){
-    clearToken();requests=[];campaigns=[];activity=[];
+    clearToken();clearReadCache();requests=[];campaigns=[];activity=[];
     diag.v6Authenticated=false;diag.endpointReachable=null;
     diag.v6OpportunitiesStatus="UNKNOWN";diag.auraReportStatus="UNKNOWN";
     diag.legacyRequestsStatus="UNKNOWN";diag.legacyCampaignsStatus="UNKNOWN";diag.legacyActivityStatus="UNKNOWN";
@@ -173,7 +204,9 @@
   function getConnectionState(){return {state,mode:state===STATES.PRIVATE_BACKEND?"PRIVATE_BACKEND":"LOCAL_DEMO",connected:state===STATES.PRIVATE_BACKEND,error:lastError,requestCount:requests.length,campaignCount:campaigns.length,activityCount:activity.length};}
 
   async function mutate(action,payload,refreshAfter=true){
-    try{const result=await jsonp(action,payload);if(refreshAfter)await refresh();return result;}
+    // Any call through mutate may write: cached reads are dropped before and after it.
+    clearReadCache();
+    try{const result=await jsonp(action,payload);clearReadCache();if(refreshAfter)await refresh({datasetsOnly:true});return result;}
     catch(error){
       const c=classifyError(error);
       if(c.kind==="AUTH"){clearToken();setState(STATES.AUTH_ERROR,c.text);}
@@ -263,13 +296,21 @@
     // AURA dashboard bridge -- read-only reporting only (see MarketingV55Backend.gs's allowlist
     // comment): never a way to build a queue, dispatch, or send a real email from this page.
     v6AuraEmailPerformanceJob:jobId=>mutate("v6AuraEmailPerformanceJob",{jobId},false),
-    v6AuraEmailPerformance:()=>mutate("v6AuraEmailPerformance",{},false),
-    v6AuraRetentionDashboard:()=>mutate("v6AuraRetentionDashboard",{},false),
-    v6AuraCampanaAAudit:()=>mutate("v6AuraCampanaAAudit",{},false),
-    v6AuraCampanaAMatchReport:()=>mutate("v6AuraCampanaAMatchReport",{},false),
-    v6AuraCampanaAStoppedBreakdown:()=>mutate("v6AuraCampanaAStoppedBreakdown",{},false),
-    v6AuraAutomaticReportStatus:()=>mutate("v6AuraAutomaticReportStatus",{},false),
-    v6AuraCampanaALatestRunSummary:()=>mutate("v6AuraCampanaALatestRunSummary",{},false),
+    v6AuraEmailPerformance:()=>readOrThrow("v6AuraEmailPerformance",{}),
+    v6AuraRetentionDashboard:()=>readOrThrow("v6AuraRetentionDashboard",{}),
+    v6AuraCampanaAAudit:()=>readOrThrow("v6AuraCampanaAAudit",{}),
+    v6AuraCampanaAMatchReport:()=>readOrThrow("v6AuraCampanaAMatchReport",{}),
+    v6AuraCampanaAStoppedBreakdown:()=>readOrThrow("v6AuraCampanaAStoppedBreakdown",{}),
+    v6AuraAutomaticReportStatus:()=>readOrThrow("v6AuraAutomaticReportStatus",{}),
+    v6AuraCampanaALatestRunSummary:()=>readOrThrow("v6AuraCampanaALatestRunSummary",{}),
+    // AURA Command Center: ONE read-only request for the whole Overview (agent state, scoped
+    // KPIs, Campaign A audit, retention, execution report, latest run).
+    v6AuraCommandCenter:options=>readOrThrow("v6AuraCommandCenter",{},options&&options.force?0:30000),
+    // Agent decisions record a human approval only; external execution stays disabled in V1.
+    agentDecide:(approvalId,decision,note)=>{clearReadCache();return mutate("v6AuraAgentDecide",{approvalId,decision,note},false);},
+    agentRunNow:()=>{clearReadCache();return mutate("v6AuraAgentRunNow",{},false);},
+    agentActivate:()=>{clearReadCache();return mutate("v6AuraAgentActivate",{},false);},
+    getRequestMetrics:()=>JSON.parse(JSON.stringify(metrics)),
     // Iniciativa 2 -- Campaign Studio como unica fuente canonica del email. approveCreative
     // persists the FULL approved creative (never just a status flag); getLatestApprovedCreative
     // reads it back for a post-approval invalidation check or a Test Draft comparison. Neither
