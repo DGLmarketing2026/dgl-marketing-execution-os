@@ -116,6 +116,6 @@ test('governed Campaign A render includes tracking and dispatch verification re-
 test('web app routes tracking first and keeps the existing router for everything else',()=>{
   const core=fs.readFileSync('backend/apps-script-live-core/DGL_Core.gs','utf8'),body=core.slice(core.indexOf('function doGet(e)'));
   assert(body.indexOf('v6AuraTrackingHandle_(e)')>=0&&body.indexOf('v6AuraTrackingHandle_(e)')<body.indexOf('handleMarketingV55Api_'));
-  assert.equal((core.match(/function doGet(/g)||[]).length,1);
+  assert.equal((core.match(/function doGet\(/g)||[]).length,1);
 });
 console.log(checks+'/'+checks+' tracking checks passed');
