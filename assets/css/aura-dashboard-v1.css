@@ -133,3 +133,8 @@
   .aura-task { flex-direction: column; }
   .aura-task-side { flex-direction: row; align-items: center; flex-wrap: wrap; }
 }
+/* Task cards stack: title full width, policy + decisions on one row (readable at any lane width). */
+.aura-task { flex-direction: column; }
+.aura-task-side { flex-direction: row; align-items: center; flex-wrap: wrap; }
+.aura-cc .aura-badge-ready, .aura-scoped .aura-badge-ready { background: rgba(20,16,138,.55); color: #fff; border: 1px solid rgba(255,255,255,.18); }
+.aura-cc .aura-badge-idle, .aura-scoped .aura-badge-idle { color: var(--text-secondary, #6B7280); }
