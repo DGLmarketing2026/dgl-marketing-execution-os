@@ -2,17 +2,17 @@
  * AURA Overview — real-data dashboard for the Existing Account Growth pipeline
  * (NOVA/Salesforce -> AM Intelligence -> AURA -> Marketing OS).
  *
- * Read-only by design: this page only ever calls the AURA reporting endpoints
- * (v6AuraRetentionDashboard/v6AuraCampanaAAudit/v6AuraCampanaAMatchReport/
- * v6AuraCampanaAStoppedBreakdown/v6AuraExecutionReport), never a function that builds a
- * queue, dispatches, or sends a real email. Every number shown here is real Data Hub data
+ * AURA Agent Command Center. Loads with ONE read-only request (v6AuraCommandCenter) and
+ * falls back to the previous per-report calls only if the bundle is unavailable. The only
+ * writes are agent approval decisions / run-now / activate, which never build a queue,
+ * dispatch, or send a real email (external execution is disabled in Agent Runtime V1). Every number shown here is real Data Hub data
  * once connected -- there is no local sample/demo data path for this module.
  */
 (function (global) {
   "use strict";
 
   const adapter = () => global.DGL_MARKETING_BACKEND_ADAPTER_V55;
-  let state = { loading: false, error: "", retention: null, campanaA: null, matchReport: null, stoppedBreakdown: null, execReport: null, runSummary: null, performance: null, performanceError: "" };
+  let state = { agent: null, agentError: "", agentBusy: "", agentNotice: "", loadMeta: null, loading: false, error: "", retention: null, campanaA: null, matchReport: null, stoppedBreakdown: null, execReport: null, runSummary: null, performance: null, performanceError: "" };
 
   function fmt(n) { return n == null || !Number.isFinite(Number(n)) ? "N/A" : Number(n).toLocaleString("en-US"); }
   function esc(v) { return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
@@ -39,9 +39,9 @@
   }
   function performanceSection() {
     const data=state.performance;
-    if(!data)return `<section class="card card-pad"><h3>Email Performance</h3><p>${esc(state.performanceError||'Loading recipient report…')}</p></section>`;
+    if(!data||!data.summary||!Array.isArray(data.rows))return `<section class="card card-pad"><h3>Email Performance</h3><p>${esc(state.performanceError||'Loading recipient report…')}</p></section>`;
     const opts = k => [...new Set(data.rows.map(r=>r[k]).filter(Boolean))].sort().map(v=>`<option ${perfFilters[k]===v?'selected':''} value="${esc(v).replace(/"/g,'&quot;')}">${esc(v)}</option>`).join('');
-    return `<section class="aura-performance card card-pad"><h3>Email Performance</h3>
+    return `<section class="aura-performance card card-pad"><h3>Email Performance · all campaigns · all-time</h3>
       <div class="aura-performance-kpis">${['sent','failed','bounced','replied','opened','clicked'].map(k=>`<button type="button" data-perf-kpi="${k}" aria-pressed="${perfFilters.metric===k}"><span>${k.toUpperCase()}</span><strong>${fmt(data.summary[k])}</strong><small>${data.summary[k]==null?'NOT TRACKED':'MEASURED'}</small>${k==='sent'?`<small>${fmt(data.summary.sentUniqueEmails)} recipient emails · ${fmt(data.summary.sentUniqueAccounts)} accounts</small>`:''}</button>`).join('')}</div>
       <div class="aura-performance-filters"><label>Search company/contact/email<input data-perf-filter="search" type="search" value="${esc(perfFilters.search).replace(/"/g,'&quot;')}"></label>
       ${[['campaignId','Campaign'],['campaignFamily','Family'],['sendStatus','Status'],['language','Language']].map(([k,label])=>`<label>${label}<select data-perf-filter="${k}"><option value="">All</option>${opts(k)}</select></label>`).join('')}
@@ -51,7 +51,7 @@
       <div data-perf-detail></div></section>`;
   }
   function bindPerformance(mount) {
-    if(!state.performance)return;
+    if(!state.performance||!Array.isArray(state.performance.rows))return;
     const host=mount.querySelector&&mount.querySelector('.aura-performance');if(!host)return;
     function update(){
       const rows=filterPerformance(state.performance.rows,perfFilters);
@@ -108,6 +108,77 @@
     }
   }
   global.DGL_AURA_PERFORMANCE = {filter:filterPerformance,csv:performanceCsv,page:pageRows,openEmail:openEmail};
+  global.DGL_AURA_COMMAND_CENTER = { refresh: (o) => refresh(currentMount, o), getState: () => state };
+
+  const pct = v => v == null || v === "" ? "N/A" : Number(v).toFixed(2).replace(/\.00$/, "") + "%";
+  const isRate = m => /^(openRate|ctr|ctor)$/.test(m);
+  const SCOPE_COLUMNS = [["currentRun","CURRENT RUN"],["currentFamilyRun","CURRENT CAMPAIGN FAMILY"],["historical","HISTORICAL (OTHER FAMILIES)"],["allTime","ALL-TIME"]];
+  const SCOPE_METRICS = [["sent","SENT"],["delivered","DELIVERED (SENT − BOUNCED)"],["bounced","BOUNCED"],["opened","OPENED (unique)"],["clicked","CLICKED (unique)"],["replied","REPLIED"],["openRate","OPEN RATE"],["ctr","CTR"],["ctor","CTOR"]];
+  function scopedKpiSection() {
+    const scopes = (state.performance && state.performance.scopes) || {};
+    const list = Object.values(scopes).filter(c => c.allTime && c.allTime.sent).sort((a,b)=>String(b.lastSentAt||"").localeCompare(String(a.lastSentAt||""))).slice(0, 4);
+    if (!list.length) return "";
+    const cell = (c,k,m) => { const v = (c[k]||{})[m]; return isRate(m) ? pct(v) : v == null ? "NOT TRACKED" : fmt(v); };
+    return `<section class="card card-pad aura-scoped"><div class="aura-section-head"><h3>Campaign KPIs by scope</h3></div>
+      <p class="aura-hint">SENT is not DELIVERED. OPEN is a weak signal (image proxies and Apple Mail Privacy Protection inflate or hide opens). OR = unique opens ÷ delivered · CTR = unique clicks ÷ delivered · CTOR = unique clicks ÷ unique opens.</p>
+      ${list.map(c => `<div class="aura-scope-card"><div class="aura-scope-title"><strong>${esc(c.campaignId)}</strong><span class="aura-badge aura-badge-ready">CURRENT FAMILY: ${esc(c.currentFamily || "UNKNOWN")}</span>${c.latestRunId ? `<span class="aura-badge aura-badge-idle">RUN ${esc(c.latestRunId)}</span>` : ""}${Object.keys(c.historicalFamilies||{}).length ? `<span class="aura-badge aura-badge-idle">HISTORICAL: ${esc(Object.entries(c.historicalFamilies).map(([k,v])=>k+" "+v).join(", "))}</span>` : ""}</div>
+        <div class="aura-performance-scroll"><table class="data-table aura-scope-table"><thead><tr><th>Metric</th>${SCOPE_COLUMNS.map(([,l])=>`<th>${l}</th>`).join("")}</tr></thead><tbody>
+        ${SCOPE_METRICS.map(([m,l])=>`<tr><th scope="row">${l}</th>${SCOPE_COLUMNS.map(([k])=>`<td data-scope="${k}" data-metric="${m}">${cell(c,k,m)}</td>`).join("")}</tr>`).join("")}
+        <tr><th scope="row">RFQ / QUOTE / LOAD (campaign)</th><td colspan="4">${fmt((c.pipeline||{}).rfq)} / ${fmt((c.pipeline||{}).quote)} / ${fmt((c.pipeline||{}).load)}</td></tr></tbody></table></div></div>`).join("")}</section>`;
+  }
+  const POLICY_TONE = { AUTO: "live", REVIEW: "ready", APPROVAL_REQUIRED: "warn", BLOCKED: "idle" };
+  const attr = v => esc(v).replace(/"/g, "&quot;");
+  function taskItem(t, withDecision) {
+    const decide = withDecision && t.approvalId && t.approvalStatus === "PENDING";
+    return `<li class="aura-task"><div class="aura-task-main"><span class="aura-task-title">${esc(t.title)}</span><span class="aura-task-meta">${esc(t.scope)} · ${esc(t.state)}${t.blockReason ? " · " + esc(String(t.blockReason).replace(/_/g," ")) : ""}</span>${t.summary ? `<span class="aura-task-sub">${esc(t.summary)}</span>` : ""}${t.nextAction ? `<span class="aura-task-next">→ ${esc(t.nextAction)}</span>` : ""}</div>
+      <div class="aura-task-side"><span class="aura-badge aura-badge-${POLICY_TONE[t.policy]||"idle"}">${esc(String(t.policy||"").replace(/_/g," "))}</span>${decide ? `<button class="btn btn-primary btn-sm" data-agent-decide="APPROVED" data-approval="${attr(t.approvalId)}" data-title="${attr(t.title)}" ${state.agentBusy?"disabled":""}>APPROVE</button><button class="btn btn-secondary btn-sm" data-agent-decide="REJECTED" data-approval="${attr(t.approvalId)}" data-title="${attr(t.title)}" ${state.agentBusy?"disabled":""}>REJECT</button>` : ""}</div></li>`;
+  }
+  function lane(title, items, opts) {
+    const o = opts || {}, list = items || [];
+    return `<div class="aura-lane card card-pad${o.wide ? " aura-lane-wide" : ""}" data-lane="${attr(title)}"><div class="aura-lane-head"><h4>${title}</h4><span class="aura-count">${list.length}</span></div>${list.length ? `<ul class="aura-task-list">${list.slice(0, o.limit || 8).map(t => o.render ? o.render(t) : taskItem(t, o.decide)).join("")}</ul>` : `<div class="aura-empty">${o.empty || "Nothing here."}</div>`}</div>`;
+  }
+  function commandCenterSection() {
+    const a = state.agent;
+    if (!a) return `<section class="card card-pad aura-cc-status"><h3>AURA STATUS</h3><p>${esc(state.agentError || "Loading agent state…")}</p></section>`;
+    const st = a.status || {}, last = st.lastRun || {}, active = st.runtime === "ACTIVE", meta = state.loadMeta || {};
+    return `<section class="aura-cc">
+      <div class="aura-cc-status card card-pad"><div class="aura-section-head"><h3>AURA STATUS</h3>
+        <div class="aura-cc-actions">${active ? "" : `<button class="btn btn-primary btn-sm" data-agent-activate ${state.agentBusy?"disabled":""}>ACTIVATE HOURLY RUNTIME</button>`}<button class="btn btn-secondary btn-sm" data-agent-run ${state.agentBusy?"disabled":""}>RUN CYCLE NOW</button></div></div>
+        <div class="aura-cc-pills"><span class="aura-badge aura-badge-${active?"live":"warn"}">RUNTIME ${active?"ACTIVE · HOURLY":"INACTIVE"}</span><span class="aura-badge aura-badge-idle">LAST RUN ${esc(last.state||"NONE")} ${esc(String(last.finishedAt||last.startedAt||"").slice(0,16).replace("T"," "))}</span><span class="aura-badge aura-badge-warn">EXTERNAL ACTIONS NEED APPROVAL · V1 NEVER SENDS OR PUBLISHES</span>${meta.backendMs!=null?`<span class="aura-badge aura-badge-idle">1 REQUEST · ${fmt(meta.backendMs)} MS BACKEND</span>`:""}</div>
+        ${state.agentBusy ? `<p role="status" class="aura-hint">${esc(state.agentBusy)}</p>` : ""}${!state.agentBusy && state.agentNotice ? `<p role="status" class="aura-hint">${esc(state.agentNotice)}</p>` : ""}
+      </div>
+      <div class="aura-cc-grid">
+        ${lane("TODAY'S PRIORITIES", a.priorities, { empty: "No open priorities." })}
+        ${lane("WAITING FOR APPROVAL", a.waitingApproval, { decide: true, empty: "Nothing waiting for you." })}
+        ${lane("DETECTED OPPORTUNITIES", a.opportunities, { empty: "No eligible opportunities detected." })}
+        ${lane("ACTION QUEUE", a.actionQueue, { empty: "Queue empty." })}
+        ${lane("RUNNING", a.running, { empty: "Nothing running." })}
+        ${lane("BLOCKED", a.blocked, { empty: "Nothing blocked." })}
+        ${lane("COMPLETED", a.completed, { empty: "No completed tasks yet." })}
+        ${lane("NEXT BEST ACTIONS", a.nextBestActions, { render: t => `<li class="aura-task"><div class="aura-task-main"><span class="aura-task-title">${esc(t.nextAction)}</span><span class="aura-task-meta">${esc(t.title)}</span></div></li>`, empty: "No suggestions yet." })}
+        ${lane("RECENT RESULTS", (a.recentResults||[]).filter(m => m.scope === "currentRun"), { wide: true, limit: 12, render: m => `<li class="aura-task"><div class="aura-task-main"><span class="aura-task-title">${esc(m.campaignId)} · ${esc(m.metric)}</span><span class="aura-task-meta">CURRENT RUN · ${esc(String(m.at||"").slice(0,16).replace("T"," "))}</span></div><div class="aura-task-side"><strong>${isRate(m.metric) && m.value !== "NOT_TRACKED" ? pct(m.value) : esc(String(m.value).replace(/_/g," "))}</strong></div></li>`, empty: "No measurements yet." })}
+      </div></section>`;
+  }
+  async function agentAction(kind, el) {
+    const ad = adapter(); if (!ad || state.agentBusy) return;
+    try {
+      if (kind === "decide") {
+        const decision = el.dataset.agentDecide, title = el.dataset.title || "";
+        if (!global.confirm((decision === "APPROVED" ? "Approve" : "Reject") + ": " + title + "?\n\nThis records your decision only. No email is sent and nothing is published from here.")) return;
+        state.agentBusy = "Recording decision…"; paint(currentMount);
+        await ad.agentDecide(el.dataset.approval, decision, "");
+        state.agentNotice = "Decision recorded. AURA applies it on the next cycle.";
+      } else if (kind === "run") {
+        state.agentBusy = "Running AURA cycle…"; paint(currentMount);
+        const r = await ad.agentRunNow(); state.agentNotice = "Cycle " + String((r && r.status) || "done").replace(/_/g," ").toLowerCase() + ".";
+      } else if (kind === "activate") {
+        if (!global.confirm("Activate the hourly AURA runtime?\n\nIt observes, measures and prepares work. External actions still need your approval.")) return;
+        state.agentBusy = "Activating…"; paint(currentMount);
+        const r = await ad.agentActivate(); state.agentNotice = "Runtime " + String((r && r.status) || "").replace(/_/g," ").toLowerCase() + ".";
+      }
+    } catch (error) { state.agentNotice = "Action failed: " + (error && error.message || error); }
+    state.agentBusy = ""; await refresh(currentMount, { force: true });
+  }
 
   function statusBadge(status) {
     const s = String(status || "").toUpperCase();
@@ -269,8 +340,8 @@
     <div class="page-head">
       <div>
         <div class="eyebrow">AURA · EXISTING ACCOUNT GROWTH</div>
-        <h2>AURA Overview</h2>
-        <p class="lede">NOVA/Salesforce → AM Intelligence → AURA → Marketing OS. Datos reales del Data Hub — sin cifras de muestra.</p>
+        <h2>AURA Command Center</h2>
+        <p class="lede">AURA observes, analyzes, prepares and measures. You approve anything external — once per campaign. Real Data Hub data only.</p>
       </div>
       <div class="page-head-actions">
         <span class="sample-flag">${connected ? "PRIVATE BACKEND / LIVE" : connectionState.state === "CONNECTING" ? "CONNECTING" : "PRIVATE BACKEND REQUIRED"}</span>
@@ -282,6 +353,8 @@
 
     ${!connected ? `<div class="card card-pad"><strong>${state.loading ? "Cargando…" : state.error || "Conecta el backend privado para ver datos reales de AURA."}</strong></div>` : `
 
+    ${commandCenterSection()}
+    ${scopedKpiSection()}
     ${performanceSection()}
     <div class="kpi-grid">
       ${kpi("git-branch", "Run ID (última corrida Retention)", r.runId || "—")}
@@ -298,7 +371,7 @@
       ${kpi("building-2", "Source accounts", c.sourceAccountCount)}
       ${kpi("users", "Jobs (Campaña A)", c.jobsForCampaignA)}
       ${kpi("mail", "Queued (DRY_RUN)", (c.byStatusForCampaignA || {}).DRY_RUN)}
-      ${kpi("send", "Sent real", c.realSendsDetected)}
+      ${kpi("send", "Sent real (all families, all-time)", c.realSendsDetected)}
       ${kpi("shield-off", "Stopped", (c.byStatusForCampaignA || {}).STOPPED)}
       ${kpi("badge-check", "Estado fuente", c.sourceStatus === "SOURCE_OK" ? "OK" : (c.sourceStatus || "—"))}
     </div>
@@ -325,9 +398,22 @@
     global.lucide && global.lucide.createIcons && global.lucide.createIcons();
   }
 
-  async function refresh(mount) {
+  async function refresh(mount, options) {
     if (state.loading || !adapter() || !adapter().isConnected()) return;
-    state.loading = true; state.error = ""; state.performance = null; paint(mount);
+    state.loading = true; state.error = ""; paint(mount);
+    if (adapter().v6AuraCommandCenter) {
+      try {
+        const b = await adapter().v6AuraCommandCenter(options);
+        if (!b || !b.meta) throw new Error("bundle unavailable");
+        const ok = v => v && !v.error ? v : null;
+        state.agent = ok(b.agent); state.agentError = state.agent ? "" : "Agent runtime unavailable";
+        state.performance = ok(b.performance); state.performanceError = state.performance ? "" : "Email Performance unavailable";
+        state.retention = ok(b.retention) || {}; state.campanaA = ok(b.campanaA) || {}; state.execReport = ok(b.execution) || {}; state.runSummary = ok(b.latestRun);
+        state.loadMeta = b.meta;
+        state.loading = false; paint(mount); return;
+      } catch (error) { state.agent = null; state.agentError = "Agent Command Center is not available on this backend version yet."; state.loadMeta = null; }
+    }
+    state.performance = null;
     try { state.performance = await adapter().v6AuraEmailPerformance(); state.performanceError = ""; }
     catch(error) { state.performanceError = "Email Performance unavailable"; }
     try {
@@ -361,7 +447,13 @@
     if (event.target.closest("[data-aura-connect]")) {
       try { await adapter().connect(); if (adapter().isConnected()) await refresh(currentMount); } catch (error) { state.error = error.message; paint(currentMount); }
     } else if (event.target.closest("[data-aura-refresh]")) {
-      await refresh(currentMount);
+      await refresh(currentMount, { force: true });
+    } else if (event.target.closest("[data-agent-decide]")) {
+      await agentAction("decide", event.target.closest("[data-agent-decide]"));
+    } else if (event.target.closest("[data-agent-run]")) {
+      await agentAction("run");
+    } else if (event.target.closest("[data-agent-activate]")) {
+      await agentAction("activate");
     }
   });
   global.addEventListener && global.addEventListener("dgl:v55-backend-change", (event) => {
