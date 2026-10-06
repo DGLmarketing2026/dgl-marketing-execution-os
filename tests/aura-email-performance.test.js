@@ -6,7 +6,7 @@ ctx.v6MarkContactEmailInvalid_=p=>{ctx.invalid=p;};
 let checks=0;function test(name,fn){fn();checks++;console.log('PASS '+name);}
 const q={jobId:'j1',campaignId:'c1',accountId:'a1',contactId:'p1',email:'person@example.com',company:'Ácme',status:'SENT',processedAt:'2026-09-20T10:00:00Z'};
 tables.MKT_EMAIL_QUEUE.push(q,{...q,jobId:'j2',email:'failed@example.com',status:'FAILED'});
-test('SENT and FAILED counts',()=>{const r=ctx.v6AuraEmailPerformance_();assert.equal(r.summary.sent,1);assert.equal(r.summary.failed,1);assert(!('delivered' in r.summary));});
+test('SENT and FAILED counts',()=>{const r=ctx.v6AuraEmailPerformance_();assert.equal(r.summary.sent,1);assert.equal(r.summary.failed,1);assert.equal(r.summary.delivered,r.summary.sent-r.summary.bounced);assert.equal(r.summary.openRate,null);});
 test('OPEN and CLICK remain null without tracking',()=>{const r=ctx.v6AuraEmailPerformance_();assert.equal(r.summary.opened,null);assert.equal(r.summary.clicked,null);assert.equal(r.rows[0].opened,null);assert.equal(r.tracking.clicked,'NOT_TRACKED');});
 function message(code,id,email='person@example.com'){return {getRawContent:()=>`Content-Type: multipart/report; report-type=delivery-status\nFinal-Recipient: rfc822; ${email}\nStatus: ${code}\nDiagnostic-Code: smtp; ${code[0]==='4'?'450':'550'} ${code}`,getDate:()=>new Date('2026-09-21T10:00:00Z'),getId:()=>id};}
 test('hard bounce invalidation and permanent exclusion',()=>{assert.equal(ctx.v6AuraIngestDsnMessage_(message('5.1.1','m1')),1);assert.equal(ctx.invalid.contactId,'p1');assert.equal(tables.MKT_EXCLUSIONS[0].reasonCode,'HARD_BOUNCE');assert.equal(ctx.v6AuraEmailPerformance_().summary.bounced,1);});
@@ -29,5 +29,20 @@ test('governed events table created and extended without replacing data',()=>{
 });
 test('source reconciliation preserves actual evidence and is idempotent',()=>{
  tables.MKT_RESPONSES=[];ctx.v6AuraReconcileEmailEvents_();const count=tables.MKT_EMAIL_EVENTS.length;ctx.v6AuraReconcileEmailEvents_();assert.equal(tables.MKT_EMAIL_EVENTS.length,count);assert(tables.MKT_EMAIL_EVENTS.some(e=>e.eventType==='SENT'));assert(tables.MKT_EMAIL_EVENTS.some(e=>e.eventType==='FAILED'));assert(!tables.MKT_EMAIL_EVENTS.some(e=>['DELIVERED','OPEN','CLICK'].includes(e.eventType)));
+});
+test('KPI scopes separate current run, current family, historical and all-time (Campaign A 214/109/323)',()=>{
+  const T={MKT_EMAIL_QUEUE:[],MKT_EMAIL_EVENTS:[],MKT_RESPONSES:[{responseId:'R1',campaignId:'CMP-A',eventType:'RFQ'},{responseId:'R2',campaignId:'CMP-A',eventType:'QUOTE'}],MKT_CAMPAIGNS:[{campaignId:'CMP-A',campaignType:'Reactivation'}]};
+  const c2=Object.assign({},ctx,{v6Rows_:n=>T[n]||[]});vm.createContext(c2);
+  for(const f of ['MarketingV6SchemaMigration.gs','MarketingV6ResponseEvents.gs','MarketingV6AuraEmailPerformance.gs'])vm.runInContext(fs.readFileSync('backend/apps-script-v6/'+f,'utf8'),c2);
+  for(let i=0;i<109;i++)T.MKT_EMAIL_QUEUE.push({jobId:'H'+i,campaignId:'CMP-A',status:'SENT',playbookId:'Retention',processedAt:'2026-07-01T10:00:00Z'});
+  for(let i=0;i<214;i++)T.MKT_EMAIL_QUEUE.push({jobId:'R'+i,campaignId:'CMP-A',status:'SENT',playbookId:'Reactivation',goLiveRunId:'GL-2',processedAt:'2026-10-01T10:00:00Z'});
+  T.MKT_EMAIL_QUEUE.push({jobId:'D1',campaignId:'CMP-A',status:'DRY_RUN',playbookId:'Reactivation'});
+  T.MKT_EMAIL_EVENTS.push({eventId:'b',jobId:'R1',eventType:'BOUNCE',occurredAt:'2026-10-01T11:00:00Z',source:'GMAIL_DSN'});
+  const s=c2.v6AuraEmailPerformance_().scopes['CMP-A'];
+  assert.equal(s.currentRun.sent,214);assert.equal(s.currentFamilyRun.sent,214);assert.equal(s.historical.sent,109);assert.equal(s.allTime.sent,323);
+  assert.equal(s.historicalFamilies.Retention,109);assert.equal(s.latestRunId,'GL-2');
+  assert.equal(s.currentRun.bounced,1);assert.equal(s.currentRun.delivered,213,'SENT is not DELIVERED');
+  assert.equal(s.currentRun.openRate,null,'no tracking evidence = null, never 0%');
+  assert.deepEqual(JSON.parse(JSON.stringify(s.pipeline)),{rfq:1,quote:1,load:0});
 });
 console.log(`${checks}/${checks} performance checks passed`);

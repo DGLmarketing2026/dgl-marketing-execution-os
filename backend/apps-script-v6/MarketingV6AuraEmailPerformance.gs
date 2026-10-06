@@ -20,29 +20,40 @@ function v6AuraEmailDate_(value) {
 // Admin-only reconciliation: materialize authoritative queue/response evidence without
 // inferring delivery, opens or clicks. The report also reads these sources directly.
 function v6AuraReconcileEmailEvents_() {
-  var queue=v6Rows_('MKT_EMAIL_QUEUE');
+  var queue=v6Rows_('MKT_EMAIL_QUEUE'),known={};v6Rows_('MKT_EMAIL_EVENTS').forEach(function(e){known[e.eventId]=true;});
+  var pending=[];
   queue.forEach(function(q){
     if(!q.jobId||!/^(SENT|FAILED)$/.test(q.status))return;
     var event={eventId:'QUEUE:'+q.jobId+':'+q.status,jobId:q.jobId,campaignId:q.campaignId,accountId:q.accountId,contactId:q.contactId,email:q.email,eventType:q.status,occurredAt:v6AuraEmailDate_(q.processedAt),source:'MKT_EMAIL_QUEUE',externalId:q.jobId,reasonCode:q.status==='FAILED'?'SEND_FAILED':'',reasonText:q.error||'',createdAt:new Date().toISOString()};
-    if(!v6Rows_('MKT_EMAIL_EVENTS').some(function(e){return e.eventId===event.eventId;}))v6UpsertByKey_('MKT_EMAIL_EVENTS',['eventId'],event);
+    if(!known[event.eventId]){known[event.eventId]=true;pending.push(event);}
   });
+  var sentByCampaign={};queue.forEach(function(q){if(q.status==='SENT')(sentByCampaign[q.campaignId]=sentByCampaign[q.campaignId]||[]).push(q);});
   v6Rows_('MKT_RESPONSES').forEach(function(r){
     if(!/^(REPLY|CUSTOMER_REPLIED)$/.test(String(r.eventType||r.responseType).toUpperCase())||!r.responseId)return;
-    var jobs=queue.filter(function(q){return q.status==='SENT'&&v6AuraEmailDate_(q.processedAt||q.sentAt)&&v6AuraEmailDate_(q.processedAt||q.sentAt)<=v6AuraEmailDate_(r.responseAt)&&q.campaignId===r.campaignId&&((r.contactId&&r.contactId===q.contactId)||(r.email&&String(r.email).toLowerCase()===String(q.email).toLowerCase()));});
+    var jobs=(sentByCampaign[r.campaignId]||[]).filter(function(q){return q.status==='SENT'&&v6AuraEmailDate_(q.processedAt||q.sentAt)&&v6AuraEmailDate_(q.processedAt||q.sentAt)<=v6AuraEmailDate_(r.responseAt)&&q.campaignId===r.campaignId&&((r.contactId&&r.contactId===q.contactId)||(r.email&&String(r.email).toLowerCase()===String(q.email).toLowerCase()));});
     if(jobs.length!==1)return;
     var q=jobs[0],eventId='REPLY:'+r.responseId;
-    if(!v6Rows_('MKT_EMAIL_EVENTS').some(function(e){return e.eventId===eventId;}))v6UpsertByKey_('MKT_EMAIL_EVENTS',['eventId'],{eventId:eventId,jobId:q.jobId,campaignId:q.campaignId,accountId:q.accountId,contactId:q.contactId,email:q.email,eventType:'REPLY',occurredAt:v6AuraEmailDate_(r.responseAt),source:'MKT_RESPONSES',externalId:r.externalMessageId||r.responseId,createdAt:new Date().toISOString()});
+    if(!known[eventId]){known[eventId]=true;pending.push({eventId:eventId,jobId:q.jobId,campaignId:q.campaignId,accountId:q.accountId,contactId:q.contactId,email:q.email,eventType:'REPLY',occurredAt:v6AuraEmailDate_(r.responseAt),source:'MKT_RESPONSES',externalId:r.externalMessageId||r.responseId,createdAt:new Date().toISOString()});}
   });
+  if(pending.length){if(typeof v6BatchUpsertByKey_==='function')v6BatchUpsertByKey_('MKT_EMAIL_EVENTS',['eventId'],pending);else pending.forEach(function(e){v6UpsertByKey_('MKT_EMAIL_EVENTS',['eventId'],e);});}
+  return {written:pending.length};
 }
 function v6AuraEmailPerformance_() {
   var events=v6Rows_('MKT_EMAIL_EVENTS'),responses=v6Rows_('MKT_RESPONSES'),queue=v6Rows_('MKT_EMAIL_QUEUE');
   var campaigns=v6Rows_('MKT_CAMPAIGNS'),contacts=v6Rows_('MKT_CONTACTS_SECURE'),accounts=v6Rows_('MKT_ACCOUNTS');
-  function find(list,key,value){return list.filter(function(r){return value&&String(r[key])===String(value);})[0]||{};}
+  var indexes={};
+  function find(list,key,value){
+    if(!value)return {};
+    var id=key+'@'+(list===campaigns?'c':list===contacts?'k':list===accounts?'a':'x');
+    if(!indexes[id]){indexes[id]={};list.forEach(function(r){var k=String(r[key]);if(!(k in indexes[id]))indexes[id][k]=r;});}
+    return indexes[id][String(value)]||{};
+  }
+  var eventsByJob={};events.forEach(function(e){if(e.jobId)(eventsByJob[e.jobId]=eventsByJob[e.jobId]||[]).push(e);});
   // Tracking availability requires a real event with explicit source provenance.
   var tracking={opened:events.some(function(e){return e.eventType==='OPEN'&&e.source&&v6AuraEmailDate_(e.occurredAt);})?'TRACKED':'NOT_TRACKED',clicked:events.some(function(e){return e.eventType==='CLICK'&&e.source&&v6AuraEmailDate_(e.occurredAt);})?'TRACKED':'NOT_TRACKED'};
   var rows=queue.map(function(q){
     var c=find(campaigns,'campaignId',q.campaignId),ct=find(contacts,'contactId',q.contactId),a=find(accounts,'accountId',q.accountId);
-    var ev=events.filter(function(e){return e.jobId&&e.jobId===q.jobId;});
+    var ev=eventsByJob[q.jobId]||[];
     function at(type){return ev.filter(function(e){return e.eventType===type&&e.source;}).map(function(e){return v6AuraEmailDate_(e.occurredAt);}).filter(Boolean).sort()[0]||'';}
     var replies=responses.filter(function(r){return r.campaignId===q.campaignId&&((r.contactId&&r.contactId===q.contactId)||(r.email&&String(r.email).toLowerCase()===String(q.email).toLowerCase()))&&/^(REPLY|CUSTOMER_REPLIED)$/.test(String(r.eventType||r.responseType).toUpperCase());});
     replies=replies.filter(function(r){
@@ -61,7 +72,37 @@ function v6AuraEmailPerformance_() {
   summary.sentRecipientJobs=sentRows.length;
   summary.sentUniqueEmails=new Set(sentRows.map(function(r){return String(r.email||'').trim().toLowerCase();}).filter(Boolean)).size;
   summary.sentUniqueAccounts=new Set(sentRows.map(function(r){return r.accountId;}).filter(Boolean)).size;
-  return {summary:summary,rows:rows,tracking:tracking};
+  Object.assign(summary,v6AuraRatesOrNull_(summary));
+  return {summary:summary,rows:rows,tracking:tracking,scopes:v6AuraEmailKpiScopes_(rows,queue,campaigns,tracking)};
+}
+function v6AuraRatesOrNull_(c){return typeof v6AuraEngagementRates_==='function'?v6AuraEngagementRates_(c):{delivered:Math.max(0,(c.sent||0)-(c.bounced||0)),openRate:null,ctr:null,ctor:null};}
+// KPI scopes per campaign. A campaign can carry SENT history from an earlier family (Campaign A:
+// 109 historical Retention + 214 Reactivation = 323 all-time), so the current run, the current
+// family, the historical family sends and all-time are reported separately and never mixed.
+// CURRENT_RUN = SENT jobs of the latest governed GO LIVE run (goLiveRunId) when present, else
+// the current family. SENT is never presented as DELIVERED (delivered = sent - bounced).
+function v6AuraEmailKpiScopes_(rows,queue,campaigns,tracking){
+  var byCampaign={},jobById={};queue.forEach(function(q){jobById[q.jobId]=q;});
+  var currentFamily={};campaigns.forEach(function(c){currentFamily[String(c.campaignId)]=String(c.campaignType||c.objective||'');});
+  if(typeof CAMPANA_A_CAMPAIGN_ID_!=='undefined'&&typeof CAMPANA_A_JOB_FAMILY_!=='undefined')currentFamily[CAMPANA_A_CAMPAIGN_ID_]=CAMPANA_A_JOB_FAMILY_;
+  // Commercial outcomes are campaign-level evidence (MKT_RESPONSES), never inferred from engagement.
+  var pipeline={};v6Rows_('MKT_RESPONSES').forEach(function(r){var t=String(r.eventType||r.responseType||'').toUpperCase(),k=t==='RFQ'?'rfq':/^QUOTE(_SIGNAL)?$/.test(t)?'quote':/^LOAD(_SIGNAL)?$/.test(t)?'load':'';if(!k||!r.campaignId)return;var p=pipeline[r.campaignId]||(pipeline[r.campaignId]={rfq:0,quote:0,load:0});p[k]++;});
+  function blank(){return {sent:0,bounced:0,failed:0,replied:0,opened:tracking.opened==='NOT_TRACKED'?null:0,clicked:tracking.clicked==='NOT_TRACKED'?null:0};}
+  function add(t,r){if(r.sendStatus==='SENT')t.sent++;if(r.sendStatus==='FAILED')t.failed++;if(r.bounceStatus)t.bounced++;if(r.replied)t.replied++;if(t.opened!=null&&r.opened)t.opened++;if(t.clicked!=null&&r.clicked)t.clicked++;}
+  rows.forEach(function(r){
+    if(!r.campaignId)return;
+    var c=byCampaign[r.campaignId]||(byCampaign[r.campaignId]={campaignId:r.campaignId,currentFamily:currentFamily[r.campaignId]||'',latestRunId:'',allTime:blank(),currentFamilyRun:blank(),historical:blank(),currentRun:blank(),historicalFamilies:{}});
+    var q=jobById[r.jobId]||{},fam=String(q.playbookId||r.sentFamily||'');
+    if(q.goLiveRunId&&String(q.goLiveRunId)>c.latestRunId&&r.sendStatus==='SENT')c.latestRunId=String(q.goLiveRunId);
+    add(c.allTime,r);
+    if(c.currentFamily&&fam.toUpperCase()===c.currentFamily.toUpperCase())add(c.currentFamilyRun,r);
+    else if(r.sendStatus==='SENT'){add(c.historical,r);c.historicalFamilies[fam||'UNKNOWN']=(c.historicalFamilies[fam||'UNKNOWN']||0)+1;}
+  });
+  rows.forEach(function(r){var c=byCampaign[r.campaignId],q=jobById[r.jobId]||{};if(!c)return;
+    var inRun=c.latestRunId?String(q.goLiveRunId)===c.latestRunId:(c.currentFamily&&String(q.playbookId||'').toUpperCase()===c.currentFamily.toUpperCase());
+    if(inRun)add(c.currentRun,r);});
+  Object.keys(byCampaign).forEach(function(id){var c=byCampaign[id];c.pipeline=pipeline[id]||{rfq:0,quote:0,load:0};['allTime','currentFamilyRun','historical','currentRun'].forEach(function(k){Object.assign(c[k],v6AuraRatesOrNull_(c[k]));});});
+  return byCampaign;
 }
 function v6AuraJobEvidence_(job,campaign) {
   var family=job.playbookId||job.campaignFamily||'',checksum=job.recipientContentChecksum,hasChecksum=checksum!==null&&checksum!==undefined&&checksum!=='';
@@ -77,6 +118,7 @@ function v6AuraEmailPerformanceJob_(payload) {
   if(!jobs.length)return {status:'NOT_FOUND',jobId:id};
   if(jobs.length!==1)return {status:'AMBIGUOUS_JOB_ID',jobId:id};
   var job=jobs[0],row=v6AuraEmailPerformance_().rows.filter(function(r){return r.jobId===id;})[0];
+  row.engagement=v6Rows_('MKT_EMAIL_EVENTS').filter(function(e){return e.jobId===id&&/^(OPEN|CLICK)$/.test(e.eventType);}).map(function(e){return {eventType:e.eventType,ctaId:e.ctaId||'',firstAt:v6AuraEmailDate_(e.occurredAt),lastAt:v6AuraEmailDate_(e.lastOccurredAt||e.occurredAt),count:Number(e.eventCount||1)};});
   // Explicit fields only: no reconstructed content, invented IDs or historical writes.
   ['firstName','status','processedAt','createdAt','sequenceStep','subject','htmlBody','replyTo','creativeId','creativeVersion','creativeApprovalId','htmlChecksum','recipientRenderedChecksum','recipientContentChecksum'].forEach(function(k){row[k]=job[k]==null?'':job[k];});
   return row;
