@@ -36,7 +36,7 @@ test('campaign preparation is AUTO and governed: audience, language, creative, e
     MKT_EMAIL_QUEUE:[{jobId:'J',status:'SENT',email:'recent@x.com',processedAt:'2026-10-01T10:00:00Z'}]});
   const r=c.v6AuraAgentPlanCampaign_('REACTIVATION',NOW),p=r.plan;
   assert.equal(r.status,'DONE');assert.equal(p.eligibleAccounts,2,'suppressed + other scopes excluded');
-  assert.deepEqual(JSON.parse(JSON.stringify(p.contacts)),{eligible:6,invalid:1,doNotContact:1,recentlySent:1,duplicate:1,recipients:2});
+  assert.deepEqual(JSON.parse(JSON.stringify(p.contacts)),{eligible:6,invalid:1,doNotContact:1,recentlySent:1,duplicate:1,languageUnresolved:0,recipients:2});
   assert.equal(p.languages.ES+p.languages.EN,2);assert.equal(p.creativeSystem,'editorial-white');assert.equal(p.angle,'Previous Relationship');
   assert(!/@/.test(JSON.stringify(r)),'no email addresses in the plan');
   assert.equal(c.v6AuraAgentPlanCampaign_('QNB',NOW).plan.creativeSystem,'executive-minimal');

@@ -66,10 +66,11 @@ function v6AuraHubPrefetch_(tables, options) {
     var vals = (((data.valueRanges || [])[i]) || {}).values || [], h = out.headers[p.table], rows = rowsByTable[p.table] || (rowsByTable[p.table] = []);
     vals.forEach(function (v, r) { var o = rows[r] || (rows[r] = {}); for (var c = p.start; c <= p.end; c++) o[h[c]] = v6AuraHubCell_(h[c], v[c - p.start]); });
   });
+  out.rowNumbers = {};
   present.forEach(function (t) {
-    var h = out.headers[t];
-    out.tables[t] = (rowsByTable[t] || []).map(function (o) { o = o || {}; h.forEach(function (k) { if (!(k in o) && (AURA_HUB_EXCLUDE_[t] || []).indexOf(k) < 0) o[k] = ''; }); return o; })
-      .filter(function (o) { return h.some(function (k) { return o[k] !== '' && o[k] != null; }); });
+    var h = out.headers[t], rows = [], nums = [];
+    (rowsByTable[t] || []).forEach(function (o, i) { o = o || {}; h.forEach(function (k) { if (!(k in o) && (AURA_HUB_EXCLUDE_[t] || []).indexOf(k) < 0) o[k] = ''; }); if (h.some(function (k) { return o[k] !== '' && o[k] != null; })) { rows.push(o); nums.push(i + 2); } });
+    out.tables[t] = rows; out.rowNumbers[t] = nums;
   });
   return out;
 }
@@ -97,6 +98,30 @@ function v6AuraHubWriteAgentTables_(hub, changed, keys, schemas) {
   return { tables: data.length, structural: structural.length };
 }
 
+// Contact-language backfill: ONLY the four language columns of MKT_CONTACTS_SECURE, ONLY rows
+// whose preferredLanguage is empty, ONLY HIGH-confidence auditable evidence (caller-filtered).
+var AURA_HUB_LANG_COLUMNS_ = ['preferredLanguage', 'languageSource', 'languageConfidence', 'languageResolvedAt'];
+function v6AuraHubBackfillContactLanguage_(hub, updates) {
+  var t = 'MKT_CONTACTS_SECURE', rows = hub.tables[t] || [], nums = (hub.rowNumbers || {})[t] || [], headers = (hub.headers[t] || []).slice(), sh = hub.sheets[t];
+  if (!updates.length || !sh || !headers.length) return { written: 0 };
+  var structural = [], data = [];
+  AURA_HUB_LANG_COLUMNS_.forEach(function (c) { if (headers.indexOf(c) < 0) headers.push(c); });
+  if (headers.length > (hub.headers[t] || []).length) {
+    if (sh.columnCount < headers.length) structural.push({ updateSheetProperties: { properties: { sheetId: sh.sheetId, gridProperties: { columnCount: headers.length } }, fields: 'gridProperties.columnCount' } });
+    data.push({ range: v6AuraHubQuote_(t) + '!A1:' + v6AuraHubCol_(headers.length) + '1', values: [headers] });
+  }
+  var byId = {}; rows.forEach(function (r, i) { if (r.contactId) byId[String(r.contactId)] = i; });
+  var written = 0;
+  updates.slice(0, 500).forEach(function (u) {
+    var i = byId[String(u.contactId)]; if (i == null || String(rows[i].preferredLanguage || '').trim()) return;
+    AURA_HUB_LANG_COLUMNS_.forEach(function (c) { data.push({ range: v6AuraHubQuote_(t) + '!' + v6AuraHubCol_(headers.indexOf(c) + 1) + nums[i], values: [[u[c]]] }); });
+    written++;
+  });
+  if (!written) return { written: 0 };
+  if (structural.length) v6AuraHubCall_('contacts.structure', function () { return Sheets.Spreadsheets.batchUpdate({ requests: structural }, hub.spreadsheetId); }, hub.stats);
+  v6AuraHubCall_('contacts.languageBackfill', function () { return Sheets.Spreadsheets.Values.batchUpdate({ valueInputOption: 'RAW', data: data }, hub.spreadsheetId); }, hub.stats);
+  return { written: written };
+}
 // Production-safe diagnostic: timings per stage, no customer values logged (names/counts only).
 function v6AuraHubDiagnose_() {
   var out = { spreadsheetId: MKT_V6_DATA_HUB_ID, stages: [] }, ss = null;
