@@ -138,3 +138,28 @@
 .aura-task-side { flex-direction: row; align-items: center; flex-wrap: wrap; }
 .aura-cc .aura-badge-ready, .aura-scoped .aura-badge-ready { background: rgba(20,16,138,.55); color: #fff; border: 1px solid rgba(255,255,255,.18); }
 .aura-cc .aura-badge-idle, .aura-scoped .aura-badge-idle { color: var(--text-secondary, #6B7280); }
+
+/* ---- Platform performance + UX V1 ------------------------------------------------------------ */
+/* Loading skeletons: the layout appears immediately while the single bundled request runs. */
+.aura-skel { border-radius: 14px; background: linear-gradient(90deg, rgba(255,255,255,.04) 25%, rgba(255,255,255,.09) 37%, rgba(255,255,255,.04) 63%); background-size: 400% 100%; animation: aura-skel 1.4s ease infinite; }
+.aura-skel-status { height: 112px; }
+.aura-skel-lane { height: 190px; }
+@keyframes aura-skel { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+@media (prefers-reduced-motion: reduce) { .aura-skel { animation: none; } }
+/* Secondary diagnostics collapsed by default: less scrolling, less technical noise. */
+.aura-diagnostics { margin: 18px 0; padding: 0; overflow: hidden; }
+.aura-diagnostics > summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 16px 20px; font-weight: 700; }
+.aura-diagnostics > summary::-webkit-details-marker { display: none; }
+.aura-diagnostics > summary::before { content: "▸"; color: var(--secondary, #77B82A); transition: transform .15s ease; }
+.aura-diagnostics[open] > summary::before { transform: rotate(90deg); }
+.aura-diagnostics > summary small { font-weight: 500; color: var(--text-secondary, #6B7280); }
+.aura-diagnostics-body { padding: 0 20px 20px; }
+/* Long tables keep their header visible while scrolling. */
+.aura-performance-scroll { max-height: 560px; overflow: auto; }
+.aura-performance-scroll thead th { position: sticky; top: 0; z-index: 1; background: var(--card, #1A2236); }
+:focus-visible { outline: 2px solid var(--secondary, #77B82A); outline-offset: 2px; }
+@media (max-width: 640px) {
+  .aura-diagnostics > summary { padding: 14px 16px; }
+  .aura-diagnostics-body { padding: 0 12px 16px; }
+  .btn.btn-sm { min-height: 40px; }
+}
