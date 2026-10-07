@@ -21,7 +21,7 @@
  * with an outbound action.
  */
 var AURA_AGENT_SCHEMAS_ = {
-  AURA_AGENT_RUNS: ['runId', 'trigger', 'state', 'startedAt', 'finishedAt', 'tasksCreated', 'tasksAdvanced', 'tasksCompleted', 'tasksBlocked', 'tasksFailed', 'error'],
+  AURA_AGENT_RUNS: ['runId', 'trigger', 'state', 'startedAt', 'finishedAt', 'tasksCreated', 'tasksAdvanced', 'tasksCompleted', 'tasksBlocked', 'tasksFailed', 'error', 'dataPath'],
   AURA_AGENT_TASKS: ['taskId', 'runId', 'kind', 'scope', 'campaignId', 'subjectKey', 'title', 'summary', 'state', 'policy', 'priority', 'blockReason', 'nextAction', 'attempts', 'lastError', 'approvalId', 'createdAt', 'updatedAt', 'completedAt', 'intent', 'source', 'observed', 'dataSource', 'rationale'],
   // One decision ledger row per task: what AURA observed, from which source, what it decided and
   // why, priority, planned action, approval requirement, execution result, metric result, next action.
@@ -175,7 +175,7 @@ function v6AuraAgentLoad_() {
 }
 function v6AuraAgentPut_(st, table, record) { (st.changed[table] = st.changed[table] || []).push(record); }
 function v6AuraAgentFlush_(st) {
-  var keys = { AURA_AGENT_RUNS: 'runId', AURA_AGENT_TASKS: 'taskId', AURA_AGENT_DECISIONS: 'decisionId', AURA_AGENT_ACTIONS: 'actionId', AURA_AGENT_APPROVALS: 'approvalId', AURA_AGENT_EVENTS: 'eventId', AURA_AGENT_MEMORY: 'memoryKey', AURA_AGENT_METRICS: 'metricId' };
+  var keys = AURA_AGENT_KEYS_;
   Object.keys(st.changed).forEach(function (t) { if (st.changed[t].length) v6BatchUpsertByKey_(t, [keys[t]], st.changed[t]); });
   st.changed = {};
 }
@@ -228,6 +228,17 @@ function v6AuraAgentDetect_(nowIso) {
 }
 
 // ---- One cycle -------------------------------------------------------------------------------
+var AURA_AGENT_KEYS_ = { AURA_AGENT_RUNS: 'runId', AURA_AGENT_TASKS: 'taskId', AURA_AGENT_DECISIONS: 'decisionId', AURA_AGENT_ACTIONS: 'actionId', AURA_AGENT_APPROVALS: 'approvalId', AURA_AGENT_EVENTS: 'eventId', AURA_AGENT_MEMORY: 'memoryKey', AURA_AGENT_METRICS: 'metricId' };
+// Primary data path: one batched Sheets API read of every agent-required table, loaded into the
+// cycle memo (no SpreadsheetApp open of the Data Hub). Returns null when the Sheets advanced
+// service is unavailable (SpreadsheetApp fallback). A failed batch read fails the cycle closed.
+function v6AuraAgentHubAttach_() {
+  if (typeof v6AuraHubApiAvailable_ !== 'function' || !v6AuraHubApiAvailable_() || typeof V6_ROWS_MEMO_ === 'undefined' || !V6_ROWS_MEMO_) return null;
+  var hub = v6AuraHubPrefetch_(AURA_HUB_AGENT_TABLES_.concat(AURA_HUB_DATA_TABLES_), {});
+  Object.keys(hub.tables).forEach(function (t) { V6_ROWS_MEMO_.rows[t] = hub.tables[t]; });
+  V6_ROWS_MEMO_.reader = function (name) { var one = v6AuraHubPrefetch_([name], { stats: hub.stats }); hub.sheets[name] = one.sheets[name]; hub.headers[name] = one.headers[name]; hub.tables[name] = one.tables[name]; return one.tables[name]; };
+  return hub;
+}
 function v6AuraAgentRunCycle_(options) {
   var prevCache = AURA_AGENT_CYCLE_CACHE_;
   AURA_AGENT_CYCLE_CACHE_ = { perf: null, startedMs: Date.now() };
@@ -242,7 +253,8 @@ function v6AuraAgentRunCycleCore_(options) {
   props.setProperty(AURA_AGENT_LEASE_PROP_, String(now.getTime()));
   var st, run;
   try {
-    v6AuraAgentRetry_(v6AuraAgentEnsureSheets_);
+    var hub = opts.useHub === false ? null : v6AuraAgentHubAttach_();
+    if (!hub) v6AuraAgentRetry_(v6AuraAgentEnsureSheets_);
     st = v6AuraAgentRetry_(v6AuraAgentLoad_); st.runId = 'RUN:' + nowIso; st.advanced = 0; st.nowIso = nowIso;
     run = { runId: st.runId, trigger: opts.trigger || 'MANUAL', state: 'RUNNING', startedAt: nowIso, tasksCreated: 0 };
     var created = 0, openBySubject = {};
@@ -273,8 +285,10 @@ function v6AuraAgentRunCycleCore_(options) {
     v6AuraAgentPut_(st, 'AURA_AGENT_MEMORY', { memoryKey: 'runtime.lastTick', scope: 'RUNTIME', value: JSON.stringify({ runId: st.runId, at: nowIso, trigger: run.trigger }), updatedAt: nowIso });
     Object.assign(run, { state: 'COMPLETED', finishedAt: new Date().toISOString(), tasksCreated: created, tasksAdvanced: st.advanced, tasksCompleted: stats.completed, tasksBlocked: stats.blocked, tasksFailed: stats.failed, error: stats.deferred ? 'DEFERRED_TASKS=' + stats.deferred : '' });
     v6AuraAgentPut_(st, 'AURA_AGENT_RUNS', run);
+    if (hub) run.dataPath = 'SHEETS_API';
     var pending = st.changed;
-    v6AuraAgentRetry_(function () { st.changed = pending; v6AuraAgentFlush_(st); });
+    if (hub) { v6AuraHubWriteAgentTables_(hub, pending, AURA_AGENT_KEYS_, AURA_AGENT_SCHEMAS_); st.changed = {}; }
+    else v6AuraAgentRetry_(function () { st.changed = pending; v6AuraAgentFlush_(st); });
     return { status: 'COMPLETED', run: run };
   } catch (err) {
     if (run) { try { st.changed = {}; v6BatchUpsertByKey_('AURA_AGENT_RUNS', ['runId'], [Object.assign(run, { state: 'FAILED', finishedAt: new Date().toISOString(), error: String(err && err.message || err).slice(0, 300) })]); } catch (e) {} }

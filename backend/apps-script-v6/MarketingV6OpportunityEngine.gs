@@ -18,9 +18,10 @@ function v6Sheet_(name){if(V6_ROWS_MEMO_){V6_ROWS_MEMO_.book=V6_ROWS_MEMO_.book|
 function v6Rows_(name){
   var memo=V6_ROWS_MEMO_,rows=memo&&memo.rows[name];
   if(!rows){
-    var s=v6Sheet_(name),ex=memo&&memo.exclude&&memo.exclude[name];
+    var s=memo&&memo.reader?null:v6Sheet_(name),ex=memo&&memo.exclude&&memo.exclude[name];
     if(memo&&memo.reads)memo.reads[name]=(memo.reads[name]||0)+1;
-    if(s&&ex&&ex.length)rows=v6ReadProjected_(s,ex);
+    if(memo&&memo.reader)rows=memo.reader(name);
+    else if(s&&ex&&ex.length)rows=v6ReadProjected_(s,ex);
     else{var v=s?s.getDataRange().getValues():[];if(v.length<2)rows=[];else{var h=v.shift();rows=v.map(function(r){var o={};h.forEach(function(k,i){o[k]=r[i];});return o;});}}
     if(memo)memo.rows[name]=rows;else return rows;
   }
