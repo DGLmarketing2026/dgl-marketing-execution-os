@@ -16,6 +16,20 @@
 var AURA_TRACKING_QA_CAMPAIGN_ID_ = 'CMP-AURA-TRACKING-QA';
 var AURA_TRACKING_PROD_EXEC_URL_ = 'https://script.google.com/macros/s/AKfycbw1lzTl7iwqYNp_sp_y2So7rtTt-yUsTmb9DEtRy3tsrF9tUGxHy-exI6Vo8Qmy66GH/exec';
 var AURA_TRACKING_QA_JOB_PROP_ = 'AURA_TRACKING_QA_LAST_JOB';
+var AURA_TRACKING_QA_REPORT_PROP_ = 'AURA_TRACKING_QA_REPORT_ID';
+// Results go to a small standalone spreadsheet (AURA_TRACKING_QA_REPORT) so they can be read
+// without the private API token. It contains no PII: opaque tokens and QA ids only.
+function v6AuraTrackingQaReport_(section, data) {
+  var props = PropertiesService.getScriptProperties(), id = props.getProperty(AURA_TRACKING_QA_REPORT_PROP_), ss = null;
+  if (id) { try { ss = SpreadsheetApp.openById(id); } catch (e) { ss = null; } }
+  if (!ss) { ss = SpreadsheetApp.create('AURA_TRACKING_QA_REPORT'); ss.getSheets()[0].getRange(1, 1, 1, 3).setValues([['at', 'section', 'json']]); props.setProperty(AURA_TRACKING_QA_REPORT_PROP_, ss.getId()); }
+  ss.getSheets()[0].appendRow([new Date().toISOString(), section, JSON.stringify(data)]);
+}
+// STEP 2 runs once by itself 10 minutes after STEP 1 (time to exercise the endpoints).
+function v6AuraTrackingQaScheduleVerify_() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'AURA_TRACKING_QA_STEP2_VERIFY') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('AURA_TRACKING_QA_STEP2_VERIFY').timeBased().after(10 * 60 * 1000).create();
+}
 
 function v6AuraTrackingQaFingerprint_(value) {
   if (!value) return '';
@@ -77,15 +91,19 @@ function AURA_TRACKING_QA_STEP1_ACTIVATE() {
       outOfRange: AURA_TRACKING_PROD_EXEC_URL_ + '?aura_t=c&k=' + k + '&c=99',
       invalid: AURA_TRACKING_PROD_EXEC_URL_ + '?aura_t=o&k=' + k.slice(0, -3) + 'AAA'
     };
+    v6AuraTrackingQaScheduleVerify_();
+    out.verifyScheduled = 'STEP2 in ~10 minutes';
     out.status = 'STEP1_OK';
   } catch (err) {
     out.status = 'STEP1_FAILED'; out.error = String(err && err.message || err);
   } finally { lock.releaseLock(); }
   console.log('AURA_TRACKING_QA ' + JSON.stringify(out));
+  try { v6AuraTrackingQaReport_('STEP1', out); } catch (e) { console.log('REPORT_WRITE_FAILED ' + e); }
   return out;
 }
 
 function AURA_TRACKING_QA_STEP2_VERIFY() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'AURA_TRACKING_QA_STEP2_VERIFY') ScriptApp.deleteTrigger(t); });
   var props = PropertiesService.getScriptProperties(), jobId = props.getProperty(AURA_TRACKING_QA_JOB_PROP_) || '';
   var events = v6Rows_('MKT_EMAIL_EVENTS').filter(function (e) { return e.jobId === jobId; }).map(function (e) {
     return { eventId: e.eventId, eventType: e.eventType, source: e.source, eventCount: e.eventCount, ctaId: e.ctaId, campaignId: e.campaignId, contactId: e.contactId, creativeId: e.creativeId, creativeVersion: e.creativeVersion, occurredAt: e.occurredAt, lastOccurredAt: e.lastOccurredAt };
@@ -100,5 +118,6 @@ function AURA_TRACKING_QA_STEP2_VERIFY() {
     campaignA: { sentRowsInQueue: caSent.length, currentRun: (ca.currentRun || {}).sent, historical: (ca.historical || {}).sent, historicalFamilies: ca.historicalFamilies, allTime: (ca.allTime || {}).sent, openRate: (ca.allTime || {}).openRate, opened: (ca.allTime || {}).opened }
   };
   console.log('AURA_TRACKING_QA ' + JSON.stringify(out));
+  try { v6AuraTrackingQaReport_('STEP2', out); } catch (e) { console.log('REPORT_WRITE_FAILED ' + e); }
   return out;
 }
