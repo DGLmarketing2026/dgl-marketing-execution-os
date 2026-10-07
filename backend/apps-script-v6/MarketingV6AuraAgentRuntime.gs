@@ -22,8 +22,10 @@
  */
 var AURA_AGENT_SCHEMAS_ = {
   AURA_AGENT_RUNS: ['runId', 'trigger', 'state', 'startedAt', 'finishedAt', 'tasksCreated', 'tasksAdvanced', 'tasksCompleted', 'tasksBlocked', 'tasksFailed', 'error'],
-  AURA_AGENT_TASKS: ['taskId', 'runId', 'kind', 'scope', 'campaignId', 'subjectKey', 'title', 'summary', 'state', 'policy', 'priority', 'blockReason', 'nextAction', 'attempts', 'lastError', 'approvalId', 'createdAt', 'updatedAt', 'completedAt'],
-  AURA_AGENT_DECISIONS: ['decisionId', 'taskId', 'runId', 'decision', 'rationale', 'evidence', 'createdAt'],
+  AURA_AGENT_TASKS: ['taskId', 'runId', 'kind', 'scope', 'campaignId', 'subjectKey', 'title', 'summary', 'state', 'policy', 'priority', 'blockReason', 'nextAction', 'attempts', 'lastError', 'approvalId', 'createdAt', 'updatedAt', 'completedAt', 'intent', 'source', 'observed', 'dataSource', 'rationale'],
+  // One decision ledger row per task: what AURA observed, from which source, what it decided and
+  // why, priority, planned action, approval requirement, execution result, metric result, next action.
+  AURA_AGENT_DECISIONS: ['decisionId', 'taskId', 'runId', 'decision', 'rationale', 'evidence', 'createdAt', 'observed', 'dataSource', 'priority', 'plannedAction', 'approvalRequirement', 'executionResult', 'metricResult', 'nextAction', 'updatedAt'],
   AURA_AGENT_ACTIONS: ['actionId', 'taskId', 'actionType', 'channel', 'external', 'policy', 'status', 'preview', 'result', 'error', 'createdAt', 'executedAt', 'verifiedAt'],
   AURA_AGENT_APPROVALS: ['approvalId', 'taskId', 'campaignId', 'scope', 'summary', 'status', 'requestedAt', 'decidedAt', 'decidedBy', 'note'],
   AURA_AGENT_EVENTS: ['eventId', 'runId', 'taskId', 'fromState', 'toState', 'at', 'detail'],
@@ -49,8 +51,13 @@ var AURA_AGENT_ACTION_TYPES_ = {
   INGEST_BOUNCES_REPLIES: { channel: 'GMAIL', external: false, policy: 'AUTO' },
   RECONCILE_EVENTS: { channel: 'SHEETS', external: false, policy: 'AUTO' },
   MEASURE_CAMPAIGN: { channel: 'ANALYTICS', external: false, policy: 'AUTO' },
-  PREPARE_CAMPAIGN_PLAN: { channel: 'SHEETS', external: false, policy: 'REVIEW' },
-  FOLLOW_UP_REPLIES: { channel: 'SHEETS', external: false, policy: 'REVIEW' },
+  PREPARE_CAMPAIGN_PLAN: { channel: 'SHEETS', external: false, policy: 'AUTO' },
+  FOLLOW_UP_REPLIES: { channel: 'SHEETS', external: false, policy: 'AUTO' },
+  ANALYZE_OPPORTUNITIES: { channel: 'SHEETS', external: false, policy: 'AUTO' },
+  PREPARE_REPORT: { channel: 'ANALYTICS', external: false, policy: 'AUTO' },
+  PRIORITIZE_TODAY: { channel: 'SHEETS', external: false, policy: 'AUTO' },
+  PREPARE_SOCIAL_PLAN: { channel: 'METRICOOL', external: false, policy: 'AUTO' },
+  FIND_SEO_OPPORTUNITIES: { channel: 'ANALYTICS', external: false, policy: 'AUTO' },
   SEND_CUSTOMER_EMAIL: { channel: 'GMAIL', external: true, policy: 'APPROVAL_REQUIRED' },
   PUBLISH_SOCIAL_POST: { channel: 'METRICOOL', external: true, policy: 'APPROVAL_REQUIRED' },
   PUBLISH_WORDPRESS: { channel: 'WORDPRESS', external: true, policy: 'APPROVAL_REQUIRED' },
@@ -88,9 +95,21 @@ var AURA_AGENT_HANDLERS_ = {
   INGEST_BOUNCES_REPLIES: function () { var r = v6AuraIngestGmailDsn_({}); return { status: 'DONE', detail: r && r.status ? r.status : 'OK' }; },
   RECONCILE_EVENTS: function () { var r = v6AuraReconcileEmailEvents_(); return { status: 'DONE', detail: 'written=' + ((r && r.written) || 0) }; },
   MEASURE_CAMPAIGN: function (action, state) { return v6AuraAgentMeasureCampaign_(action, state); },
-  PREPARE_CAMPAIGN_PLAN: function (action) { return { status: 'DONE', detail: 'PLAN_RECORDED: ' + action.preview }; },
-  FOLLOW_UP_REPLIES: function (action) { return { status: 'DONE', detail: 'AM_FOLLOW_UP_LISTED: ' + action.preview }; }
+  PREPARE_CAMPAIGN_PLAN: function (action, st) {
+    var scope = v6AuraAgentText_(action.preview);
+    if (typeof v6AuraAgentPlanCampaign_ !== 'function' || !AURA_AGENT_PLAYBOOK_[scope]) return { status: 'DONE', detail: 'PLAN_RECORDED: ' + action.preview };
+    var r = v6AuraAgentPlanCampaign_(scope, st && st.nowIso);
+    return { status: r.status, error: r.error, detail: JSON.stringify({ plan: r.plan }) };
+  },
+  FOLLOW_UP_REPLIES: function (action) { return { status: 'DONE', detail: 'AM_FOLLOW_UP_LISTED: ' + action.preview }; },
+  ANALYZE_OPPORTUNITIES: function (action) { return v6AuraAgentJson_(v6AuraAgentAnalyzeOpportunities_(v6AuraAgentText_(action.preview))); },
+  PREPARE_REPORT: function (action, st) { var r = v6AuraAgentMonthlyReport_(st.nowIso); v6AuraAgentPut_(st, 'AURA_AGENT_MEMORY', { memoryKey: 'report.monthly.' + st.nowIso.slice(0, 7), scope: 'ANALYTICS', value: JSON.stringify(r.report), updatedAt: st.nowIso }); return v6AuraAgentJson_(r); },
+  PRIORITIZE_TODAY: function (action, st) { return v6AuraAgentJson_(v6AuraAgentPrioritize_(st)); },
+  // Not connected yet: reported honestly, never simulated.
+  PREPARE_SOCIAL_PLAN: function () { return { status: 'BLOCKED', error: 'SOURCE_NOT_CONNECTED:METRICOOL' }; },
+  FIND_SEO_OPPORTUNITIES: function () { return { status: 'BLOCKED', error: 'SOURCE_NOT_CONNECTED:SEARCH_CONSOLE' }; }
 };
+function v6AuraAgentJson_(r) { var body = Object.assign({}, r); delete body.status; delete body.error; return { status: r.status, error: r.error, detail: JSON.stringify(body) }; }
 function v6AuraAgentAdapter_(channel) {
   var name = v6AuraAgentText_(channel).toUpperCase();
   if (AURA_AGENT_CHANNELS_.indexOf(name) < 0) throw new Error('UNKNOWN_CHANNEL ' + name);
@@ -120,6 +139,7 @@ function v6AuraAgentLoad_() {
   st.taskById = {}; st.AURA_AGENT_TASKS.forEach(function (t) { st.taskById[t.taskId] = t; });
   st.approvalById = {}; st.AURA_AGENT_APPROVALS.forEach(function (a) { st.approvalById[a.approvalId] = a; });
   st.actionsByTask = {}; st.AURA_AGENT_ACTIONS.forEach(function (a) { (st.actionsByTask[a.taskId] = st.actionsByTask[a.taskId] || []).push(a); });
+  st.decisionById = {}; st.AURA_AGENT_DECISIONS.forEach(function (d) { st.decisionById[d.decisionId] = d; });
   return st;
 }
 function v6AuraAgentPut_(st, table, record) { (st.changed[table] = st.changed[table] || []).push(record); }
@@ -150,15 +170,15 @@ function v6AuraAgentScopeForType_(type) {
 }
 function v6AuraAgentDetect_(nowIso) {
   var day = nowIso.slice(0, 10), hour = nowIso.slice(0, 13), now = new Date(nowIso).getTime(), found = [];
-  found.push({ taskId: 'AT:' + hour + ':INGEST', kind: 'MAINTENANCE', scope: 'EMAIL', subjectKey: 'GMAIL_DSN', title: 'Ingest bounces and replies', summary: 'Read Gmail delivery notifications and reconcile email events.', priority: 20, actions: [{ actionType: 'INGEST_BOUNCES_REPLIES', preview: 'Gmail DSN scan + MKT_EMAIL_EVENTS reconcile' }] });
+  found.push({ taskId: 'AT:' + hour + ':INGEST', kind: 'MAINTENANCE', scope: 'EMAIL', subjectKey: 'GMAIL_DSN', title: 'Ingest bounces and replies', summary: 'Read Gmail delivery notifications and reconcile email events.', observed: 'Hourly maintenance window', dataSource: 'Gmail DSN + MKT_EMAIL_EVENTS', rationale: 'Bounces and replies must be current before any measurement or next send', priority: 20, actions: [{ actionType: 'INGEST_BOUNCES_REPLIES', preview: 'Gmail DSN scan + MKT_EMAIL_EVENTS reconcile' }] });
   var perf = typeof v6AuraEmailPerformance_ === 'function' ? v6AuraEmailPerformance_() : { scopes: {} };
   Object.keys(perf.scopes || {}).forEach(function (cid) {
     var s = perf.scopes[cid], cur = s.currentRun || {};
     // Only campaigns with SENT evidence in the last 45 days are measured daily.
     if (!(s.allTime && s.allTime.sent) || !s.lastSentAt || now - new Date(s.lastSentAt).getTime() > 45 * 86400000) return;
     var scope = v6AuraAgentScopeForType_(s.currentFamily) || 'EMAIL';
-    found.push({ taskId: 'AT:' + day + ':MEASURE:' + cid, kind: 'MEASUREMENT', scope: scope, campaignId: cid, subjectKey: cid, title: 'Measure ' + cid, summary: 'Current run SENT ' + (cur.sent || 0) + ', bounced ' + (cur.bounced || 0) + ', replied ' + (cur.replied || 0) + '.', priority: 30, actions: [{ actionType: 'MEASURE_CAMPAIGN', preview: cid, campaignId: cid }] });
-    if (s.allTime.replied > 0) found.push({ taskId: 'AT:' + day + ':REPLIES:' + cid, kind: 'FOLLOW_UP', scope: scope, campaignId: cid, subjectKey: cid, title: s.allTime.replied + ' replies to follow up (' + cid + ')', summary: 'Hand replied contacts to the owning AM.', priority: 10, actions: [{ actionType: 'FOLLOW_UP_REPLIES', preview: s.allTime.replied + ' replied contacts', campaignId: cid }] });
+    found.push({ taskId: 'AT:' + day + ':MEASURE:' + cid, kind: 'MEASUREMENT', scope: scope, campaignId: cid, subjectKey: cid, title: 'Measure ' + cid, summary: 'Current run SENT ' + (cur.sent || 0) + ', bounced ' + (cur.bounced || 0) + ', replied ' + (cur.replied || 0) + '.', observed: 'SENT evidence in the last 45 days', dataSource: 'MKT_EMAIL_QUEUE/MKT_EMAIL_EVENTS', rationale: 'Daily measurement of active campaigns', priority: 30, actions: [{ actionType: 'MEASURE_CAMPAIGN', preview: cid, campaignId: cid }] });
+    if (s.allTime.replied > 0) found.push({ taskId: 'AT:' + day + ':REPLIES:' + cid, kind: 'FOLLOW_UP', scope: scope, campaignId: cid, subjectKey: cid, title: s.allTime.replied + ' replies to follow up (' + cid + ')', summary: 'Hand replied contacts to the owning AM.', observed: s.allTime.replied + ' replies', dataSource: 'MKT_RESPONSES/MKT_EMAIL_EVENTS', rationale: 'Replies are the strongest buying signal and need an owner', priority: 10, actions: [{ actionType: 'FOLLOW_UP_REPLIES', preview: s.allTime.replied + ' replied contacts', campaignId: cid }] });
   });
   var groups = {};
   v6Rows_('MKT_OPPORTUNITIES').forEach(function (o) {
@@ -169,7 +189,7 @@ function v6AuraAgentDetect_(nowIso) {
   });
   Object.keys(groups).forEach(function (scope) {
     var n = Object.keys(groups[scope].accounts).length; if (!n) return;
-    found.push({ taskId: 'AT:' + day + ':OPP:' + scope, kind: 'OPPORTUNITY', scope: scope, subjectKey: scope, title: groups[scope].type + ': ' + n + ' eligible accounts', summary: 'Prepare a governed ' + groups[scope].type + ' campaign plan. Sending requires one approval and then the governed send flow.', priority: AURA_AGENT_SCOPES_.indexOf(scope) + 1, actions: [{ actionType: 'PREPARE_CAMPAIGN_PLAN', preview: groups[scope].type + ' plan for ' + n + ' accounts' }, { actionType: 'SEND_CUSTOMER_EMAIL', preview: groups[scope].type + ' email to ' + n + ' accounts (governed flow)' }] });
+    found.push({ taskId: 'AT:' + day + ':OPP:' + scope, kind: 'OPPORTUNITY', scope: scope, subjectKey: scope, title: groups[scope].type + ': ' + n + ' eligible accounts', summary: 'Prepare a governed ' + groups[scope].type + ' campaign plan. Sending requires one approval and then the governed send flow.', observed: n + ' eligible (non-suppressed) accounts', dataSource: 'MKT_OPPORTUNITIES', rationale: 'Eligible accounts without an open campaign task for this family', priority: AURA_AGENT_SCOPES_.indexOf(scope) + 1, actions: [{ actionType: 'PREPARE_CAMPAIGN_PLAN', preview: scope }, { actionType: 'SEND_CUSTOMER_EMAIL', preview: groups[scope].type + ' email to ' + n + ' accounts (governed flow)' }] });
   });
   return found;
 }
@@ -183,20 +203,23 @@ function v6AuraAgentRunCycle_(options) {
   var st, run;
   try {
     v6AuraAgentEnsureSheets_();
-    st = v6AuraAgentLoad_(); st.runId = 'RUN:' + nowIso; st.advanced = 0;
+    st = v6AuraAgentLoad_(); st.runId = 'RUN:' + nowIso; st.advanced = 0; st.nowIso = nowIso;
     run = { runId: st.runId, trigger: opts.trigger || 'MANUAL', state: 'RUNNING', startedAt: nowIso, tasksCreated: 0 };
     var created = 0, openBySubject = {};
     st.AURA_AGENT_TASKS.forEach(function (t) { if (!AURA_AGENT_TERMINAL_[t.state]) openBySubject[t.kind + ':' + t.subjectKey] = true; });
-    v6AuraAgentDetect_(nowIso).forEach(function (d) {
+    var detections = (opts.extra || []).concat(opts.onlyExtra ? [] : v6AuraAgentDetect_(nowIso)), onlyIds = {};
+    detections.forEach(function (d) {
       // Idempotent: one task per deterministic key, and never a second open task for the same subject.
       if (st.taskById[d.taskId] || openBySubject[d.kind + ':' + d.subjectKey]) return;
       openBySubject[d.kind + ':' + d.subjectKey] = true;
-      var task = { taskId: d.taskId, runId: st.runId, kind: d.kind, scope: d.scope, campaignId: d.campaignId || '', subjectKey: d.subjectKey, title: d.title, summary: d.summary, state: 'OBSERVE', policy: v6AuraAgentTaskPolicy_(d.actions.map(function (a) { return a.actionType; }), { campaignId: d.campaignId }), priority: d.priority, attempts: 0, createdAt: nowIso, updatedAt: nowIso, _actions: d.actions, _new: true };
+      if (opts.onlyExtra) onlyIds[d.taskId] = true;
+      var task = { taskId: d.taskId, runId: st.runId, kind: d.kind, scope: d.scope, campaignId: d.campaignId || '', subjectKey: d.subjectKey, title: d.title, summary: d.summary, state: 'OBSERVE', intent: d.intent || '', source: d.source || 'AURA_DETECTION', observed: d.observed || d.summary, dataSource: d.dataSource || '', rationale: d.rationale || '', policy: v6AuraAgentTaskPolicy_(d.actions.map(function (a) { return a.actionType; }), { campaignId: d.campaignId }), priority: d.priority, attempts: 0, createdAt: nowIso, updatedAt: nowIso, _actions: d.actions, _new: true };
       st.taskById[task.taskId] = task; st.AURA_AGENT_TASKS.push(task); created++;
     });
     var stats = { completed: 0, blocked: 0, failed: 0 };
     st.AURA_AGENT_TASKS.forEach(function (task) {
       if (AURA_AGENT_TERMINAL_[task.state]) return;
+      if (opts.onlyExtra && !onlyIds[task.taskId]) return; // a command never advances unrelated work
       try { v6AuraAgentAdvance_(st, task, nowIso); }
       catch (err) {
         task.attempts = Number(task.attempts || 0) + 1; task.lastError = String(err && err.message || err).slice(0, 300);
@@ -218,7 +241,13 @@ function v6AuraAgentRunCycle_(options) {
 }
 function v6AuraAgentStripTask_(task) { var o = {}; AURA_AGENT_SCHEMAS_.AURA_AGENT_TASKS.forEach(function (h) { o[h] = task[h] == null ? '' : task[h]; }); return o; }
 function v6AuraAgentDecision_(st, task, decision, rationale, evidence, nowIso) {
-  v6AuraAgentPut_(st, 'AURA_AGENT_DECISIONS', { decisionId: task.taskId + ':' + decision, taskId: task.taskId, runId: st.runId, decision: decision, rationale: rationale, evidence: evidence || '', createdAt: nowIso });
+  v6AuraAgentLedger_(st, task, { decision: decision, rationale: rationale, evidence: evidence || '' }, nowIso);
+}
+// Decision ledger: one row per task (DEC:<taskId>), completed as the task moves through the loop.
+function v6AuraAgentLedger_(st, task, patch, nowIso) {
+  var id = 'DEC:' + task.taskId, row = st.decisionById[id] || { decisionId: id, taskId: task.taskId, createdAt: nowIso, observed: task.observed || task.summary || '', dataSource: task.dataSource || '', priority: task.priority, approvalRequirement: task.policy };
+  Object.assign(row, patch, { runId: st.runId, updatedAt: nowIso });
+  st.decisionById[id] = row; v6AuraAgentPut_(st, 'AURA_AGENT_DECISIONS', row);
 }
 // Advance one task as far as policy allows in this tick.
 function v6AuraAgentAdvance_(st, task, nowIso) {
@@ -229,7 +258,10 @@ function v6AuraAgentAdvance_(st, task, nowIso) {
     else if (s === 'ANALYZE') v6AuraAgentMove_(st, task, 'DECIDE', task.summary, nowIso);
     else if (s === 'DECIDE') {
       if (task.policy === 'BLOCKED') { task.blockReason = 'ACTION_BLOCKED_BY_POLICY'; v6AuraAgentDecision_(st, task, 'BLOCK', 'Policy BLOCKED', '', nowIso); v6AuraAgentMove_(st, task, 'BLOCKED', task.blockReason, nowIso); }
-      else { v6AuraAgentDecision_(st, task, 'PROCEED', task.kind + ' / policy ' + task.policy, task.summary, nowIso); v6AuraAgentMove_(st, task, 'PLAN', '', nowIso); }
+      else {
+        v6AuraAgentLedger_(st, task, { decision: 'PROCEED', rationale: task.rationale || (task.kind + ' / policy ' + task.policy), evidence: task.summary, plannedAction: (task._actions || []).map(function (a) { return a.actionType; }).join(' -> '), approvalRequirement: task.policy }, nowIso);
+        v6AuraAgentMove_(st, task, 'PLAN', '', nowIso);
+      }
     } else if (s === 'PLAN') {
       (task._actions || []).forEach(function (a) {
         var def = AURA_AGENT_ACTION_TYPES_[a.actionType] || {}, id = 'AA:' + task.taskId + ':' + a.actionType;
@@ -239,11 +271,27 @@ function v6AuraAgentAdvance_(st, task, nowIso) {
       v6AuraAgentMove_(st, task, 'PREPARE', (task._actions || []).length + ' actions', nowIso);
     } else if (s === 'PREPARE') {
       (st.actionsByTask[task.taskId] || []).forEach(function (a) { Object.assign(a, v6AuraAgentAdapter_(a.channel).prepare(a)); v6AuraAgentPut_(st, 'AURA_AGENT_ACTIONS', a); });
-      if (task.policy === 'AUTO') v6AuraAgentMove_(st, task, 'EXECUTE', 'AUTO', nowIso);
+      // AUTO internal steps (audience, language, creative system, analysis…) run now, so the human
+      // approves a PREPARED campaign, not a request to start preparing one.
+      var prepBlocked = '';
+      (st.actionsByTask[task.taskId] || []).forEach(function (a) {
+        if (prepBlocked || a.status === 'DONE' || v6AuraAgentPolicy_(a.actionType, { campaignId: task.campaignId }) !== 'AUTO') return;
+        var pr = v6AuraAgentAdapter_(a.channel).execute(a, null, st);
+        a.status = pr.status === 'DONE' ? 'DONE' : 'BLOCKED'; a.result = pr.detail || ''; a.error = pr.error || ''; a.executedAt = nowIso;
+        v6AuraAgentPut_(st, 'AURA_AGENT_ACTIONS', a);
+        if (a.status !== 'DONE') prepBlocked = pr.error || 'BLOCKED';
+      });
+      if (prepBlocked) {
+        task.blockReason = prepBlocked;
+        task.nextAction = /^SOURCE_NOT_CONNECTED:/.test(prepBlocked) ? 'Connect ' + prepBlocked.split(':')[1].replace(/_/g, ' ') + ' to enable this capability.' : prepBlocked === 'NO_ELIGIBLE_RECIPIENTS' ? 'No eligible recipients after governance; nothing to approve.' : '';
+        v6AuraAgentLedger_(st, task, { executionResult: 'BLOCKED: ' + prepBlocked, nextAction: task.nextAction }, nowIso);
+        v6AuraAgentMove_(st, task, 'BLOCKED', prepBlocked, nowIso);
+      } else if (task.policy === 'AUTO') v6AuraAgentMove_(st, task, 'EXECUTE', 'AUTO', nowIso);
       else {
         task.approvalId = 'AP:' + task.taskId;
         if (!st.approvalById[task.approvalId]) { var ap = { approvalId: task.approvalId, taskId: task.taskId, campaignId: task.campaignId || '', scope: task.scope, summary: task.title, status: 'PENDING', requestedAt: nowIso }; st.approvalById[ap.approvalId] = ap; v6AuraAgentPut_(st, 'AURA_AGENT_APPROVALS', ap); }
         task.nextAction = task.policy === 'REVIEW' ? 'Review and approve in AURA' : 'Approve once in AURA; the send then runs through the governed flow';
+        v6AuraAgentLedger_(st, task, { executionResult: 'PREPARED; waiting for approval', nextAction: task.nextAction }, nowIso);
         v6AuraAgentMove_(st, task, 'APPROVAL', task.policy, nowIso);
       }
     } else if (s === 'APPROVAL') {
@@ -262,6 +310,7 @@ function v6AuraAgentAdvance_(st, task, nowIso) {
         v6AuraAgentPut_(st, 'AURA_AGENT_ACTIONS', a);
         if (a.status !== 'DONE') blocked = r.error || 'BLOCKED';
       });
+      v6AuraAgentLedger_(st, task, { executionResult: blocked ? 'BLOCKED: ' + blocked : 'DONE: ' + (st.actionsByTask[task.taskId] || []).map(function (a) { return a.actionType + '=' + a.status; }).join(', ') }, nowIso);
       if (blocked) {
         task.blockReason = blocked;
         task.nextAction = blocked === AURA_AGENT_EXTERNAL_DISABLED_ ? 'Internal steps done. Run the send in Campaign Studio (DRY_RUN, then governed GO LIVE).' : '';
@@ -273,9 +322,12 @@ function v6AuraAgentAdvance_(st, task, nowIso) {
       v6AuraAgentMove_(st, task, 'MEASURE', 'verified', nowIso);
     } else if (s === 'MEASURE') {
       v6AuraAgentPut_(st, 'AURA_AGENT_METRICS', { metricId: task.taskId + ':actions', runId: st.runId, scope: task.scope, campaignId: task.campaignId || '', metric: 'actionsDone', value: (st.actionsByTask[task.taskId] || []).length, basis: 'AURA_AGENT_ACTIONS', at: nowIso });
+      v6AuraAgentLedger_(st, task, { metricResult: 'actionsDone=' + (st.actionsByTask[task.taskId] || []).length }, nowIso);
       v6AuraAgentMove_(st, task, 'NEXT_ACTION', '', nowIso);
     } else if (s === 'NEXT_ACTION') {
-      task.nextAction = task.kind === 'FOLLOW_UP' ? 'AM follows up the replied contacts' : task.kind === 'OPPORTUNITY' ? 'Build the campaign in Campaign Studio' : '';
+      task.nextAction = task.kind === 'FOLLOW_UP' ? 'AM follows up the replied contacts' : task.kind === 'OPPORTUNITY' ? 'Build the campaign in Campaign Studio' :
+        task.intent === 'FIND_OPPORTUNITIES' ? 'Say "Run the next ' + String(task.scope || '').toLowerCase().replace('_', '-') + ' campaign" to prepare it' : task.intent === 'MONTHLY_REPORT' ? 'Review the report in Recent results' : '';
+      v6AuraAgentLedger_(st, task, { nextAction: task.nextAction }, nowIso);
       v6AuraAgentMove_(st, task, 'COMPLETED', '', nowIso);
     } else return;
   }
@@ -323,12 +375,17 @@ function v6AuraAgentActivate_() {
 function v6AuraAgentCommandCenter_() {
   var tasks = v6Rows_('AURA_AGENT_TASKS'), approvals = v6Rows_('AURA_AGENT_APPROVALS'), runs = v6Rows_('AURA_AGENT_RUNS'), metrics = v6Rows_('AURA_AGENT_METRICS');
   var apById = {}; approvals.forEach(function (a) { apById[a.approvalId] = a; });
-  function view(t) { return { taskId: t.taskId, title: t.title, summary: t.summary, scope: t.scope, kind: t.kind, campaignId: t.campaignId, state: t.state, policy: t.policy, priority: Number(t.priority || 99), blockReason: t.blockReason || '', nextAction: t.nextAction || '', approvalId: t.approvalId || '', approvalStatus: (apById[t.approvalId] || {}).status || '', updatedAt: t.updatedAt }; }
+  var decById = {}; v6Rows_('AURA_AGENT_DECISIONS').forEach(function (d) { decById[d.taskId] = d; });
+  var planByTask = {}; v6Rows_('AURA_AGENT_ACTIONS').forEach(function (a) { if (a.status === 'DONE' && /^\{/.test(String(a.result || ''))) { try { planByTask[a.taskId] = JSON.parse(a.result); } catch (e) {} } });
+  function view(t) { return { taskId: t.taskId, title: t.title, summary: t.summary, scope: t.scope, kind: t.kind, campaignId: t.campaignId, state: t.state, policy: t.policy, priority: Number(t.priority || 99), blockReason: t.blockReason || '', nextAction: t.nextAction || '', approvalId: t.approvalId || '', approvalStatus: (apById[t.approvalId] || {}).status || '', updatedAt: t.updatedAt, intent: t.intent || '', source: t.source || '',
+    decision: decById[t.taskId] ? { observed: decById[t.taskId].observed, dataSource: decById[t.taskId].dataSource, rationale: decById[t.taskId].rationale, plannedAction: decById[t.taskId].plannedAction, executionResult: decById[t.taskId].executionResult, metricResult: decById[t.taskId].metricResult } : null,
+    result: planByTask[t.taskId] || null }; }
   var all = tasks.map(view).sort(function (a, b) { return a.priority - b.priority || String(b.updatedAt).localeCompare(String(a.updatedAt)); });
   var open = all.filter(function (t) { return !AURA_AGENT_TERMINAL_[t.state]; });
   var lastRun = runs.slice().sort(function (a, b) { return String(b.startedAt).localeCompare(String(a.startedAt)); })[0] || null;
   var latest = metrics.slice().sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); }).slice(0, 40);
   return {
+    commands: typeof AURA_AGENT_COMMAND_EXAMPLES_ !== 'undefined' ? AURA_AGENT_COMMAND_EXAMPLES_ : [],
     status: { runtime: v6AuraAgentTriggerInstalled_() ? 'ACTIVE' : 'INACTIVE', schedule: 'HOURLY', lastRun: lastRun, externalExecution: AURA_AGENT_EXTERNAL_DISABLED_, policyModel: ['AUTO', 'REVIEW', 'APPROVAL_REQUIRED', 'BLOCKED'], scopes: AURA_AGENT_SCOPES_.map(function (s) { return { scope: s, source: AURA_AGENT_SCOPE_SOURCES_[s] }; }), channels: AURA_AGENT_CHANNELS_ },
     priorities: open.slice(0, 5),
     opportunities: all.filter(function (t) { return t.kind === 'OPPORTUNITY' && !AURA_AGENT_TERMINAL_[t.state]; }),

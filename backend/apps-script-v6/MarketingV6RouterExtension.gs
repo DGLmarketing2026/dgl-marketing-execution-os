@@ -170,6 +170,8 @@ function routeMarketingV6_(action, payload) {
       return v6AuraAgentDecide_(p);
     case 'v6AuraAgentRunNow':
       return v6AuraAgentRunCycle_({ trigger: 'OPERATOR' });
+    case 'v6AuraAgentCommand':
+      return v6AuraAgentCommand_(p);
     case 'v6AuraAgentActivate':
       return v6AuraAgentActivate_();
     case 'v6AuraCampanaALatestRunSummary':

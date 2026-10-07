@@ -342,6 +342,7 @@
     agentDecide:(approvalId,decision,note)=>{clearReadCache();return mutate("v6AuraAgentDecide",{approvalId,decision,note},false);},
     agentRunNow:()=>{clearReadCache();return mutate("v6AuraAgentRunNow",{},false);},
     agentActivate:()=>{clearReadCache();return mutate("v6AuraAgentActivate",{},false);},
+    agentCommand:text=>{clearReadCache();return mutate("v6AuraAgentCommand",{text:String(text||"").slice(0,300)},false);},
     getRequestMetrics:()=>JSON.parse(JSON.stringify(metrics)),
     // Iniciativa 2 -- Campaign Studio como unica fuente canonica del email. approveCreative
     // persists the FULL approved creative (never just a status flag); getLatestApprovedCreative
