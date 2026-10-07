@@ -177,3 +177,14 @@
 .aura-task-plan { font-size: 12px; padding: 6px 8px; border-radius: 8px; background: rgba(119,184,42,.08); }
 .aura-task-why { font-size: 12px; color: var(--text-secondary, #6B7280); }
 @media (max-width: 640px) { .aura-command-row { flex-direction: column; } }
+
+/* ---- KPI table dark-theme fix + technical / QA evidence ------------------------------------- */
+/* The legacy ".aura-performance-scroll th" rule painted every th light (#edf3fa), including the
+   METRIC row headers. Row headers follow the dark theme; only the column header row is sticky. */
+.aura-performance-scroll tbody th,
+.aura-scope-table tbody th.aura-metric-cell { position: static; background: var(--card, #1A2236); color: var(--text, #FFFFFF); border-bottom: 1px solid var(--border, rgba(255,255,255,.08)); padding: 12px 16px; font-size: 12px; }
+.aura-scope-table td { color: var(--text, #FFFFFF); }
+.aura-technical { margin-top: 18px; border-top: 1px dashed var(--border-strong, rgba(255,255,255,.14)); padding-top: 12px; }
+.aura-technical > summary { cursor: pointer; font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--text-secondary, #AAB3C5); }
+.aura-scope-technical { opacity: .92; }
+.aura-technical-toggle { display: inline-flex; align-items: center; gap: 8px; margin: 10px 0 0; font-size: 12px; color: var(--text-secondary, #AAB3C5); }

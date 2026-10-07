@@ -17,7 +17,23 @@
   function fmt(n) { return n == null || !Number.isFinite(Number(n)) ? "N/A" : Number(n).toLocaleString("en-US"); }
   function esc(v) { return String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 
-  const perfFilters = { metric: '', search: '', campaignId: '', campaignFamily: '', sendStatus: '', language: '', from: '', to: '' };
+  const perfFilters = { metric: '', search: '', campaignId: '', campaignFamily: '', sendStatus: '', language: '', from: '', to: '', technical: false };
+  // Technical / QA campaigns (tracking QA, tests) never mix into commercial KPIs. They stay
+  // available as technical evidence (collapsed section, "Include technical / QA" toggle, or an
+  // explicit campaign filter).
+  const TECHNICAL_ID_RE = /(^|[^A-Z0-9])(QA|TEST)([^A-Z0-9]|$)/i;
+  function isTechnicalCampaign(id, family) { return TECHNICAL_ID_RE.test(String(id || "")) || /^(TRACKING_QA|QA|TEST)$/i.test(String(family || "").trim()); }
+  function isTechnicalRow(r) { return isTechnicalCampaign(r.campaignId, r.playbookId || r.sentFamily || r.campaignFamily); }
+  // Commercial summary recomputed from the recipient rows when technical rows exist (the server
+  // summary covers every campaign). Untracked opens/clicks stay null (N/A), never 0.
+  function commercialSummary(data) {
+    if (perfFilters.technical || !data.rows.some(isTechnicalRow)) return data.summary;
+    const rows = data.rows.filter(r => !isTechnicalRow(r)), sent = rows.filter(r => r.sendStatus === 'SENT');
+    const tracked = k => rows.some(r => r[k] != null) ? rows.filter(r => r[k] === true).length : null;
+    return { sent: sent.length, failed: rows.filter(r => r.failedAt || r.sendStatus === 'FAILED').length, bounced: rows.filter(r => r.bounceStatus).length, replied: rows.filter(r => r.replied === true).length,
+      opened: tracked('opened'), clicked: tracked('clicked'),
+      sentUniqueEmails: new Set(sent.map(r => String(r.email || '').trim().toLowerCase()).filter(Boolean)).size, sentUniqueAccounts: new Set(sent.map(r => r.accountId).filter(Boolean)).size };
+  }
   const perfColumns = ['jobId','company','contactName','email','campaignId','campaignFamily','subject','sentFamily','currentCampaignFamily','playbookId','creativeProvenance','integrityStatus','service','language','amOwner','sendStatus','sentAt','failedAt','bounceStatus','bounceReason','bounceAt','replied','replyAt','opened','openAt','clicked','clickAt'];
   let performancePage = 0;
   function pageRows(rows, page) { return rows.slice().sort((a,b)=>String(b.sentAt||'').localeCompare(String(a.sentAt||''))).slice(page*25,(page+1)*25); }
@@ -26,6 +42,7 @@
   }
   function filterPerformance(rows, filters) {
     return rows.filter(r => {
+      if (!filters.technical && !filters.campaignId && isTechnicalRow(r)) return false;
       if (!metricMatches(r,filters.metric)) return false;
       if (!['company','contactName','email'].some(k=>String(r[k]||'').toLowerCase().includes(String(filters.search||'').toLowerCase()))) return false;
       if (['campaignId','campaignFamily','sendStatus','language'].some(k=>filters[k] && r[k]!==filters[k])) return false;
@@ -41,8 +58,10 @@
     const data=state.performance;
     if(!data||!data.summary||!Array.isArray(data.rows))return `<section class="card card-pad"><h3>Email Performance</h3><p>${esc(state.performanceError||'Loading recipient report…')}</p></section>`;
     const opts = k => [...new Set(data.rows.map(r=>r[k]).filter(Boolean))].sort().map(v=>`<option ${perfFilters[k]===v?'selected':''} value="${esc(v).replace(/"/g,'&quot;')}">${esc(v)}</option>`).join('');
-    return `<section class="aura-performance card card-pad"><h3>Email Performance · all campaigns · all-time</h3>
-      <div class="aura-performance-kpis">${['sent','failed','bounced','replied','opened','clicked'].map(k=>`<button type="button" data-perf-kpi="${k}" aria-pressed="${perfFilters.metric===k}"><span>${k.toUpperCase()}</span><strong>${fmt(data.summary[k])}</strong><small>${data.summary[k]==null?'NOT TRACKED':'MEASURED'}</small>${k==='sent'?`<small>${fmt(data.summary.sentUniqueEmails)} recipient emails · ${fmt(data.summary.sentUniqueAccounts)} accounts</small>`:''}</button>`).join('')}</div>
+    const sum=commercialSummary(data),hasTechnical=data.rows.some(isTechnicalRow);
+    return `<section class="aura-performance card card-pad"><h3>Email Performance · ${perfFilters.technical?'all campaigns incl. technical / QA':'commercial campaigns'} · all-time</h3>
+      <div class="aura-performance-kpis">${['sent','failed','bounced','replied','opened','clicked'].map(k=>`<button type="button" data-perf-kpi="${k}" aria-pressed="${perfFilters.metric===k}"><span>${k.toUpperCase()}</span><strong>${fmt(sum[k])}</strong><small>${sum[k]==null?'NOT TRACKED':'MEASURED'}</small>${k==='sent'?`<small>${fmt(sum.sentUniqueEmails)} recipient emails · ${fmt(sum.sentUniqueAccounts)} accounts</small>`:''}</button>`).join('')}</div>
+      ${hasTechnical?`<label class="aura-technical-toggle"><input type="checkbox" data-perf-technical ${perfFilters.technical?'checked':''}> Include technical / QA campaigns</label>`:''}
       <div class="aura-performance-filters"><label>Search company/contact/email<input data-perf-filter="search" type="search" value="${esc(perfFilters.search).replace(/"/g,'&quot;')}"></label>
       ${[['campaignId','Campaign'],['campaignFamily','Family'],['sendStatus','Status'],['language','Language']].map(([k,label])=>`<label>${label}<select data-perf-filter="${k}"><option value="">All</option>${opts(k)}</select></label>`).join('')}
       ${['from','to'].map(k=>`<label>${k==='from'?'From':'To'} (UTC)<input type="date" data-perf-filter="${k}" value="${perfFilters[k]}"></label>`).join('')}
@@ -62,7 +81,8 @@
     }
     host.querySelectorAll('[data-perf-kpi]').forEach(b=>b.onclick=()=>{perfFilters.metric=perfFilters.metric===b.dataset.perfKpi?'':b.dataset.perfKpi;performancePage=0;update();});
     host.querySelectorAll('[data-perf-filter]').forEach(input=>input.oninput=()=>{perfFilters[input.dataset.perfFilter]=input.value;performancePage=0;update();});
-    host.querySelector('[data-perf-reset]').onclick=()=>{Object.keys(perfFilters).forEach(k=>perfFilters[k]='');performancePage=0;paint(mount);};
+    host.querySelector('[data-perf-reset]').onclick=()=>{Object.keys(perfFilters).forEach(k=>perfFilters[k]='');perfFilters.technical=false;performancePage=0;paint(mount);};
+    const tech=host.querySelector('[data-perf-technical]');if(tech)tech.onchange=()=>{perfFilters.technical=!!tech.checked;performancePage=0;paint(mount);};
     host.querySelector('[data-perf-download]').onclick=()=>{
       const blob=new Blob([performanceCsv(filterPerformance(state.performance.rows,perfFilters))],{type:'text/csv;charset=utf-8'});
       const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='aura-email-performance.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -116,15 +136,19 @@
   const SCOPE_METRICS = [["sent","SENT"],["delivered","DELIVERED (SENT − BOUNCED)"],["bounced","BOUNCED"],["opened","OPENED (unique)"],["clicked","CLICKED (unique)"],["replied","REPLIED"],["openRate","OPEN RATE"],["ctr","CTR"],["ctor","CTOR"]];
   function scopedKpiSection() {
     const scopes = (state.performance && state.performance.scopes) || {};
-    const list = Object.values(scopes).filter(c => c.allTime && c.allTime.sent).sort((a,b)=>String(b.lastSentAt||"").localeCompare(String(a.lastSentAt||""))).slice(0, 4);
-    if (!list.length) return "";
+    const all = Object.values(scopes).filter(c => c.allTime && c.allTime.sent).sort((a,b)=>String(b.lastSentAt||"").localeCompare(String(a.lastSentAt||"")));
+    const technical = all.filter(c => isTechnicalCampaign(c.campaignId, c.currentFamily) || Object.keys(c.historicalFamilies || {}).some(f => isTechnicalCampaign('', f)));
+    const list = all.filter(c => technical.indexOf(c) < 0).slice(0, 4);
+    if (!list.length && !technical.length) return "";
     const cell = (c,k,m) => { const v = (c[k]||{})[m]; return isRate(m) ? pct(v) : v == null ? "NOT TRACKED" : fmt(v); };
+    const card = (c, tech) => `<div class="aura-scope-card${tech ? " aura-scope-technical" : ""}" data-scope-campaign="${attr(c.campaignId)}"><div class="aura-scope-title"><strong>${esc(c.campaignId)}</strong>${tech ? '<span class="aura-badge aura-badge-warn">TECHNICAL / QA</span>' : `<span class="aura-badge aura-badge-ready">CURRENT FAMILY: ${esc(c.currentFamily || "UNKNOWN")}</span>`}${!tech && c.latestRunId ? `<span class="aura-badge aura-badge-idle">RUN ${esc(c.latestRunId)}</span>` : ""}${!tech && Object.keys(c.historicalFamilies||{}).length ? `<span class="aura-badge aura-badge-idle">HISTORICAL: ${esc(Object.entries(c.historicalFamilies).map(([k,v])=>k+" "+v).join(", "))}</span>` : ""}</div>
+        <div class="aura-performance-scroll"><table class="data-table aura-scope-table"><thead><tr><th>Metric</th>${SCOPE_COLUMNS.map(([,l])=>`<th>${l}</th>`).join("")}</tr></thead><tbody>
+        ${SCOPE_METRICS.map(([m,l])=>`<tr><th scope="row" class="aura-metric-cell">${l}</th>${SCOPE_COLUMNS.map(([k])=>`<td data-scope="${k}" data-metric="${m}">${cell(c,k,m)}</td>`).join("")}</tr>`).join("")}
+        <tr><th scope="row" class="aura-metric-cell">RFQ / QUOTE / LOAD (campaign)</th><td colspan="4">${fmt((c.pipeline||{}).rfq)} / ${fmt((c.pipeline||{}).quote)} / ${fmt((c.pipeline||{}).load)}</td></tr></tbody></table></div></div>`;
     return `<section class="card card-pad aura-scoped"><div class="aura-section-head"><h3>Campaign KPIs by scope</h3></div>
       <p class="aura-hint">SENT is not DELIVERED. OPEN is a weak signal (image proxies and Apple Mail Privacy Protection inflate or hide opens). OR = unique opens ÷ delivered · CTR = unique clicks ÷ delivered · CTOR = unique clicks ÷ unique opens.</p>
-      ${list.map(c => `<div class="aura-scope-card"><div class="aura-scope-title"><strong>${esc(c.campaignId)}</strong><span class="aura-badge aura-badge-ready">CURRENT FAMILY: ${esc(c.currentFamily || "UNKNOWN")}</span>${c.latestRunId ? `<span class="aura-badge aura-badge-idle">RUN ${esc(c.latestRunId)}</span>` : ""}${Object.keys(c.historicalFamilies||{}).length ? `<span class="aura-badge aura-badge-idle">HISTORICAL: ${esc(Object.entries(c.historicalFamilies).map(([k,v])=>k+" "+v).join(", "))}</span>` : ""}</div>
-        <div class="aura-performance-scroll"><table class="data-table aura-scope-table"><thead><tr><th>Metric</th>${SCOPE_COLUMNS.map(([,l])=>`<th>${l}</th>`).join("")}</tr></thead><tbody>
-        ${SCOPE_METRICS.map(([m,l])=>`<tr><th scope="row">${l}</th>${SCOPE_COLUMNS.map(([k])=>`<td data-scope="${k}" data-metric="${m}">${cell(c,k,m)}</td>`).join("")}</tr>`).join("")}
-        <tr><th scope="row">RFQ / QUOTE / LOAD (campaign)</th><td colspan="4">${fmt((c.pipeline||{}).rfq)} / ${fmt((c.pipeline||{}).quote)} / ${fmt((c.pipeline||{}).load)}</td></tr></tbody></table></div></div>`).join("")}</section>`;
+      ${list.map(c => card(c, false)).join("")}
+      ${technical.length ? `<details class="aura-technical"><summary>Technical / QA evidence · excluded from commercial KPIs (${technical.length})</summary>${technical.map(c => card(c, true)).join("")}</details>` : ""}</section>`;
   }
   const POLICY_TONE = { AUTO: "live", REVIEW: "ready", APPROVAL_REQUIRED: "warn", BLOCKED: "idle" };
   const attr = v => esc(v).replace(/"/g, "&quot;");
