@@ -63,10 +63,11 @@ function v6AuraEmailPerformance_() {
     });
     var replyAt=at('REPLY')||replies.map(function(r){return v6AuraEmailDate_(r.responseAt||r.occurredAt);}).filter(Boolean).sort()[0]||'';
     var bounce=ev.filter(function(e){return /^(BOUNCE|SOFT_BOUNCE)$/.test(e.eventType);}).sort(function(x,y){return String(y.occurredAt).localeCompare(String(x.occurredAt));})[0]||{};
-    return {jobId:q.jobId,accountId:q.accountId,contactId:q.contactId,company:q.company||a.accountName||'',contactName:q.contactName||[q.firstName||ct.firstName,ct.lastName].filter(Boolean).join(' '),email:q.email||'',campaignId:q.campaignId||'',campaignFamily:q.campaignFamily||c.campaignFamily||c.campaignType||'',service:q.service||c.service||'',language:q.preferredLanguage||q.language||'',amOwner:q.amOwner||a.amOwner||'',sendStatus:q.status||'UNKNOWN',sentAt:at('SENT')||(q.status==='SENT'?v6AuraEmailDate_(q.sentAt||q.processedAt):''),failedAt:at('FAILED')||(q.status==='FAILED'?v6AuraEmailDate_(q.failedAt||q.processedAt):''),bounceStatus:bounce.eventType||'',bounceReason:bounce.reasonCode||'',bounceAt:v6AuraEmailDate_(bounce.occurredAt),replied:!!replyAt,replyAt:replyAt,opened:tracking.opened==='NOT_TRACKED'?null:!!at('OPEN'),openAt:at('OPEN'),clicked:tracking.clicked==='NOT_TRACKED'?null:!!at('CLICK'),clickAt:at('CLICK')};
+    return {jobId:q.jobId,accountId:q.accountId,contactId:q.contactId,company:q.company||a.accountName||'',contactName:q.contactName||[q.firstName||ct.firstName,ct.lastName].filter(Boolean).join(' '),email:q.email||'',campaignId:q.campaignId||'',campaignFamily:q.campaignFamily||c.campaignFamily||c.campaignType||'',service:q.service||c.service||'',language:q.preferredLanguage||q.language||'',amOwner:q.amOwner||a.amOwner||'',sendStatus:q.status||'UNKNOWN',sentAt:at('SENT')||(q.status==='SENT'?v6AuraEmailDate_(q.sentAt||q.processedAt):''),failedAt:at('FAILED')||(q.status==='FAILED'?v6AuraEmailDate_(q.failedAt||q.processedAt):''),bounceStatus:bounce.eventType||'',bounceReason:bounce.reasonCode||'',bounceAt:v6AuraEmailDate_(bounce.occurredAt),replied:!!replyAt,replyAt:replyAt,tracked:v6AuraJobTracked_(q,ev),opened:v6AuraJobTracked_(q,ev)?!!at('OPEN'):null,openAt:at('OPEN'),clicked:v6AuraJobTracked_(q,ev)?!!at('CLICK'):null,clickAt:at('CLICK')};
   });
-  var summary={sent:0,failed:0,bounced:0,replied:0,opened:tracking.opened==='NOT_TRACKED'?null:0,clicked:tracking.clicked==='NOT_TRACKED'?null:0};
-  rows.forEach(function(r){if(r.sentAt||r.sendStatus==='SENT')summary.sent++;if(r.failedAt||r.sendStatus==='FAILED')summary.failed++;if(r.bounceStatus)summary.bounced++;if(r.replied)summary.replied++;if(r.opened)summary.opened++;if(r.clicked)summary.clicked++;});
+  var summary={sent:0,failed:0,bounced:0,replied:0,opened:null,clicked:null};
+  rows.forEach(function(r){if(r.sentAt||r.sendStatus==='SENT')summary.sent++;if(r.failedAt||r.sendStatus==='FAILED')summary.failed++;if(r.bounceStatus)summary.bounced++;if(r.replied)summary.replied++;v6AuraAddTracked_(summary,r);});
+  tracking={opened:rows.some(function(r){return r.tracked;})?'TRACKED':'NOT_TRACKED',clicked:rows.some(function(r){return r.tracked;})?'TRACKED':'NOT_TRACKED',trackedJobs:rows.filter(function(r){return r.tracked;}).length};
   rows.forEach(function(r,i){Object.assign(r,v6AuraJobEvidence_(queue[i],find(campaigns,'campaignId',r.campaignId)));});
   var sentRows=rows.filter(function(r){return r.sendStatus==='SENT';});
   summary.sentRecipientJobs=sentRows.length;
@@ -75,7 +76,21 @@ function v6AuraEmailPerformance_() {
   Object.assign(summary,v6AuraRatesOrNull_(summary));
   return {summary:summary,rows:rows,tracking:tracking,scopes:v6AuraEmailKpiScopes_(rows,queue,campaigns,tracking)};
 }
-function v6AuraRatesOrNull_(c){return typeof v6AuraEngagementRates_==='function'?v6AuraEngagementRates_(c):{delivered:Math.max(0,(c.sent||0)-(c.bounced||0)),openRate:null,ctr:null,ctor:null};}
+function v6AuraJobTracked_(q,ev){return !!String(q.trackingBaseUrl==null?'':q.trackingBaseUrl).trim()||/[?&]aura_t=o&/.test(String(q.htmlBody||''))||(ev||[]).some(function(e){return /^(OPEN|CLICK)$/.test(e.eventType)&&e.source&&v6AuraEmailDate_(e.occurredAt);});}
+// Tracked-only accumulation: opened/clicked stay null until a tracked job is in scope; rate
+// denominators are tracked SENT jobs minus their bounces.
+function v6AuraAddTracked_(t,r){
+  if(!r.tracked)return;
+  if(t.opened==null)t.opened=0;if(t.clicked==null)t.clicked=0;
+  if(r.sendStatus==='SENT'){t.trackedSent=(t.trackedSent||0)+1;if(r.bounceStatus)t.trackedBounced=(t.trackedBounced||0)+1;}
+  if(r.opened)t.opened++;if(r.clicked)t.clicked++;
+}
+function v6AuraRatesOrNull_(c){
+  var delivered=Math.max(0,(c.sent||0)-(c.bounced||0));
+  if(typeof v6AuraEngagementRates_!=='function')return {delivered:delivered,openRate:null,ctr:null,ctor:null};
+  var r=v6AuraEngagementRates_({sent:c.trackedSent||0,bounced:c.trackedBounced||0,opened:c.opened,clicked:c.clicked});
+  return {delivered:delivered,deliveredBasis:'SENT_MINUS_BOUNCED',trackedDelivered:r.delivered,openRate:r.openRate,ctr:r.ctr,ctor:r.ctor};
+}
 // KPI scopes per campaign. A campaign can carry SENT history from an earlier family (Campaign A:
 // 109 historical Retention + 214 Reactivation = 323 all-time), so the current run, the current
 // family, the historical family sends and all-time are reported separately and never mixed.
@@ -87,8 +102,8 @@ function v6AuraEmailKpiScopes_(rows,queue,campaigns,tracking){
   if(typeof CAMPANA_A_CAMPAIGN_ID_!=='undefined'&&typeof CAMPANA_A_JOB_FAMILY_!=='undefined')currentFamily[CAMPANA_A_CAMPAIGN_ID_]=CAMPANA_A_JOB_FAMILY_;
   // Commercial outcomes are campaign-level evidence (MKT_RESPONSES), never inferred from engagement.
   var pipeline={};v6Rows_('MKT_RESPONSES').forEach(function(r){var t=String(r.eventType||r.responseType||'').toUpperCase(),k=t==='RFQ'?'rfq':/^QUOTE(_SIGNAL)?$/.test(t)?'quote':/^LOAD(_SIGNAL)?$/.test(t)?'load':'';if(!k||!r.campaignId)return;var p=pipeline[r.campaignId]||(pipeline[r.campaignId]={rfq:0,quote:0,load:0});p[k]++;});
-  function blank(){return {sent:0,bounced:0,failed:0,replied:0,opened:tracking.opened==='NOT_TRACKED'?null:0,clicked:tracking.clicked==='NOT_TRACKED'?null:0};}
-  function add(t,r){if(r.sendStatus==='SENT')t.sent++;if(r.sendStatus==='FAILED')t.failed++;if(r.bounceStatus)t.bounced++;if(r.replied)t.replied++;if(t.opened!=null&&r.opened)t.opened++;if(t.clicked!=null&&r.clicked)t.clicked++;}
+  function blank(){return {sent:0,bounced:0,failed:0,replied:0,opened:null,clicked:null};}
+  function add(t,r){if(r.sendStatus==='SENT')t.sent++;if(r.sendStatus==='FAILED')t.failed++;if(r.bounceStatus)t.bounced++;if(r.replied)t.replied++;v6AuraAddTracked_(t,r);}
   rows.forEach(function(r){
     if(!r.campaignId)return;
     var c=byCampaign[r.campaignId]||(byCampaign[r.campaignId]={campaignId:r.campaignId,currentFamily:currentFamily[r.campaignId]||'',latestRunId:'',lastSentAt:'',allTime:blank(),currentFamilyRun:blank(),historical:blank(),currentRun:blank(),historicalFamilies:{}});

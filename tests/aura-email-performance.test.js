@@ -46,3 +46,19 @@ test('KPI scopes separate current run, current family, historical and all-time (
   assert.deepEqual(JSON.parse(JSON.stringify(s.pipeline)),{rfq:1,quote:1,load:0});
 });
 console.log(`${checks}/${checks} performance checks passed`);
+// Per-job tracking: activating tracking never turns untracked historical sends into 0% opens.
+{
+  const T={MKT_EMAIL_QUEUE:[],MKT_EMAIL_EVENTS:[],MKT_RESPONSES:[],MKT_CAMPAIGNS:[]};
+  const c3=Object.assign({},ctx,{v6Rows_:n=>T[n]||[]});vm.createContext(c3);
+  for(const f of ['MarketingV6SchemaMigration.gs','MarketingV6ResponseEvents.gs','MarketingV6AuraTracking.gs','MarketingV6AuraEmailPerformance.gs'])vm.runInContext(fs.readFileSync('backend/apps-script-v6/'+f,'utf8'),c3);
+  for(let i=0;i<214;i++)T.MKT_EMAIL_QUEUE.push({jobId:'A'+i,campaignId:'CMP-A',status:'SENT',playbookId:'Reactivation',processedAt:'2026-10-01T10:00:00Z',htmlBody:'<html><body>x</body></html>'});
+  T.MKT_EMAIL_QUEUE.push({jobId:'QA1',campaignId:'CMP-QA',status:'SENT',playbookId:'TRACKING_QA',processedAt:'2026-10-07T10:00:00Z',trackingBaseUrl:'https://script.google.com/macros/s/X/exec',htmlBody:'<img src="https://script.google.com/macros/s/X/exec?aura_t=o&k=t">'});
+  T.MKT_EMAIL_EVENTS.push({eventId:'OPEN:QA1',jobId:'QA1',eventType:'OPEN',occurredAt:'2026-10-07T10:01:00Z',source:'AURA_TRACKING'},{eventId:'CLICK:QA1:1',jobId:'QA1',eventType:'CLICK',occurredAt:'2026-10-07T10:02:00Z',source:'AURA_TRACKING'});
+  const r=c3.v6AuraEmailPerformance_(),a=r.scopes['CMP-A'].allTime,q=r.scopes['CMP-QA'].allTime;
+  assert.equal(a.sent,214);assert.equal(a.opened,null);assert.equal(a.openRate,null);assert.equal(a.ctr,null);
+  assert.equal(q.opened,1);assert.equal(q.clicked,1);assert.equal(q.openRate,100);assert.equal(q.ctr,100);assert.equal(q.ctor,100);
+  assert.equal(r.tracking.opened,'TRACKED');assert.equal(r.tracking.trackedJobs,1);
+  assert.equal(r.summary.sent,215);assert.equal(r.summary.opened,1);assert.equal(r.summary.openRate,100,'OR denominator = tracked delivered only');
+  assert.equal(r.rows.find(x=>x.jobId==='A0').opened,null);
+  checks++;console.log('PASS per-job tracking keeps untracked sends N/A');
+}
