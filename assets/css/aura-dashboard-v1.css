@@ -163,3 +163,17 @@
   .aura-diagnostics-body { padding: 0 12px 16px; }
   .btn.btn-sm { min-height: 40px; }
 }
+
+/* ---- AURA command bar + decision ledger (Autonomous Agent V1) -------------------------------- */
+.aura-command { margin-top: 14px; display: grid; gap: 8px; }
+.aura-command-label { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--text-secondary, #6B7280); }
+.aura-command-row { display: flex; gap: 8px; }
+.aura-command-row input { flex: 1; min-width: 0; min-height: 40px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border-strong, rgba(0,0,0,.14)); background: rgba(255,255,255,.04); color: inherit; font: inherit; }
+.aura-command-row input:focus { border-color: var(--secondary, #77B82A); outline: none; box-shadow: 0 0 0 3px rgba(119,184,42,.2); }
+.aura-command-examples { display: flex; flex-wrap: wrap; gap: 6px; }
+.aura-chip { border: 1px solid var(--border-strong, rgba(0,0,0,.14)); background: transparent; color: var(--text-secondary, #6B7280); border-radius: 999px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+.aura-chip:hover { border-color: var(--secondary, #77B82A); color: var(--secondary, #77B82A); }
+.aura-command-response { margin: 4px 0 0; padding: 10px 12px; border-radius: 10px; background: rgba(119,184,42,.1); border-left: 3px solid var(--secondary, #77B82A); font-size: 13px; }
+.aura-task-plan { font-size: 12px; padding: 6px 8px; border-radius: 8px; background: rgba(119,184,42,.08); }
+.aura-task-why { font-size: 12px; color: var(--text-secondary, #6B7280); }
+@media (max-width: 640px) { .aura-command-row { flex-direction: column; } }

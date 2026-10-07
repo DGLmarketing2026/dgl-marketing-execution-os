@@ -128,9 +128,23 @@
   }
   const POLICY_TONE = { AUTO: "live", REVIEW: "ready", APPROVAL_REQUIRED: "warn", BLOCKED: "idle" };
   const attr = v => esc(v).replace(/"/g, "&quot;");
+  // Prepared campaign recommendation shown where the human approves it (counts only, no PII).
+  function planSummary(t) {
+    const p = t.result && t.result.plan;
+    if (!p) return "";
+    const c = p.contacts || {}, l = p.languages || {};
+    return `<span class="aura-task-plan"><strong>${fmt(c.recipients)}</strong> recipients · ${fmt(p.eligibleAccounts)} accounts · ES ${fmt(l.ES)} / EN ${fmt(l.EN)} / PT ${fmt(l.PT)}${l.UNRESOLVED ? ` / ? ${fmt(l.UNRESOLVED)}` : ""} · ${esc(p.creativeSystem)} · “${esc(p.angle)}” · excluded ${fmt((c.recentlySent || 0) + (c.doNotContact || 0) + (c.invalid || 0) + (c.duplicate || 0))}</span>`;
+  }
+  function commandBar(a) {
+    const examples = (a && a.commands) || [];
+    return `<form class="aura-command" data-agent-command-form autocomplete="off"><label for="aura-command-input" class="aura-command-label">Ask AURA</label>
+      <div class="aura-command-row"><input id="aura-command-input" name="q" maxlength="300" placeholder="e.g. Run the next reactivation campaign" value="${attr(state.commandText || "")}" ${state.agentBusy ? "disabled" : ""}><button class="btn btn-primary btn-sm" type="submit" ${state.agentBusy ? "disabled" : ""}>RUN</button></div>
+      ${examples.length ? `<div class="aura-command-examples">${examples.slice(0, 7).map(e => `<button type="button" class="aura-chip" data-agent-example="${attr(e)}">${esc(e)}</button>`).join("")}</div>` : ""}
+      ${state.commandResponse ? `<p class="aura-command-response" role="status">${esc(state.commandResponse)}</p>` : ""}</form>`;
+  }
   function taskItem(t, withDecision) {
     const decide = withDecision && t.approvalId && t.approvalStatus === "PENDING";
-    return `<li class="aura-task"><div class="aura-task-main"><span class="aura-task-title">${esc(t.title)}</span><span class="aura-task-meta">${esc(t.scope)} · ${esc(t.state)}${t.blockReason ? " · " + esc(String(t.blockReason).replace(/_/g," ")) : ""}</span>${t.summary ? `<span class="aura-task-sub">${esc(t.summary)}</span>` : ""}${t.nextAction ? `<span class="aura-task-next">→ ${esc(t.nextAction)}</span>` : ""}</div>
+    return `<li class="aura-task"><div class="aura-task-main"><span class="aura-task-title">${esc(t.title)}</span><span class="aura-task-meta">${esc(t.scope)} · ${esc(t.state)}${t.blockReason ? " · " + esc(String(t.blockReason).replace(/_/g," ")) : ""}</span>${t.summary ? `<span class="aura-task-sub">${esc(t.summary)}</span>` : ""}${planSummary(t)}${t.decision && t.decision.rationale ? `<span class="aura-task-why" title="${attr("Observed: " + (t.decision.observed || "") + " · Source: " + (t.decision.dataSource || ""))}">Why: ${esc(t.decision.rationale)}${t.decision.dataSource ? ` · <em>${esc(t.decision.dataSource)}</em>` : ""}</span>` : ""}${t.nextAction ? `<span class="aura-task-next">→ ${esc(t.nextAction)}</span>` : ""}</div>
       <div class="aura-task-side"><span class="aura-badge aura-badge-${POLICY_TONE[t.policy]||"idle"}">${esc(String(t.policy||"").replace(/_/g," "))}</span>${decide ? `<button class="btn btn-primary btn-sm" data-agent-decide="APPROVED" data-approval="${attr(t.approvalId)}" data-title="${attr(t.title)}" ${state.agentBusy?"disabled":""}>APPROVE</button><button class="btn btn-secondary btn-sm" data-agent-decide="REJECTED" data-approval="${attr(t.approvalId)}" data-title="${attr(t.title)}" ${state.agentBusy?"disabled":""}>REJECT</button>` : ""}</div></li>`;
   }
   function lane(title, items, opts) {
@@ -147,6 +161,7 @@
         <div class="aura-cc-actions">${active ? "" : `<button class="btn btn-primary btn-sm" data-agent-activate ${state.agentBusy?"disabled":""}>ACTIVATE HOURLY RUNTIME</button>`}<button class="btn btn-secondary btn-sm" data-agent-run ${state.agentBusy?"disabled":""}>RUN CYCLE NOW</button></div></div>
         <div class="aura-cc-pills"><span class="aura-badge aura-badge-${active?"live":"warn"}">RUNTIME ${active?"ACTIVE · HOURLY":"INACTIVE"}</span><span class="aura-badge aura-badge-idle">LAST RUN ${esc(last.state||"NONE")} ${esc(String(last.finishedAt||last.startedAt||"").slice(0,16).replace("T"," "))}</span><span class="aura-badge aura-badge-warn">EXTERNAL ACTIONS NEED APPROVAL · V1 NEVER SENDS OR PUBLISHES</span>${meta.backendMs!=null?`<span class="aura-badge aura-badge-idle">1 REQUEST · ${fmt(meta.backendMs)} MS BACKEND</span>`:""}</div>
         ${state.agentBusy ? `<p role="status" class="aura-hint">${esc(state.agentBusy)}</p>` : ""}${!state.agentBusy && state.agentNotice ? `<p role="status" class="aura-hint">${esc(state.agentNotice)}</p>` : ""}
+        ${commandBar(a)}
       </div>
       <div class="aura-cc-grid">
         ${lane("TODAY'S PRIORITIES", a.priorities, { empty: "No open priorities." })}
@@ -169,6 +184,12 @@
         state.agentBusy = "Recording decision…"; paint(currentMount);
         await ad.agentDecide(el.dataset.approval, decision, "");
         state.agentNotice = "Decision recorded. AURA applies it on the next cycle.";
+      } else if (kind === "command") {
+        const text = String(el || "").trim(); if (!text) return;
+        state.commandText = text; state.agentBusy = "AURA is working on: " + text; paint(currentMount);
+        const r = await ad.agentCommand(text);
+        state.commandResponse = (r && r.response) || "Done."; state.commandText = "";
+        state.agentNotice = "";
       } else if (kind === "run") {
         state.agentBusy = "Running AURA cycle…"; paint(currentMount);
         const r = await ad.agentRunNow(); state.agentNotice = "Cycle " + String((r && r.status) || "done").replace(/_/g," ").toLowerCase() + ".";
@@ -459,7 +480,15 @@
       await agentAction("run");
     } else if (event.target.closest("[data-agent-activate]")) {
       await agentAction("activate");
+    } else if (event.target.closest("[data-agent-example]")) {
+      await agentAction("command", event.target.closest("[data-agent-example]").dataset.agentExample);
     }
+  });
+  global.document && global.document.addEventListener("submit", async (event) => {
+    const form = event.target && event.target.closest && event.target.closest("[data-agent-command-form]");
+    if (!form) return;
+    event.preventDefault();
+    await agentAction("command", (form.querySelector("input[name=q]") || {}).value);
   });
   global.addEventListener && global.addEventListener("dgl:v55-backend-change", (event) => {
     if (!global.location || !global.location.hash.includes("aura-overview")) return;
