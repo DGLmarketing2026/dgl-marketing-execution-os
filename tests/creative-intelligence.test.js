@@ -46,7 +46,7 @@ test('responsive contract: every system ships the mobile stack, fluid hero, wrap
   }
 });
 test('every system CTA is functional (mailto/https) and picked up by AURA tracking',()=>{
-  const ctx={Utilities:{base64EncodeWebSafe:t=>Buffer.from(String(t)).toString('base64').replace(/\+/g,'-').replace(/\//g,'_'),computeHmacSha256Signature:(v,k)=>Array.from(crypto.createHmac('sha256',k).update(v).digest()),getUuid:()=>'u'},PropertiesService:{getScriptProperties:()=>({getProperty:()=>'secret',setProperty(){}})},encodeURIComponent,String,Array,Object,Number};
+  const ctx={Utilities:{base64EncodeWebSafe:t=>Buffer.from(Array.isArray(t)?t.map(b=>b&255):String(t)).toString('base64').replace(/\+/g,'-').replace(/\//g,'_'),computeHmacSha256Signature:(v,k)=>Array.from(crypto.createHmac('sha256',k).update(v).digest()),getUuid:()=>'u'},PropertiesService:{getScriptProperties:()=>({getProperty:()=>'secret',setProperty(){}})},encodeURIComponent,String,Array,Object,Number};
   vm.createContext(ctx);vm.runInContext(fs.readFileSync('backend/apps-script-v6/MarketingV6AuraTracking.gs','utf8'),ctx);
   for(const id of Object.keys(L.CREATIVE_SYSTEMS)){
     const html=R.render({creativeSystem:id,service:'FTL',objective:'Reactivation',language:'EN'},COPY),hrefs=ctx.v6AuraTrackingCtaHrefs_(html);

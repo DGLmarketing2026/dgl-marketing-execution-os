@@ -5,7 +5,8 @@ function makeCtx(props){
   const ctx={console,Date,Math,Number,String,Object,Array,JSON,encodeURIComponent,tables,
     PropertiesService:{getScriptProperties:()=>({getProperty:k=>k in store?store[k]:null,setProperty:(k,v)=>{store[k]=v;}})},
     Utilities:{getUuid:()=>crypto.randomUUID(),
-      base64EncodeWebSafe:t=>Buffer.from(String(t),'utf8').toString('base64').replace(/\+/g,'-').replace(/\//g,'_'),
+      // Like Apps Script: byte arrays encode exactly; strings are encoded lossily (non-ASCII -> '?').
+      base64EncodeWebSafe:t=>Buffer.from(Array.isArray(t)?t.map(b=>b&255):[...String(t)].map(ch=>ch.charCodeAt(0)<128?ch.charCodeAt(0):63)).toString('base64').replace(/\+/g,'-').replace(/\//g,'_'),
       base64DecodeWebSafe:t=>Array.from(Buffer.from(String(t).replace(/-/g,'+').replace(/_/g,'/'),'base64')),
       newBlob:bytes=>({getDataAsString:()=>Buffer.from(bytes).toString('utf8')}),
       computeHmacSha256Signature:(v,k)=>Array.from(crypto.createHmac('sha256',k).update(v).digest()).map(b=>b>127?b-256:b)},
@@ -117,5 +118,20 @@ test('web app routes tracking first and keeps the existing router for everything
   const core=fs.readFileSync('backend/apps-script-live-core/DGL_Core.gs','utf8'),body=core.slice(core.indexOf('function doGet(e)'));
   assert(body.indexOf('v6AuraTrackingHandle_(e)')>=0&&body.indexOf('v6AuraTrackingHandle_(e)')<body.indexOf('handleMarketingV55Api_'));
   assert.equal((core.match(/function doGet\(/g)||[]).length,1);
+});
+test('CTA index travels as aura_c (Apps Script rejects ?c=2+), legacy c still accepted',()=>{
+  const c=seeded(),html=c.v6AuraTrackingApply_(HTML,JOB,BASE);
+  assert(/aura_t=c&k=[^"&]+&aura_c=1"/.test(html));assert(!/&c=\d/.test(html));
+  const k=c.v6AuraTrackingToken_(JOB);
+  assert(c.v6AuraTrackingHandle_({parameter:{aura_t:'c',k,aura_c:'1'}}).body.includes('https://www.dglus.com/services'));
+  assert(c.v6AuraTrackingHandle_({parameter:{aura_t:'c',k,c:'0'}}).body.includes('mailto:sales@dglus.com'));
+  assert(c.v6AuraTrackingHandle_({parameter:{aura_t:'c',k,aura_c:'9',c:'0'}}).body.includes('no longer available'),'aura_c wins over c');
+});
+test('signature is the raw HMAC (full entropy); lossy legacy tokens remain verifiable',()=>{
+  const c=seeded(),t=c.v6AuraTrackingToken_(JOB),[ref,sig]=t.split('.');
+  const raw=crypto.createHmac('sha256',c.store.AURA_TRACKING_SECRET).update(ref).digest('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'').slice(0,22);
+  assert.equal(sig,raw);
+  const legacy=ref+'.'+c.v6AuraTrackingSignLegacy_(ref);assert.notEqual(legacy,t);assert.equal(c.v6AuraTrackingVerify_(legacy),JOB);
+  assert.equal(c.v6AuraTrackingVerify_(ref+'.'+'A'.repeat(22)),'');
 });
 console.log(checks+'/'+checks+' tracking checks passed');
