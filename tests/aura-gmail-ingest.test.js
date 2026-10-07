@@ -345,7 +345,7 @@ function runTick(props,tables,threads){
 
 // 16. Frontend adapter exposes the freshness method
 (function testAdapterExposesFreshness(){
-  assert(/v6AuraGmailFreshness\s*:\s*\(\)\s*=>\s*mutate\(\s*["']v6AuraGmailFreshness["']/.test(adapterSource));
+  assert(/v6AuraGmailFreshness\s*:\s*\(\)\s*=>\s*(?:mutate|readOrThrow)\(\s*["']v6AuraGmailFreshness["']/.test(adapterSource));
   console.log('PASS: frontend adapter exposes v6AuraGmailFreshness');
 })();
 

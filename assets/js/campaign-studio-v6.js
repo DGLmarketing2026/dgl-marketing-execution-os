@@ -278,7 +278,10 @@ async function render(container,explicitId){
     try{sessionStorage.setItem(KEY,"{}");}catch(_){}
     model=createModel(context);
     const approvedLanguages=LANGUAGES.filter(l=>model.variants[l].approved);
-    const records=await Promise.all(approvedLanguages.map(l=>api().getLatestApprovedCreative(id,l).catch(()=>null)));if(ticket!==epoch)return;
+    // One request when the backend bundles the approved creatives into the context; otherwise
+    // the previous per-language reads (in parallel).
+    const bundled=context.approvedCreatives||{};
+    const records=await Promise.all(approvedLanguages.map(l=>Object.prototype.hasOwnProperty.call(bundled,l)?bundled[l]:api().getLatestApprovedCreative(id,l).catch(()=>null)));if(ticket!==epoch)return;
     approvedLanguages.forEach((l,i)=>{
       const v=model.variants[l],record=records[i];
       // An approved creative persisted by a retired renderer (templateId not in the design

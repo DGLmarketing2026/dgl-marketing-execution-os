@@ -28,13 +28,28 @@ const BUNDLE={ok:true,data:{meta:{backendMs:812,contract:'AURA_COMMAND_CENTER_V1
     scopes:{'CMP-CAMPANA-A-HA-PRIORITARIA':{campaignId:'CMP-CAMPANA-A-HA-PRIORITARIA',currentFamily:'Reactivation',latestRunId:'GL-1',lastSentAt:'2026-10-01',historicalFamilies:{Retention:109},
       currentRun:scope({sent:214,delivered:210,bounced:4,replied:2}),currentFamilyRun:scope({sent:214,delivered:210,bounced:4,replied:2}),historical:scope({sent:109,delivered:109}),allTime:scope({sent:323,delivered:319,bounced:4,replied:2}),pipeline:{rfq:1,quote:0,load:0}}}},
   retention:{},campanaA:{realSendsDetected:323},execution:{records:[]},latestRun:null}};
-const BASE={v6Opportunities:{ok:true,data:{groups:[]}},v55Requests:{ok:true,data:{requests:[]}},v55Campaigns:{ok:true,data:{campaigns:[]}},v55Activity:{ok:true,data:{activity:[]}},v6AuraExecutionReport:{ok:true,data:{records:[]}}};
+const BOOT={ok:true,data:{contract:'V55_BOOTSTRAP_V1',opportunities:{groups:[]},requests:{ok:true,data:{requests:[{requestId:'R1'}]}},campaigns:{ok:true,data:{campaigns:[{campaignId:'C1'}]}},activity:{ok:false,error:'x'},auraReport:{ok:true}}};
+const LEGACY={v6Opportunities:{ok:true,data:{groups:[]}},v55Requests:{ok:true,data:{requests:[]}},v55Campaigns:{ok:true,data:{campaigns:[]}},v55Activity:{ok:true,data:{activity:[]}},v6AuraExecutionReport:{ok:true,data:{records:[]}}};
+const BASE=Object.assign({v55Bootstrap:BOOT},LEGACY);
 let checks=0;async function test(n,fn){await fn();checks++;console.log('PASS '+n);}
 const tick=()=>new Promise(r=>setTimeout(r,0));
 (async()=>{
-  await test('connect = 5 requests; cached reads, in-flight dedupe, force and write invalidation',async()=>{
+  await test('connect = ONE bootstrap request; datasets applied; failed part degrades only itself',async()=>{
+    const e=makeEnv(BASE);await e.adapter.connect();
+    assert.deepEqual(e.log,['v55Bootstrap']);assert.equal(e.adapter.isConnected(),true);
+    const st=e.adapter.getConnectionState();assert.equal(st.requestCount,1);assert.equal(st.campaignCount,1);assert.equal(st.activityCount,0);
+  });
+  await test('older backend without bootstrap falls back to the previous connect path',async()=>{
+    const e=makeEnv(LEGACY);await e.adapter.connect();
+    assert.equal(e.log[0],'v55Bootstrap');assert.deepEqual(e.log.slice(1).sort(),['v55Activity','v55Campaigns','v55Requests','v6AuraExecutionReport','v6Opportunities']);assert.equal(e.adapter.isConnected(),true);
+  });
+  await test('bootstrap auth rejection clears the token and reports AUTH_ERROR',async()=>{
+    const e=makeEnv(Object.assign({},BASE,{v55Bootstrap:{ok:false,error:'UNAUTHORIZED: invalid token'}}));
+    await e.adapter.connect().catch(()=>{});assert.equal(e.adapter.isConnected(),false);assert.deepEqual(e.log,['v55Bootstrap']);
+  });
+  await test('cached reads, in-flight dedupe, force and write invalidation',async()=>{
     const e=makeEnv(Object.assign({},BASE,{v6AuraCommandCenter:BUNDLE,v6AuraAgentDecide:{ok:true,data:{status:'RECORDED'}}}));
-    await e.adapter.connect();assert.equal(e.log.length,5);
+    await e.adapter.connect();assert.equal(e.log.length,1);
     const [a,b]=await Promise.all([e.adapter.v6AuraCommandCenter(),e.adapter.v6AuraCommandCenter()]);
     assert.equal(e.log.filter(x=>x==='v6AuraCommandCenter').length,1,'concurrent reads de-duplicated');assert.deepEqual(a,b);
     await e.adapter.v6AuraCommandCenter();assert.equal(e.log.filter(x=>x==='v6AuraCommandCenter').length,1,'TTL cache hit');
@@ -44,11 +59,11 @@ const tick=()=>new Promise(r=>setTimeout(r,0));
     const m=e.adapter.getRequestMetrics();assert(m.cacheHits>=1&&m.dedupeHits>=1);
     assert.deepEqual([...e.localStore.keys()],['dgl_mkt_v55_token_session'],'no report data in localStorage');assert.equal(e.sessionStore.size,0);
   });
-  await test('post-mutation refresh re-reads datasets only (3 requests instead of 5)',async()=>{
+  await test('post-mutation refresh is ONE bootstrap request (was 5, then 3)',async()=>{
     const e=makeEnv(Object.assign({},BASE,{v55PauseCampaign:{ok:true,data:{}}}));
     await e.adapter.connect();e.log.length=0;
     await e.adapter.pauseCampaign?await e.adapter.pauseCampaign('C1'):await e.adapter.mutate('v55PauseCampaign',{campaignId:'C1'});
-    assert.deepEqual(e.log.slice().sort(),['v55Activity','v55Campaigns','v55PauseCampaign','v55Requests'].sort());
+    assert.deepEqual(e.log,['v55PauseCampaign','v55Bootstrap']);
   });
   await test('Command Center loads in ONE request and renders scoped KPIs and approval controls',async()=>{
     const e=makeEnv(Object.assign({},BASE,{v6AuraCommandCenter:BUNDLE}));await e.adapter.connect();e.log.length=0;
