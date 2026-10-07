@@ -114,17 +114,23 @@
   const isRate = m => /^(openRate|ctr|ctor)$/.test(m);
   const SCOPE_COLUMNS = [["currentRun","CURRENT RUN"],["currentFamilyRun","CURRENT CAMPAIGN FAMILY"],["historical","HISTORICAL (OTHER FAMILIES)"],["allTime","ALL-TIME"]];
   const SCOPE_METRICS = [["sent","SENT"],["delivered","DELIVERED (SENT − BOUNCED)"],["bounced","BOUNCED"],["opened","OPENED (unique)"],["clicked","CLICKED (unique)"],["replied","REPLIED"],["openRate","OPEN RATE"],["ctr","CTR"],["ctor","CTOR"]];
+  // Technical / QA campaigns (e.g. CMP-AURA-TRACKING-QA) are audit evidence, never commercial KPIs.
+  const TECHNICAL_CAMPAIGN_RE = /(^|[^A-Z0-9])(TRACKING[-_ ]?QA|QA|TEST)([^A-Z0-9]|$)/i;
+  const isTechnicalCampaign = id => TECHNICAL_CAMPAIGN_RE.test(String(id || ""));
   function scopedKpiSection() {
     const scopes = (state.performance && state.performance.scopes) || {};
-    const list = Object.values(scopes).filter(c => c.allTime && c.allTime.sent).sort((a,b)=>String(b.lastSentAt||"").localeCompare(String(a.lastSentAt||""))).slice(0, 4);
-    if (!list.length) return "";
+    const all = Object.values(scopes).filter(c => c.allTime && c.allTime.sent).sort((a,b)=>String(b.lastSentAt||"").localeCompare(String(a.lastSentAt||"")));
+    const list = all.filter(c => !isTechnicalCampaign(c.campaignId)).slice(0, 4), technical = all.filter(c => isTechnicalCampaign(c.campaignId));
+    if (!all.length) return "";
     const cell = (c,k,m) => { const v = (c[k]||{})[m]; return isRate(m) ? pct(v) : v == null ? "NOT TRACKED" : fmt(v); };
+    const card = (c, tech) => `<div class="aura-scope-card"${tech ? ' data-technical-campaign="true"' : ""}><div class="aura-scope-title"><strong>${esc(c.campaignId)}</strong>${tech ? '<span class="aura-badge aura-badge-idle">TECHNICAL / QA</span>' : `<span class="aura-badge aura-badge-ready">CURRENT FAMILY: ${esc(c.currentFamily || "UNKNOWN")}</span>`}${c.latestRunId ? `<span class="aura-badge aura-badge-idle">RUN ${esc(c.latestRunId)}</span>` : ""}${Object.keys(c.historicalFamilies||{}).length ? `<span class="aura-badge aura-badge-idle">HISTORICAL: ${esc(Object.entries(c.historicalFamilies).map(([k,v])=>k+" "+v).join(", "))}</span>` : ""}</div>
+        <div class="aura-performance-scroll"><table class="data-table aura-scope-table"><thead><tr><th>Metric</th>${SCOPE_COLUMNS.map(([,l])=>`<th>${l}</th>`).join("")}</tr></thead><tbody>
+        ${SCOPE_METRICS.map(([m,l])=>`<tr><th scope="row" class="aura-scope-metric">${l}</th>${SCOPE_COLUMNS.map(([k])=>`<td data-scope="${k}" data-metric="${m}">${cell(c,k,m)}</td>`).join("")}</tr>`).join("")}
+        <tr><th scope="row" class="aura-scope-metric">RFQ / QUOTE / LOAD (campaign)</th><td colspan="4">${fmt((c.pipeline||{}).rfq)} / ${fmt((c.pipeline||{}).quote)} / ${fmt((c.pipeline||{}).load)}</td></tr></tbody></table></div></div>`;
     return `<section class="card card-pad aura-scoped"><div class="aura-section-head"><h3>Campaign KPIs by scope</h3></div>
       <p class="aura-hint">SENT is not DELIVERED. OPEN is a weak signal (image proxies and Apple Mail Privacy Protection inflate or hide opens). OR = unique opens ÷ delivered · CTR = unique clicks ÷ delivered · CTOR = unique clicks ÷ unique opens.</p>
-      ${list.map(c => `<div class="aura-scope-card"><div class="aura-scope-title"><strong>${esc(c.campaignId)}</strong><span class="aura-badge aura-badge-ready">CURRENT FAMILY: ${esc(c.currentFamily || "UNKNOWN")}</span>${c.latestRunId ? `<span class="aura-badge aura-badge-idle">RUN ${esc(c.latestRunId)}</span>` : ""}${Object.keys(c.historicalFamilies||{}).length ? `<span class="aura-badge aura-badge-idle">HISTORICAL: ${esc(Object.entries(c.historicalFamilies).map(([k,v])=>k+" "+v).join(", "))}</span>` : ""}</div>
-        <div class="aura-performance-scroll"><table class="data-table aura-scope-table"><thead><tr><th>Metric</th>${SCOPE_COLUMNS.map(([,l])=>`<th>${l}</th>`).join("")}</tr></thead><tbody>
-        ${SCOPE_METRICS.map(([m,l])=>`<tr><th scope="row">${l}</th>${SCOPE_COLUMNS.map(([k])=>`<td data-scope="${k}" data-metric="${m}">${cell(c,k,m)}</td>`).join("")}</tr>`).join("")}
-        <tr><th scope="row">RFQ / QUOTE / LOAD (campaign)</th><td colspan="4">${fmt((c.pipeline||{}).rfq)} / ${fmt((c.pipeline||{}).quote)} / ${fmt((c.pipeline||{}).load)}</td></tr></tbody></table></div></div>`).join("")}</section>`;
+      <div data-commercial-kpis>${list.length ? list.map(c => card(c, false)).join("") : '<div class="aura-empty">No commercial campaign sends yet.</div>'}</div>
+      ${technical.length ? `<details class="aura-technical-evidence" data-technical-evidence><summary>Technical / QA evidence · ${technical.length} campaign${technical.length === 1 ? "" : "s"} · excluded from commercial KPIs</summary>${technical.map(c => card(c, true)).join("")}</details>` : ""}</section>`;
   }
   const POLICY_TONE = { AUTO: "live", REVIEW: "ready", APPROVAL_REQUIRED: "warn", BLOCKED: "idle" };
   const attr = v => esc(v).replace(/"/g, "&quot;");
@@ -172,7 +178,7 @@
         ${lane("BLOCKED", a.blocked, { empty: "Nothing blocked." })}
         ${lane("COMPLETED", a.completed, { empty: "No completed tasks yet." })}
         ${lane("NEXT BEST ACTIONS", a.nextBestActions, { render: t => `<li class="aura-task"><div class="aura-task-main"><span class="aura-task-title">${esc(t.nextAction)}</span><span class="aura-task-meta">${esc(t.title)}</span></div></li>`, empty: "No suggestions yet." })}
-        ${lane("RECENT RESULTS", (a.recentResults||[]).filter(m => m.scope === "currentRun"), { wide: true, limit: 12, render: m => `<li class="aura-task"><div class="aura-task-main"><span class="aura-task-title">${esc(m.campaignId)} · ${esc(m.metric)}</span><span class="aura-task-meta">CURRENT RUN · ${esc(String(m.at||"").slice(0,16).replace("T"," "))}</span></div><div class="aura-task-side"><strong>${isRate(m.metric) && m.value !== "NOT_TRACKED" ? pct(m.value) : esc(String(m.value).replace(/_/g," "))}</strong></div></li>`, empty: "No measurements yet." })}
+        ${lane("RECENT RESULTS", (a.recentResults||[]).filter(m => m.scope === "currentRun" && !isTechnicalCampaign(m.campaignId)), { wide: true, limit: 12, render: m => `<li class="aura-task"><div class="aura-task-main"><span class="aura-task-title">${esc(m.campaignId)} · ${esc(m.metric)}</span><span class="aura-task-meta">CURRENT RUN · ${esc(String(m.at||"").slice(0,16).replace("T"," "))}</span></div><div class="aura-task-side"><strong>${isRate(m.metric) && m.value !== "NOT_TRACKED" ? pct(m.value) : esc(String(m.value).replace(/_/g," "))}</strong></div></li>`, empty: "No measurements yet." })}
       </div></section>`;
   }
   async function agentAction(kind, el) {

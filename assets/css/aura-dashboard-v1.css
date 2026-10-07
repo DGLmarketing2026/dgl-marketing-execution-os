@@ -128,6 +128,10 @@
 .aura-scope-table th[scope="row"] { text-align: left; font-weight: 600; white-space: nowrap; }
 .aura-scope-table td { text-align: right; font-variant-numeric: tabular-nums; }
 .aura-scope-table thead th { font-size: 11px; letter-spacing: .06em; }
+/* Row-header metric column inherits the dark card surface (was hit by the light sticky-th rule). */
+.aura-scope-table tbody th.aura-scope-metric { position: static; background: transparent; color: var(--text, inherit); padding: 13px 16px; border-bottom: 1px solid var(--border, rgba(255,255,255,.08)); font-size: 13px; }
+.aura-technical-evidence { margin-top: 16px; border-top: 1px dashed var(--border, rgba(255,255,255,.12)); padding-top: 12px; }
+.aura-technical-evidence > summary { cursor: pointer; font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--text-secondary, #6B7280); }
 @media (max-width: 640px) {
   .aura-cc-grid { grid-template-columns: 1fr; }
   .aura-task { flex-direction: column; }
