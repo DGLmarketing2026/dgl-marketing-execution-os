@@ -360,7 +360,11 @@ function v6AuraAgentDecide_(payload) {
 }
 
 // ---- Trigger --------------------------------------------------------------------------------
-function auraAgentTick() { return v6AuraAgentRunCycle_({ trigger: 'TIME_TRIGGER' }); }
+function auraAgentTick() {
+  var r = v6AuraAgentRunCycle_({ trigger: 'TIME_TRIGGER' });
+  if (typeof v6AuraAgentShadowTickLog_ === 'function') { try { v6AuraAgentShadowTickLog_(r); } catch (e) {} }
+  return r;
+}
 function v6AuraAgentTriggerInstalled_() {
   try { return ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'auraAgentTick'; }); } catch (e) { return null; }
 }
