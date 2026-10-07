@@ -16,9 +16,14 @@
 var AURA_AGENT_MODE_PROP_ = 'AURA_AGENT_MODE';
 var AURA_AGENT_SHADOW_REPORT_PROP_ = 'AURA_AGENT_SHADOW_REPORT_ID';
 
+// Runs fn with every agent-required table loaded via the Sheets API (fallback: SpreadsheetApp).
+function v6AuraAgentShadowWithHub_(fn) {
+  if (typeof v6WithRowsMemo_ !== 'function') return fn();
+  return v6WithRowsMemo_(function () { v6AuraAgentHubAttach_(); return fn(); }, AURA_AGENT_MEMO_OPTIONS_);
+}
 function v6AuraAgentShadowQueueSnapshot_() {
   // Projected read (no htmlBody): the safety snapshot must not itself hit the Data Hub timeout.
-  var q = typeof v6WithRowsMemo_ === 'function' ? v6WithRowsMemo_(function () { return v6Rows_('MKT_EMAIL_QUEUE'); }, AURA_AGENT_MEMO_OPTIONS_) : v6Rows_('MKT_EMAIL_QUEUE'), sent = 0, campaignA = 0, statuses = {};
+  var q = v6AuraAgentShadowWithHub_(function () { return v6Rows_('MKT_EMAIL_QUEUE'); }), sent = 0, campaignA = 0, statuses = {};
   q.forEach(function (r) {
     var s = String(r.status || '').toUpperCase(); statuses[s] = (statuses[s] || 0) + 1;
     if (s === 'SENT') { sent++; if (typeof CAMPANA_A_CAMPAIGN_ID_ !== 'undefined' && r.campaignId === CAMPANA_A_CAMPAIGN_ID_) campaignA++; }
@@ -50,11 +55,14 @@ function AURA_AGENT_SHADOW_ACTIVATE() {
     if (out.initialRun.status === 'COMPLETED') out.hourlyTriggers = v6AuraAgentShadowEnsureSingleTrigger_();
     else { ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'auraAgentTick') ScriptApp.deleteTrigger(t); }); out.hourlyTriggers = 0; out.recovery = 'RUNTIME_PAUSED_UNTIL_A_CYCLE_COMPLETES'; }
     var after = v6AuraAgentRetry_(v6AuraAgentShadowQueueSnapshot_);
-    var tasks = v6Rows_('AURA_AGENT_TASKS'), actions = v6Rows_('AURA_AGENT_ACTIONS');
+    var view = v6AuraAgentShadowWithHub_(function () {
+      var v = { tasks: v6Rows_('AURA_AGENT_TASKS'), actions: v6Rows_('AURA_AGENT_ACTIONS'), cc: v6AuraAgentCommandCenter_(), tables: {} };
+      ['AURA_AGENT_RUNS', 'AURA_AGENT_TASKS', 'AURA_AGENT_DECISIONS', 'AURA_AGENT_ACTIONS', 'AURA_AGENT_APPROVALS', 'AURA_AGENT_EVENTS', 'AURA_AGENT_MEMORY', 'AURA_AGENT_METRICS'].forEach(function (n) { v.tables[n] = v6Rows_(n).length; });
+      return v;
+    });
+    var tasks = view.tasks, actions = view.actions, cc = view.cc;
     var byState = {}, byKind = {}; tasks.forEach(function (t) { byState[t.state] = (byState[t.state] || 0) + 1; byKind[t.kind] = (byKind[t.kind] || 0) + 1; });
-    var cc = v6AuraAgentCommandCenter_();
-    out.tables = {};
-    ['AURA_AGENT_RUNS', 'AURA_AGENT_TASKS', 'AURA_AGENT_DECISIONS', 'AURA_AGENT_ACTIONS', 'AURA_AGENT_APPROVALS', 'AURA_AGENT_EVENTS', 'AURA_AGENT_MEMORY', 'AURA_AGENT_METRICS'].forEach(function (n) { out.tables[n] = v6Rows_(n).length; });
+    out.tables = view.tables;
     out.tasksByState = byState; out.tasksByKind = byKind;
     out.opportunities = cc.opportunities.map(function (t) { return { title: t.title, scope: t.scope, state: t.state, plan: t.result && t.result.plan ? { recipients: t.result.plan.contacts.recipients, accounts: t.result.plan.eligibleAccounts, languages: t.result.plan.languages, creativeSystem: t.result.plan.creativeSystem } : null, blockReason: t.blockReason }; });
     out.waitingApproval = cc.waitingApproval.map(function (t) { return { title: t.title, policy: t.policy, approvalId: t.approvalId }; });
@@ -77,4 +85,15 @@ function v6AuraAgentShadowTickLog_(r) {
   if (!PropertiesService.getScriptProperties().getProperty(AURA_AGENT_SHADOW_REPORT_PROP_)) return;
   var run = (r && r.run) || {};
   v6AuraAgentShadowReport_({ section: 'TICK', status: r && r.status, runId: run.runId, tasksCreated: run.tasksCreated, tasksAdvanced: run.tasksAdvanced, tasksCompleted: run.tasksCompleted, tasksBlocked: run.tasksBlocked, tasksFailed: run.tasksFailed, error: (r && r.error) || run.error || '' });
+}
+
+// One editor run: Data Hub diagnostic (per-stage timings, no customer values) + controlled shadow
+// cycle. The hourly trigger is restored only if that cycle completes.
+function AURA_AGENT_SHADOW_RECOVER() {
+  var out = { section: 'RECOVER' };
+  try { out.diagnostic = v6AuraHubDiagnose_(); } catch (e) { out.diagnostic = { error: String(e && e.message || e) }; }
+  try { v6AuraAgentShadowReport_({ section: 'DIAGNOSTIC', diagnostic: out.diagnostic }); } catch (e) {}
+  out.activation = AURA_AGENT_SHADOW_ACTIVATE();
+  console.log('AURA_AGENT_SHADOW_RECOVER ' + JSON.stringify({ diagnostic: out.diagnostic, status: out.activation && out.activation.status }));
+  return out;
 }
