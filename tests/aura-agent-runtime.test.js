@@ -126,4 +126,18 @@ test('runtime source never sends, publishes or touches send mode / SENT history'
   assert(!/GmailApp\.|UrlFetchApp|AURA_SEND_MODE|v6AuraCampanaAGoLive_|auraProcessEmailQueue|MKT_EMAIL_QUEUE'\s*,/.test(s));
   assert(!/NOVA/.test(s.replace(/NOVA is a separate system[^\n]*/,'')));
 });
+test('transient Sheets timeouts are retried with backoff; the cycle completes without duplicates',()=>{
+  const c=makeCtx({tables:{MKT_OPPORTUNITIES:[{accountId:'A1',opportunityType:'QNB'}]}});let fails=2,sleeps=0;
+  c.Utilities={sleep:()=>{sleeps++;}};
+  const upsert=c.v6BatchUpsertByKey_;c.v6BatchUpsertByKey_=(n,k,r)=>{if(n==='AURA_AGENT_TASKS'&&fails-->0)throw new Error('Service Spreadsheets timed out while accessing document with id X.');return upsert(n,k,r);};
+  const r=c.v6AuraAgentRunCycle_({now:T0});
+  assert.equal(r.status,'COMPLETED');assert.equal(sleeps,2);
+  assert.equal(c.tables.AURA_AGENT_TASKS.filter(t=>t.kind==='OPPORTUNITY').length,1);assert.equal(c.tables.AURA_AGENT_RUNS.length,1);assert.equal(c.tables.AURA_AGENT_APPROVALS.length,1);
+  const d=makeCtx();d.Utilities={sleep:()=>{}};d.v6AuraAgentLoad_=()=>{throw new Error('PERMISSION_DENIED');};
+  let calls=0;assert.throws(()=>d.v6AuraAgentRetry_(()=>{calls++;throw new Error('PERMISSION_DENIED');}));assert.equal(calls,1,'non-transient errors are not retried');
+});
+test('Gmail DSN ingestion is not duplicated when its dedicated trigger exists',()=>{
+  const c=makeCtx();c.triggers.push({getHandlerFunction:()=>'auraIngestGmailDsn'});
+  c.v6AuraAgentRunCycle_({now:T0});assert.equal(c.calls.ingest,0);assert(!c.tables.AURA_AGENT_TASKS.some(t=>t.taskId.includes(':INGEST')));
+});
 console.log(checks+'/'+checks+' agent runtime checks passed');

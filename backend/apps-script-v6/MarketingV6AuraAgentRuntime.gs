@@ -75,6 +75,22 @@ var AURA_AGENT_MAX_ATTEMPTS_ = 3;
 var AURA_AGENT_LEASE_PROP_ = 'AURA_AGENT_LEASE';
 var AURA_AGENT_EXTERNAL_DISABLED_ = 'EXTERNAL_EXECUTION_DISABLED_PHASE_V1';
 
+// Transient Sheets/Apps Script service errors ("Service Spreadsheets timed out", "try again")
+// are retried with backoff. Every agent write is an idempotent upsert by deterministic id, so a
+// retried step can never duplicate tasks, decisions, approvals or runs.
+var AURA_AGENT_TRANSIENT_RE_ = /timed out|Service Spreadsheets|Service invoked too many times|try again|temporarily unavailable|Internal error/i;
+function v6AuraAgentRetry_(fn, attempts) {
+  var max = attempts || 3, last;
+  for (var i = 1; i <= max; i++) {
+    try { return fn(); }
+    catch (err) {
+      last = err;
+      if (i === max || !AURA_AGENT_TRANSIENT_RE_.test(String(err && err.message || err))) throw err;
+      if (typeof Utilities !== 'undefined' && Utilities.sleep) Utilities.sleep(1500 * i);
+    }
+  }
+  throw last;
+}
 function v6AuraAgentText_(v) { return v == null ? '' : String(v).trim(); }
 function v6AuraAgentCanTransition_(from, to) { return (AURA_AGENT_TRANSITIONS_[from] || []).indexOf(to) >= 0 || (to === 'BLOCKED' || to === 'FAILED') && !AURA_AGENT_TERMINAL_[from]; }
 // Policy for one action type. Unknown -> BLOCKED; an external action can never be AUTO/REVIEW.
@@ -170,7 +186,9 @@ function v6AuraAgentScopeForType_(type) {
 }
 function v6AuraAgentDetect_(nowIso) {
   var day = nowIso.slice(0, 10), hour = nowIso.slice(0, 13), now = new Date(nowIso).getTime(), found = [];
-  found.push({ taskId: 'AT:' + hour + ':INGEST', kind: 'MAINTENANCE', scope: 'EMAIL', subjectKey: 'GMAIL_DSN', title: 'Ingest bounces and replies', summary: 'Read Gmail delivery notifications and reconcile email events.', observed: 'Hourly maintenance window', dataSource: 'Gmail DSN + MKT_EMAIL_EVENTS', rationale: 'Bounces and replies must be current before any measurement or next send', priority: 20, actions: [{ actionType: 'INGEST_BOUNCES_REPLIES', preview: 'Gmail DSN scan + MKT_EMAIL_EVENTS reconcile' }] });
+  var dsnTrigger = false;
+  try { dsnTrigger = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'auraIngestGmailDsn'; }); } catch (e) {}
+  if (!dsnTrigger) found.push({ taskId: 'AT:' + hour + ':INGEST', kind: 'MAINTENANCE', scope: 'EMAIL', subjectKey: 'GMAIL_DSN', title: 'Ingest bounces and replies', summary: 'Read Gmail delivery notifications and reconcile email events.', observed: 'Hourly maintenance window', dataSource: 'Gmail DSN + MKT_EMAIL_EVENTS', rationale: 'Bounces and replies must be current before any measurement or next send', priority: 20, actions: [{ actionType: 'INGEST_BOUNCES_REPLIES', preview: 'Gmail DSN scan + MKT_EMAIL_EVENTS reconcile' }] });
   var perf = typeof v6AuraEmailPerformance_ === 'function' ? v6AuraEmailPerformance_() : { scopes: {} };
   Object.keys(perf.scopes || {}).forEach(function (cid) {
     var s = perf.scopes[cid], cur = s.currentRun || {};
@@ -202,12 +220,12 @@ function v6AuraAgentRunCycle_(options) {
   props.setProperty(AURA_AGENT_LEASE_PROP_, String(now.getTime()));
   var st, run;
   try {
-    v6AuraAgentEnsureSheets_();
-    st = v6AuraAgentLoad_(); st.runId = 'RUN:' + nowIso; st.advanced = 0; st.nowIso = nowIso;
+    v6AuraAgentRetry_(v6AuraAgentEnsureSheets_);
+    st = v6AuraAgentRetry_(v6AuraAgentLoad_); st.runId = 'RUN:' + nowIso; st.advanced = 0; st.nowIso = nowIso;
     run = { runId: st.runId, trigger: opts.trigger || 'MANUAL', state: 'RUNNING', startedAt: nowIso, tasksCreated: 0 };
     var created = 0, openBySubject = {};
     st.AURA_AGENT_TASKS.forEach(function (t) { if (!AURA_AGENT_TERMINAL_[t.state]) openBySubject[t.kind + ':' + t.subjectKey] = true; });
-    var detections = (opts.extra || []).concat(opts.onlyExtra ? [] : v6AuraAgentDetect_(nowIso)), onlyIds = {};
+    var detections = (opts.extra || []).concat(opts.onlyExtra ? [] : v6AuraAgentRetry_(function () { return v6AuraAgentDetect_(nowIso); })), onlyIds = {};
     detections.forEach(function (d) {
       // Idempotent: one task per deterministic key, and never a second open task for the same subject.
       if (st.taskById[d.taskId] || openBySubject[d.kind + ':' + d.subjectKey]) return;
@@ -232,7 +250,8 @@ function v6AuraAgentRunCycle_(options) {
     v6AuraAgentPut_(st, 'AURA_AGENT_MEMORY', { memoryKey: 'runtime.lastTick', scope: 'RUNTIME', value: JSON.stringify({ runId: st.runId, at: nowIso, trigger: run.trigger }), updatedAt: nowIso });
     Object.assign(run, { state: 'COMPLETED', finishedAt: new Date().toISOString(), tasksCreated: created, tasksAdvanced: st.advanced, tasksCompleted: stats.completed, tasksBlocked: stats.blocked, tasksFailed: stats.failed });
     v6AuraAgentPut_(st, 'AURA_AGENT_RUNS', run);
-    v6AuraAgentFlush_(st);
+    var pending = st.changed;
+    v6AuraAgentRetry_(function () { st.changed = pending; v6AuraAgentFlush_(st); });
     return { status: 'COMPLETED', run: run };
   } catch (err) {
     if (run) { try { st.changed = {}; v6BatchUpsertByKey_('AURA_AGENT_RUNS', ['runId'], [Object.assign(run, { state: 'FAILED', finishedAt: new Date().toISOString(), error: String(err && err.message || err).slice(0, 300) })]); } catch (e) {} }
