@@ -20,8 +20,73 @@ var AURA_AGENT_PLAYBOOK_ = {
   ACCOUNT_GROWTH: { objective: 'Relationship Renewal', creativeSystem: 'case-proof', angle: 'Planning Ahead', cta: 'Reply' }
 };
 var AURA_AGENT_RECENT_SEND_DAYS_ = 30;
+// Bump when the plan logic changes: plans of tasks still waiting for approval are refreshed.
+var AURA_AGENT_PLAN_VERSION_ = 2;
 
 function v6AuraAgentIsTrue_(v) { return /^(true|yes|y|1|x)$/i.test(String(v == null ? '' : v).trim()); }
+// ---- Language resolution (ES / EN / PT). Priority, each step auditable; never defaults to EN:
+// 1 explicit contact language field  -> HIGH   (CONTACT_EXPLICIT)
+// 2 Salesforce/source language field -> HIGH   (SOURCE_SYSTEM_LANGUAGE)
+// 3 prior governed send for the same contact/email whose language came from an explicit signal
+//   -> HIGH (PRIOR_SEND_EXPLICIT); from country geography -> MEDIUM (PRIOR_SEND_COUNTRY);
+//   EN fallbacks of earlier pipelines are ignored; conflicting prior languages are ignored
+// 4 contact / account country (single-language countries only) -> MEDIUM (CONTACT_COUNTRY / ACCOUNT_COUNTRY)
+// 5 email ccTLD of a single-language country (.br .mx .co …) -> MEDIUM (EMAIL_CCTLD); .com/.us/.net give nothing
+// 6 otherwise UNRESOLVED (confidence NONE): the contact is NOT send-ready.
+var AURA_LANG_EXPLICIT_FIELDS_ = ['preferredLanguage', 'language', 'Language', 'Idioma', 'idioma'];
+var AURA_LANG_SOURCE_FIELDS_ = ['salesforceLanguage', 'languageLocaleKey', 'LanguageLocaleKey', 'sourceLanguage', 'Preferred_Language__c', 'preferredLanguage__c'];
+var AURA_LANG_COUNTRY_FIELDS_ = ['country', 'Country', 'país', 'pais', 'billingCountry', 'BillingCountry', 'mailingCountry', 'MailingCountry', 'shippingCountry'];
+var AURA_LANG_CCTLD_ = { br: 'PT', pt: 'PT', mx: 'ES', co: 'ES', ar: 'ES', cl: 'ES', pe: 'ES', ec: 'ES', ve: 'ES', uy: 'ES', py: 'ES', bo: 'ES', gt: 'ES', hn: 'ES', sv: 'ES', ni: 'ES', cr: 'ES', pa: 'ES', 'do': 'ES', es: 'ES' };
+var AURA_LANG_COUNTRY_MIN_ = { BRAZIL: 'PT', BRASIL: 'PT', BR: 'PT', PORTUGAL: 'PT', MEXICO: 'ES', 'MÉXICO': 'ES', MX: 'ES', COLOMBIA: 'ES', CO: 'ES', SPAIN: 'ES', 'ESPAÑA': 'ES', 'UNITED STATES': 'EN', USA: 'EN', US: 'EN', CANADA: 'EN' };
+var AURA_LANG_PRIOR_TRUST_ = { CONTACT_EXPLICIT_SIGNAL: 'HIGH', CONTACT_EXPLICIT: 'HIGH', SOURCE_SYSTEM_LANGUAGE: 'HIGH', PRIOR_SEND_EXPLICIT: 'HIGH', CAMPANA_A_TAB_COUNTRY: 'MEDIUM', CONTACT_OR_ACCOUNT_COUNTRY: 'MEDIUM', CONTACT_COUNTRY: 'MEDIUM', ACCOUNT_COUNTRY: 'MEDIUM' };
+function v6AuraAgentLangValue_(v) {
+  var s = String(v == null ? '' : v).trim();
+  if (!s) return '';
+  if (typeof v6AuraCampanaANormalizeLanguageValue_ === 'function') { var n = v6AuraCampanaANormalizeLanguageValue_(s); if (n) return n; }
+  var l = s.toLowerCase();
+  if (/^(es|esp|spa|spanish|español|espanol)([-_].*)?$/.test(l)) return 'ES';
+  if (/^(en|eng|english|inglés|ingles)([-_].*)?$/.test(l)) return 'EN';
+  if (/^(pt|por|portuguese|português|portugues)([-_].*)?$/.test(l)) return 'PT';
+  return '';
+}
+function v6AuraAgentCountryLang_(country) {
+  var c = String(country || '').trim(); if (!c) return '';
+  if (typeof v6AuraCountryToLanguage_ === 'function') { var l = v6AuraCountryToLanguage_(c); if (l) return l; }
+  return AURA_LANG_COUNTRY_MIN_[c.toUpperCase()] || '';
+}
+function v6AuraAgentFirst_(o, fields) { for (var i = 0; i < fields.length; i++) { var v = o && o[fields[i]]; if (v != null && String(v).trim()) return v; } return ''; }
+// Per-cycle context: prior governed send languages (by contactId and exact email) and accounts.
+function v6AuraAgentLanguageContext_() {
+  var cache = typeof AURA_AGENT_CYCLE_CACHE_ !== 'undefined' ? AURA_AGENT_CYCLE_CACHE_ : null;
+  if (cache && cache.langCtx) return cache.langCtx;
+  var prior = {}, conflict = {}, accounts = {};
+  function note(key, lang, conf) { if (!key) return; if (conflict[key]) return; var p = prior[key]; if (p && p.lang !== lang) { conflict[key] = true; delete prior[key]; return; } if (!p || (conf === 'HIGH' && p.conf !== 'HIGH')) prior[key] = { lang: lang, conf: conf }; }
+  v6Rows_('MKT_EMAIL_QUEUE').forEach(function (q) {
+    var lang = v6AuraAgentLangValue_(q.preferredLanguage || q.language), conf = AURA_LANG_PRIOR_TRUST_[String(q.languageSource || '').trim()];
+    if (!lang || !conf) return; // EN fallbacks and unknown sources are not evidence
+    note('C:' + String(q.contactId || '').trim(), lang, conf); note('E:' + String(q.email || '').trim().toLowerCase(), lang, conf);
+  });
+  v6Rows_('MKT_ACCOUNTS').forEach(function (a) { if (a.accountId) accounts[a.accountId] = a; });
+  var ctx = { prior: prior, accounts: accounts };
+  if (cache) cache.langCtx = ctx;
+  return ctx;
+}
+function v6AuraAgentResolveLanguage_(c, lctx) {
+  var ctx = lctx || v6AuraAgentLanguageContext_();
+  var explicit = v6AuraAgentLangValue_(v6AuraAgentFirst_(c, AURA_LANG_EXPLICIT_FIELDS_));
+  if (explicit) return { language: explicit, source: 'CONTACT_EXPLICIT', confidence: 'HIGH', explicit: true };
+  var src = v6AuraAgentLangValue_(v6AuraAgentFirst_(c, AURA_LANG_SOURCE_FIELDS_));
+  if (src) return { language: src, source: 'SOURCE_SYSTEM_LANGUAGE', confidence: 'HIGH' };
+  var email = String(c.email || '').trim().toLowerCase(), p = ctx.prior['C:' + String(c.contactId || '').trim()] || ctx.prior['E:' + email];
+  if (p) return { language: p.lang, source: p.conf === 'HIGH' ? 'PRIOR_SEND_EXPLICIT' : 'PRIOR_SEND_COUNTRY', confidence: p.conf };
+  var byContact = v6AuraAgentCountryLang_(v6AuraAgentFirst_(c, AURA_LANG_COUNTRY_FIELDS_));
+  if (byContact) return { language: byContact, source: 'CONTACT_COUNTRY', confidence: 'MEDIUM' };
+  var byAccount = v6AuraAgentCountryLang_(v6AuraAgentFirst_(ctx.accounts[c.accountId] || {}, AURA_LANG_COUNTRY_FIELDS_));
+  if (byAccount) return { language: byAccount, source: 'ACCOUNT_COUNTRY', confidence: 'MEDIUM' };
+  var tld = (email.match(/.([a-z]{2})$/) || [])[1];
+  if (tld && AURA_LANG_CCTLD_[tld]) return { language: AURA_LANG_CCTLD_[tld], source: 'EMAIL_CCTLD', confidence: 'MEDIUM' };
+  return { language: 'UNRESOLVED', source: 'NO_RELIABLE_SIGNAL', confidence: 'NONE' };
+}
 function v6AuraAgentLang_(v) {
   if (typeof v6StudioLanguage_ === 'function') { var l = v6StudioLanguage_(v); if (/^(ES|EN|PT)$/.test(l)) return l; }
   var s = String(v || '').trim().toLowerCase();
@@ -56,7 +121,8 @@ function v6AuraAgentPlanCampaign_(scope, nowIso) {
     var at = new Date(q.processedAt || q.sentAt || 0).getTime();
     if (at && now - at <= AURA_AGENT_RECENT_SEND_DAYS_ * 86400000) recent[String(q.email || '').trim().toLowerCase()] = true;
   }); if (cache) cache.recentSends = recent; }
-  var seen = {}, out = { eligible: 0, invalid: 0, doNotContact: 0, recentlySent: 0, duplicate: 0, recipients: 0 }, langs = { ES: 0, EN: 0, PT: 0, UNRESOLVED: 0 };
+  var seen = {}, out = { eligible: 0, invalid: 0, doNotContact: 0, recentlySent: 0, duplicate: 0, languageUnresolved: 0, recipients: 0 }, langs = { ES: 0, EN: 0, PT: 0, UNRESOLVED: 0 }, sources = {}, confidence = { HIGH: 0, MEDIUM: 0, NONE: 0 };
+  var lctx = v6AuraAgentLanguageContext_(), nowIsoLang = nowIso || new Date().toISOString();
   var contacts = v6Rows_('MKT_CONTACTS_SECURE'), blockedEmail = {};
   function isInvalid(c, email) { return !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || /INVALID|BOUNCE/i.test(String(c.emailStatus || '')); }
   function isDnc(c) { return v6AuraAgentIsTrue_(c.doNotContact) || /DNC|DO_NOT_CONTACT|UNSUBSCRIBED/i.test(String(c.status || '')); }
@@ -72,17 +138,23 @@ function v6AuraAgentPlanCampaign_(scope, nowIso) {
     if (seen[email]) { out.duplicate++; return; }
     seen[email] = true;
     if (recent[email]) { out.recentlySent++; return; }
-    out.recipients++; langs[v6AuraAgentLang_(c.preferredLanguage || c.language)]++;
+    var lang = v6AuraAgentResolveLanguage_(c, lctx);
+    langs[lang.language]++; sources[lang.source] = (sources[lang.source] || 0) + 1; confidence[lang.confidence]++;
+    if (lang.language === 'UNRESOLVED') { out.languageUnresolved++; return; } // fail closed: not send-ready
+    out.recipients++;
+    // Auditable HIGH-confidence evidence is backfilled to the contact (never MEDIUM guesses).
+    var cache = typeof AURA_AGENT_CYCLE_CACHE_ !== 'undefined' ? AURA_AGENT_CYCLE_CACHE_ : null;
+    if (cache && lang.confidence === 'HIGH' && !lang.explicit && c.contactId) (cache.languageBackfill = cache.languageBackfill || {})[c.contactId] = { contactId: c.contactId, preferredLanguage: lang.language, languageSource: lang.source, languageConfidence: lang.confidence, languageResolvedAt: nowIsoLang };
   });
   var service = (v6AuraAgentTop_(elig.services, 1)[0] || {}).key || 'Multiservicio';
   return {
     status: out.recipients ? 'DONE' : 'BLOCKED', error: out.recipients ? '' : 'NO_ELIGIBLE_RECIPIENTS',
     plan: {
-      scope: scope, objective: play.objective, eligibleAccounts: elig.count, contacts: out, languages: langs,
+      planVersion: AURA_AGENT_PLAN_VERSION_, scope: scope, objective: play.objective, eligibleAccounts: elig.count, contacts: out, languages: langs, languageSources: sources, languageConfidence: confidence,
       service: service, creativeSystem: play.creativeSystem, angle: play.angle, cta: play.cta,
       topOwners: v6AuraAgentTop_(elig.owners, 5),
       governance: 'Exact-email dedupe, DNC, invalid email and ' + AURA_AGENT_RECENT_SEND_DAYS_ + '-day resend protection applied; contact frequency and exclusions are re-applied by the governed build.',
-      dataSources: ['MKT_OPPORTUNITIES', 'MKT_CONTACTS_SECURE', 'MKT_EMAIL_QUEUE'],
+      dataSources: ['MKT_OPPORTUNITIES', 'MKT_CONTACTS_SECURE', 'MKT_ACCOUNTS', 'MKT_EMAIL_QUEUE'],
       approvalRequired: 'SEND_CUSTOMER_EMAIL (one approval for the whole campaign)'
     }
   };

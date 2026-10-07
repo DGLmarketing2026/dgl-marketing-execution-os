@@ -84,7 +84,7 @@ function AURA_AGENT_SHADOW_ACTIVATE() {
 function v6AuraAgentShadowTickLog_(r) {
   if (!PropertiesService.getScriptProperties().getProperty(AURA_AGENT_SHADOW_REPORT_PROP_)) return;
   var run = (r && r.run) || {};
-  v6AuraAgentShadowReport_({ section: 'TICK', status: r && r.status, runId: run.runId, tasksCreated: run.tasksCreated, tasksAdvanced: run.tasksAdvanced, tasksCompleted: run.tasksCompleted, tasksBlocked: run.tasksBlocked, tasksFailed: run.tasksFailed, error: (r && r.error) || run.error || '' });
+  v6AuraAgentShadowReport_({ section: 'TICK', status: r && r.status, runId: run.runId, tasksCreated: run.tasksCreated, tasksAdvanced: run.tasksAdvanced, tasksCompleted: run.tasksCompleted, tasksBlocked: run.tasksBlocked, tasksFailed: run.tasksFailed, dataPath: run.dataPath || '', languageSummary: run.languageSummary || '', languageBackfilled: run.languageBackfilled || 0, error: (r && r.error) || run.error || '' });
 }
 
 // One editor run: Data Hub diagnostic (per-stage timings, no customer values) + controlled shadow

@@ -21,7 +21,7 @@
  * with an outbound action.
  */
 var AURA_AGENT_SCHEMAS_ = {
-  AURA_AGENT_RUNS: ['runId', 'trigger', 'state', 'startedAt', 'finishedAt', 'tasksCreated', 'tasksAdvanced', 'tasksCompleted', 'tasksBlocked', 'tasksFailed', 'error', 'dataPath'],
+  AURA_AGENT_RUNS: ['runId', 'trigger', 'state', 'startedAt', 'finishedAt', 'tasksCreated', 'tasksAdvanced', 'tasksCompleted', 'tasksBlocked', 'tasksFailed', 'error', 'dataPath', 'languageSummary', 'languageBackfilled'],
   AURA_AGENT_TASKS: ['taskId', 'runId', 'kind', 'scope', 'campaignId', 'subjectKey', 'title', 'summary', 'state', 'policy', 'priority', 'blockReason', 'nextAction', 'attempts', 'lastError', 'approvalId', 'createdAt', 'updatedAt', 'completedAt', 'intent', 'source', 'observed', 'dataSource', 'rationale'],
   // One decision ledger row per task: what AURA observed, from which source, what it decided and
   // why, priority, planned action, approval requirement, execution result, metric result, next action.
@@ -130,6 +130,7 @@ var AURA_AGENT_HANDLERS_ = {
     var scope = v6AuraAgentText_(action.preview);
     if (typeof v6AuraAgentPlanCampaign_ !== 'function' || !AURA_AGENT_PLAYBOOK_[scope]) return { status: 'DONE', detail: 'PLAN_RECORDED: ' + action.preview };
     var r = v6AuraAgentPlanCampaign_(scope, st && st.nowIso);
+    if (st && r.plan) (st.languageSummary = st.languageSummary || {})[scope] = { recipients: r.plan.contacts.recipients, languageUnresolved: r.plan.contacts.languageUnresolved, languages: r.plan.languages, sources: r.plan.languageSources, confidence: r.plan.languageConfidence };
     return { status: r.status, error: r.error, detail: JSON.stringify({ plan: r.plan }) };
   },
   FOLLOW_UP_REPLIES: function (action) { return { status: 'DONE', detail: 'AM_FOLLOW_UP_LISTED: ' + action.preview }; },
@@ -286,8 +287,13 @@ function v6AuraAgentRunCycleCore_(options) {
     Object.assign(run, { state: 'COMPLETED', finishedAt: new Date().toISOString(), tasksCreated: created, tasksAdvanced: st.advanced, tasksCompleted: stats.completed, tasksBlocked: stats.blocked, tasksFailed: stats.failed, error: stats.deferred ? 'DEFERRED_TASKS=' + stats.deferred : '' });
     v6AuraAgentPut_(st, 'AURA_AGENT_RUNS', run);
     if (hub) run.dataPath = 'SHEETS_API';
+    run.languageSummary = st.languageSummary ? JSON.stringify(st.languageSummary) : '';
     var pending = st.changed;
-    if (hub) { v6AuraHubWriteAgentTables_(hub, pending, AURA_AGENT_KEYS_, AURA_AGENT_SCHEMAS_); st.changed = {}; }
+    if (hub) {
+      v6AuraHubWriteAgentTables_(hub, pending, AURA_AGENT_KEYS_, AURA_AGENT_SCHEMAS_); st.changed = {};
+      var bf = AURA_AGENT_CYCLE_CACHE_ && AURA_AGENT_CYCLE_CACHE_.languageBackfill;
+      if (bf && typeof v6AuraHubBackfillContactLanguage_ === 'function') run.languageBackfilled = v6AuraHubBackfillContactLanguage_(hub, Object.keys(bf).map(function (k) { return bf[k]; })).written;
+    }
     else v6AuraAgentRetry_(function () { st.changed = pending; v6AuraAgentFlush_(st); });
     return { status: 'COMPLETED', run: run };
   } catch (err) {
@@ -352,6 +358,23 @@ function v6AuraAgentAdvance_(st, task, nowIso) {
       }
     } else if (s === 'APPROVAL') {
       var approval = st.approvalById[task.approvalId] || {};
+      // Plans waiting for approval are refreshed when the planning logic changed (AUTO, internal),
+      // so the human always approves the current governed plan.
+      if (approval.status === 'PENDING' || !approval.status) {
+        var stale = (st.actionsByTask[task.taskId] || []).filter(function (a) { if (a.actionType !== 'PREPARE_CAMPAIGN_PLAN' || a.status !== 'DONE') return false; try { var p = JSON.parse(a.result || '{}').plan; return !!p && p.planVersion !== (typeof AURA_AGENT_PLAN_VERSION_ !== 'undefined' ? AURA_AGENT_PLAN_VERSION_ : p.planVersion); } catch (e) { return false; } })[0];
+        if (stale) {
+          var rp = v6AuraAgentAdapter_(stale.channel).execute(stale, null, st);
+          stale.result = rp.detail || ''; stale.error = rp.error || ''; stale.executedAt = nowIso; v6AuraAgentPut_(st, 'AURA_AGENT_ACTIONS', stale);
+          if (rp.status !== 'DONE') {
+            stale.status = 'BLOCKED'; task.blockReason = rp.error || 'BLOCKED'; task.nextAction = rp.error === 'NO_ELIGIBLE_RECIPIENTS' ? 'No send-ready recipients after governance and language resolution.' : '';
+            approval.status = 'WITHDRAWN'; approval.decidedAt = nowIso; approval.note = 'Plan refresh: ' + task.blockReason; v6AuraAgentPut_(st, 'AURA_AGENT_APPROVALS', approval);
+            v6AuraAgentLedger_(st, task, { executionResult: 'REPLANNED -> BLOCKED: ' + task.blockReason, nextAction: task.nextAction }, nowIso);
+            v6AuraAgentMove_(st, task, 'BLOCKED', task.blockReason, nowIso); continue;
+          }
+          v6AuraAgentLedger_(st, task, { executionResult: 'REPLANNED (plan v' + AURA_AGENT_PLAN_VERSION_ + '); waiting for approval' }, nowIso);
+          st.advanced = (st.advanced || 0) + 1;
+        }
+      }
       if (approval.status === 'APPROVED') v6AuraAgentMove_(st, task, 'EXECUTE', 'approved by ' + (approval.decidedBy || 'user'), nowIso);
       else if (approval.status === 'REJECTED') { task.nextAction = ''; v6AuraAgentMove_(st, task, 'CANCELLED', 'rejected', nowIso); }
       else return; // waits for a human; nothing else happens for this task
