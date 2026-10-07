@@ -139,6 +139,7 @@
   }
   function commandCenterSection() {
     const a = state.agent;
+    if (!a && state.loading) return `<section class="aura-cc" aria-busy="true" aria-label="Loading AURA Command Center"><div class="aura-skel aura-skel-status"></div><div class="aura-cc-grid">${Array.from({ length: 6 }, () => '<div class="aura-skel aura-skel-lane"></div>').join("")}</div></section>`;
     if (!a) return `<section class="card card-pad aura-cc-status"><h3>AURA STATUS</h3><p>${esc(state.agentError || "Loading agent state…")}</p></section>`;
     const st = a.status || {}, last = st.lastRun || {}, active = st.runtime === "ACTIVE", meta = state.loadMeta || {};
     return `<section class="aura-cc">
@@ -356,6 +357,7 @@
     ${commandCenterSection()}
     ${scopedKpiSection()}
     ${performanceSection()}
+    <details class="aura-diagnostics card"${state.diagOpen ? " open" : ""}><summary><span>Pipeline diagnostics</span><small>Retention pilot · Campaign A source, run summary and NOVA sync coverage</small></summary><div class="aura-diagnostics-body">
     <div class="kpi-grid">
       ${kpi("git-branch", "Run ID (última corrida Retention)", r.runId || "—")}
       ${kpi("calendar-clock", "Última ejecución", (r.lastRun || "—").slice(0, 16).replace("T", " "))}
@@ -384,6 +386,7 @@
     ${recipientSourceCard(c.byRecipientSource)}
     ${stoppedBreakdownCard(c.stoppedBreakdown)}
     ${matchReportCard(c.matchReport)}
+    </div></details>
 
     <h3 class="aura-subhead">Campañas AURA (todas las familias · datos reales de MKT_AURA_EXECUTION_REPORT)</h3>
     ${campaignsTable(((state.execReport || {}).records) || [])}
@@ -394,6 +397,8 @@
     </div>
     `}`;
 
+    const diag = mount.querySelector && mount.querySelector(".aura-diagnostics");
+    if (diag && diag.addEventListener) diag.addEventListener("toggle", () => { state.diagOpen = diag.open; });
     bindPerformance(mount);
     global.lucide && global.lucide.createIcons && global.lucide.createIcons();
   }

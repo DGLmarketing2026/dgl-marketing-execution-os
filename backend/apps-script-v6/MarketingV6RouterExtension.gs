@@ -8,7 +8,7 @@ function routeMarketingV6_(action, payload) {
   var a = String(action || '');
 
   switch (a) {
-    case 'v6CampaignStudioContext': return v6CampaignStudioContext_(p);
+    case 'v6CampaignStudioContext': return v6CampaignStudioContextBundle_(p);
     case 'v6CampaignStudioTestDraft': return v6CampaignStudioTestDraft_(p);
     case 'v6CampaignStudioList': return v6CampaignStudioList_();
     case 'v6CampaignStudioApproveSet': return v6CampaignStudioApproveSet_(p);
@@ -181,4 +181,21 @@ function routeMarketingV6_(action, payload) {
 
 function v6RouteMissing_(action, handler) {
   throw new Error('V6_HANDLER_NOT_DEPLOYED: ' + action + ' -> ' + handler);
+}
+
+// Campaign Studio open = ONE request: the context plus (when asked) the approved creative record
+// per approved language, which the Studio previously fetched in a second sequential wave.
+// Read-only; MKT_CAMPAIGN_CREATIVES and the revoke ledger are read once (v6WithRowsMemo_).
+function v6CampaignStudioContextBundle_(p) {
+  var run = function () {
+    var context = v6CampaignStudioContext_(p);
+    if (p && (p.includeApprovedCreatives === true || p.includeApprovedCreatives === 'true') && context && context.approvedCreativeVariants) {
+      context.approvedCreatives = {};
+      Object.keys(context.approvedCreativeVariants).forEach(function (l) {
+        context.approvedCreatives[l] = v6AuraLatestApprovedCreativeForLanguage_(context.campaignId, l) || null;
+      });
+    }
+    return context;
+  };
+  return typeof v6WithRowsMemo_ === 'function' ? v6WithRowsMemo_(run) : run();
 }

@@ -41,7 +41,7 @@ function row(overrides){
 
 // 2. Frontend adapter exposes v6AuraExecutionReport
 (function testAdapterMethodExists(){
-  assert(/v6AuraExecutionReport\s*:\s*\(\)\s*=>\s*mutate\(\s*["']v6AuraExecutionReport["']/.test(adapterSource),'adapter must expose v6AuraExecutionReport backed by mutate("v6AuraExecutionReport",...)');
+  assert(/v6AuraExecutionReport\s*:\s*\(\)\s*=>\s*(?:mutate|readOrThrow)\(\s*["']v6AuraExecutionReport["']/.test(adapterSource),'adapter must expose v6AuraExecutionReport backed by mutate("v6AuraExecutionReport",...)');
   console.log('PASS: frontend adapter exposes v6AuraExecutionReport');
 })();
 

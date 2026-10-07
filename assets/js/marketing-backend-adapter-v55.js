@@ -137,6 +137,37 @@
 
   async function refresh(options){
     if(!token())throw new Error("Private backend token required");
+    // ONE-request bootstrap (v55Bootstrap): auth probe + requests + campaigns + activity + AURA
+    // report health aggregated server-side. Every Apps Script round trip costs ~3 s, so this
+    // replaces 2 sequential waves (1 + 4 requests). Older backends without it fall through to
+    // the previous path unchanged.
+    const datasetsOnly=!!(options&&options.datasetsOnly&&state===STATES.PRIVATE_BACKEND);
+    const boot=await probe("v55Bootstrap",{});
+    if(boot.ok&&boot.value&&boot.value.contract==="V55_BOOTSTRAP_V1"){
+      const b=boot.value,list=(p,keys)=>p&&p.ok?arrayFrom(p.data,keys):null;
+      const r=list(b.requests,["requests","records"]),c=list(b.campaigns,["campaigns","records"]),a=list(b.activity,["activity","records"]);
+      if(r||!datasetsOnly)requests=(r||[]).map(normalizeRequest);
+      if(c||!datasetsOnly)campaigns=(c||[]).map(normalizeCampaign);
+      if(a||!datasetsOnly)activity=a||[];
+      diag.endpointReachable=true;diag.v6OpportunitiesStatus="OK";diag.v6Authenticated=true;
+      diag.lastErrorCode="";diag.lastErrorMessage="";
+      diag.legacyRequestsStatus=r?"OK":"FAILED";diag.legacyCampaignsStatus=c?"OK":"FAILED";diag.legacyActivityStatus=a?"OK":"FAILED";
+      diag.auraReportStatus=b.auraReport&&b.auraReport.ok?"OK":"FAILED";
+      // Seed the read cache so the lifecycle modules (Reactivation, Retention, QNB…) open
+      // without another round trip right after connect.
+      const now=Date.now();
+      if(b.opportunities)readCache.set('v6Opportunities|{}',{at:now,value:b.opportunities});
+      if(b.pipelineSummary&&b.pipelineSummary.ok)readCache.set('v6PipelineSummary|{}',{at:now,value:b.pipelineSummary.data});
+      if(datasetsOnly){emit();return getConnectionState();}
+      setState(STATES.PRIVATE_BACKEND);
+      return getConnectionState();
+    }
+    if(!boot.ok&&classifyError(boot.error).kind==="AUTH"){
+      const c=classifyError(boot.error);
+      diag.endpointReachable=true;diag.v6OpportunitiesStatus="FAILED";diag.v6Authenticated=false;
+      diag.lastErrorCode=c.code;diag.lastErrorMessage=c.text;clearToken();setState(STATES.AUTH_ERROR,c.text);
+      throw new Error(c.text);
+    }
     // After a mutation on an already-authenticated session only the datasets are re-read:
     // the auth probe and the AURA report health check are not repeated (5 -> 3 requests).
     if(options&&options.datasetsOnly&&state===STATES.PRIVATE_BACKEND){
@@ -270,13 +301,13 @@
     recordOutcome:p=>mutate("v55RecordOutcome",p),
     getActivity:()=>clone(activity),
     privateBackendAvailable:()=>state===STATES.PRIVATE_BACKEND,
-    v6Opportunities:()=>mutate("v6Opportunities",{},false),
+    v6Opportunities:()=>readOrThrow("v6Opportunities",{}),
     v6RunOpportunityEngine:data=>mutate("v6RunOpportunityEngine",data||{},false),
     v6OpportunitySummary:()=>mutate("v6OpportunitySummary",{},false),
     v6FrequencyStatus:data=>mutate("v6FrequencyStatus",data||{},false),
     v6EvaluateCampaignPressure:data=>mutate("v6EvaluateCampaignPressure",data||{},false),
     v6AccountPipeline:()=>mutate("v6AccountPipeline",{},false),
-    v6PipelineSummary:()=>mutate("v6PipelineSummary",{},false),
+    v6PipelineSummary:()=>readOrThrow("v6PipelineSummary",{}),
     v6PipelineTransition:data=>mutate("v6PipelineTransition",data||{},false),
     v6PipelineSyncSignals:data=>mutate("v6PipelineSyncSignals",data||{},false),
     v6CreateExecution:data=>mutate("v6CreateExecution",data||{},false),
@@ -288,11 +319,12 @@
     v6RecordCopyUsage:data=>mutate("v6RecordCopyUsage",data||{},false),
     v6CreativeUsage:data=>mutate("v6CreativeUsage",data||{},false),
     v6RecordCreativeUsage:data=>mutate("v6RecordCreativeUsage",data||{},false),
-    v6AuraExecutionReport:()=>mutate("v6AuraExecutionReport",{},false),
-    v6AuraGmailFreshness:()=>mutate("v6AuraGmailFreshness",{},false),
-    v6AuraGmailPanel:()=>mutate("v6AuraGmailPanel",{},false),
-    v6AuraIngestHistory:()=>mutate("v6AuraIngestHistory",{},false),
-    v6AuraSourceBreakdown:()=>mutate("v6AuraSourceBreakdown",{},false),
+    // Read-only reports: in-memory 30 s cache + in-flight de-duplication (see read()).
+    v6AuraExecutionReport:()=>readOrThrow("v6AuraExecutionReport",{}),
+    v6AuraGmailFreshness:()=>readOrThrow("v6AuraGmailFreshness",{}),
+    v6AuraGmailPanel:()=>readOrThrow("v6AuraGmailPanel",{}),
+    v6AuraIngestHistory:()=>readOrThrow("v6AuraIngestHistory",{}),
+    v6AuraSourceBreakdown:()=>readOrThrow("v6AuraSourceBreakdown",{}),
     // AURA dashboard bridge -- read-only reporting only (see MarketingV55Backend.gs's allowlist
     // comment): never a way to build a queue, dispatch, or send a real email from this page.
     v6AuraEmailPerformanceJob:jobId=>mutate("v6AuraEmailPerformanceJob",{jobId},false),
@@ -315,7 +347,9 @@
     // persists the FULL approved creative (never just a status flag); getLatestApprovedCreative
     // reads it back for a post-approval invalidation check or a Test Draft comparison. Neither
     // writes a queue row nor sends anything -- still no second way to trigger a real send.
-    campaignStudioContext:campaignId=>mutate("v6CampaignStudioContext",{campaignId},false),
+    // includeApprovedCreatives: the backend returns the approved creative per approved language
+    // in the same response (older backends ignore the flag and the Studio fetches them itself).
+    campaignStudioContext:campaignId=>mutate("v6CampaignStudioContext",{campaignId,includeApprovedCreatives:true},false),
     campaignStudioTestDraft:(campaignId,draft)=>createTestDraft(campaignId,draft,"v6CampaignStudioTestDraft"),
     campaignStudioList:()=>mutate("v6CampaignStudioList",{},false),
     approveCreativeSet:campaignId=>mutate("v6CampaignStudioApproveSet",{campaignId},false),

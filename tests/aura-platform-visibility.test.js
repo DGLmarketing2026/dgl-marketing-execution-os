@@ -38,7 +38,7 @@ function makeContext(tables){
   assert(/case 'v6AuraIngestHistory'\s*:[\s\S]{0,200}v6AuraIngestHistory_/.test(routerSource),'router must expose v6AuraIngestHistory');
   assert(/case 'v6AuraSourceBreakdown'\s*:[\s\S]{0,200}v6AuraGmailSourceBreakdown_/.test(routerSource),'router must expose v6AuraSourceBreakdown');
   ['v6AuraGmailPanel','v6AuraIngestHistory','v6AuraSourceBreakdown'].forEach(function(a){
-    assert(new RegExp(a+'\\s*:\\s*\\(\\)\\s*=>\\s*mutate\\(\\s*["\']'+a+'["\']').test(adapterSource),'adapter must expose '+a);
+    assert(new RegExp(a+'\\s*:\\s*\\(\\)\\s*=>\\s*(?:mutate|readOrThrow)\\(\\s*["\']'+a+'["\']').test(adapterSource),'adapter must expose '+a);
   });
   console.log('PASS: v6AuraGmailPanel / v6AuraIngestHistory / v6AuraSourceBreakdown are defined, routed and exposed to the frontend');
 })();
