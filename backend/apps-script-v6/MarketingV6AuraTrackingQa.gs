@@ -66,7 +66,7 @@ function AURA_TRACKING_QA_STEP1_ACTIVATE() {
     };
     var rendered = v6AuraCampanaAGovernedRender_(creative, job);
     var html = rendered.htmlBody, approved = v6AuraTrackingCtaHrefs_(creative.htmlBody);
-    var trackedLinks = (html.match(/[?&]aura_t=c&k=[^"&]+&c=\d+/g) || []);
+    var trackedLinks = (html.match(/[?&]aura_t=c&k=[^"&]+&aura_c=\d+/g) || []);
     var token = decodeURIComponent((html.match(/aura_t=o&k=([^"&]+)/) || [])[1] || '');
     out.render = {
       pixel: /aura_t=o&k=/.test(html), approvedCtas: approved.length, trackedCtas: trackedLinks.length,
@@ -87,8 +87,8 @@ function AURA_TRACKING_QA_STEP1_ACTIVATE() {
     out.qaJob = { jobId: job.jobId, campaignId: job.campaignId, contactId: job.contactId, creativeId: job.creativeId, creativeVersion: job.creativeVersion, recipient: 'SCRIPT_OWNER_DGL_MAILBOX' };
     out.testUrls = {
       open: AURA_TRACKING_PROD_EXEC_URL_ + '?aura_t=o&k=' + k,
-      clicks: approved.map(function (h, i) { return { index: i, approvedDestination: h.replace(/\?.*$/, '?…'), url: AURA_TRACKING_PROD_EXEC_URL_ + '?aura_t=c&k=' + k + '&c=' + i }; }),
-      outOfRange: AURA_TRACKING_PROD_EXEC_URL_ + '?aura_t=c&k=' + k + '&c=99',
+      clicks: approved.map(function (h, i) { return { index: i, approvedDestination: h.replace(/\?.*$/, '?…'), url: AURA_TRACKING_PROD_EXEC_URL_ + '?aura_t=c&k=' + k + '&aura_c=' + i }; }),
+      outOfRange: AURA_TRACKING_PROD_EXEC_URL_ + '?aura_t=c&k=' + k + '&aura_c=99',
       invalid: AURA_TRACKING_PROD_EXEC_URL_ + '?aura_t=o&k=' + k.slice(0, -3) + 'AAA'
     };
     v6AuraTrackingQaScheduleVerify_();

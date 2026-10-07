@@ -35,8 +35,19 @@ function v6AuraTrackingUnB64_(text) {
   var s = String(text || ''); while (s.length % 4) s += '=';
   return Utilities.newBlob(Utilities.base64DecodeWebSafe(s)).getDataAsString();
 }
+// Signature = web-safe base64 of the raw HMAC bytes, truncated to 22 chars (~132 bits).
 function v6AuraTrackingSign_(payload) {
+  return Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(String(payload), v6AuraTrackingSecret_())).replace(/=+$/, '').slice(0, 22);
+}
+// Tokens issued before the raw-byte fix (internal QA only) encoded the HMAC through a lossy
+// string conversion; they stay verifiable so no already-delivered link breaks.
+function v6AuraTrackingSignLegacy_(payload) {
   return v6AuraTrackingB64_(Utilities.computeHmacSha256Signature(String(payload), v6AuraTrackingSecret_()).map(function (b) { return String.fromCharCode(b & 255); }).join('')).slice(0, 22);
+}
+function v6AuraTrackingSameSig_(expected, given) {
+  var diff = expected.length ^ given.length;
+  for (var i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ (given.charCodeAt(i) || 0);
+  return !diff;
 }
 function v6AuraTrackingToken_(jobId) {
   var ref = v6AuraTrackingB64_(jobId);
@@ -46,9 +57,7 @@ function v6AuraTrackingToken_(jobId) {
 function v6AuraTrackingVerify_(token) {
   var parts = String(token || '').split('.');
   if (parts.length !== 2 || !parts[0] || !parts[1] || parts[0].length > 400) return '';
-  var expected = v6AuraTrackingSign_(parts[0]), diff = expected.length ^ parts[1].length;
-  for (var i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ (parts[1].charCodeAt(i) || 0);
-  if (diff) return '';
+  if (!v6AuraTrackingSameSig_(v6AuraTrackingSign_(parts[0]), parts[1]) && !v6AuraTrackingSameSig_(v6AuraTrackingSignLegacy_(parts[0]), parts[1])) return '';
   try { return v6AuraTrackingUnB64_(parts[0]); } catch (e) { return ''; }
 }
 // Approved CTA destinations, in document order: functional mailto:/https: hrefs only.
@@ -63,7 +72,7 @@ function v6AuraTrackingApply_(html, jobId, baseUrl) {
   if (!baseUrl || !jobId) return String(html || '');
   var token = encodeURIComponent(v6AuraTrackingToken_(jobId)), i = 0;
   var tracked = String(html || '').replace(/(<a\b[^>]*\shref=")((?:mailto:|https:\/\/)[^"]*)(")/gi, function (all, pre, href, post) {
-    return pre + baseUrl + '?aura_t=c&k=' + token + '&c=' + (i++) + post;
+    return pre + baseUrl + '?aura_t=c&k=' + token + '&aura_c=' + (i++) + post;
   });
   var pixel = '<img src="' + baseUrl + '?aura_t=o&k=' + token + '" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;opacity:0">';
   return /<\/body>/i.test(tracked) ? tracked.replace(/<\/body>/i, pixel + '</body>') : tracked + pixel;
@@ -100,6 +109,9 @@ function v6AuraTrackingDestination_(job, ctaIndex) {
 // router handles it. Never throws to the caller; never reveals whether a token was valid.
 function v6AuraTrackingHandle_(e) {
   var p = (e && e.parameter) || {}, type = String(p.aura_t || '');
+  // CTA index: aura_c (current). Apps Script rejects ?c= values other than 0/1 before doGet, so
+  // the short legacy "c" is accepted only for links already issued.
+  if (p.aura_c != null) p = Object.assign({}, p, { c: p.aura_c });
   if (type !== 'o' && type !== 'c') return null;
   var dest = '';
   try {
