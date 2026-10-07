@@ -1,7 +1,7 @@
 const assert=require('assert'),fs=require('fs'),vm=require('vm');
 const SRC=f=>fs.readFileSync('backend/apps-script-v6/'+f,'utf8');
 function makeCtx(o){
-  o=o||{};const tables=Object.assign({MKT_OPPORTUNITIES:[],MKT_EMAIL_QUEUE:[{jobId:'J1',status:'SENT'}]},o.tables||{}),store={},triggers=[],calls={ingest:0,gmailSend:0};
+  o=o||{};const tables=Object.assign({MKT_OPPORTUNITIES:[],MKT_EMAIL_QUEUE:[{jobId:'J1',status:'SENT'}],MKT_CONTACTS_SECURE:['A1','A2','A3'].map((a,i)=>({contactId:'C'+i,accountId:a,email:'c'+i+'@example.com',preferredLanguage:i?'EN':'ES'}))},o.tables||{}),store={},triggers=[],calls={ingest:0,gmailSend:0};
   const ctx={console,Date,Math,Number,String,Object,Array,JSON,Error,tables,store,triggers,calls,
     CAMPANA_A_CAMPAIGN_ID_:'CMP-CAMPANA-A-HA-PRIORITARIA',
     PropertiesService:{getScriptProperties:()=>({getProperty:k=>k in store?store[k]:null,setProperty:(k,v)=>{store[k]=v;},deleteProperty:k=>{delete store[k];}})},
@@ -14,7 +14,7 @@ function makeCtx(o){
     v6AuraIngestGmailDsn_:()=>{calls.ingest++;if(o.ingestFails&&calls.ingest<=o.ingestFails)throw new Error('GMAIL_TIMEOUT');return {status:'OK'};},
     v6AuraReconcileEmailEvents_:()=>({written:0}),
     v6AuraEmailPerformance_:()=>({scopes:o.scopes||{}})};
-  vm.createContext(ctx);vm.runInContext(SRC('MarketingV6AuraAgentRuntime.gs'),ctx);return ctx;
+  vm.createContext(ctx);vm.runInContext(SRC('MarketingV6AuraAgentRuntime.gs'),ctx);vm.runInContext(SRC('MarketingV6AuraAgentIntelligence.gs'),ctx);return ctx;
 }
 let checks=0;function test(n,fn){fn();checks++;console.log('PASS '+n);}
 const T0='2026-10-06T10:05:00.000Z',T1='2026-10-06T11:05:00.000Z',T2='2026-10-06T12:05:00.000Z',T3='2026-10-07T10:05:00.000Z';
@@ -31,7 +31,7 @@ test('lifecycle transitions are validated',()=>{
 });
 test('approval policy: unknown BLOCKED, external never AUTO, Campaign A outbound BLOCKED',()=>{
   const c=makeCtx();
-  assert.equal(c.v6AuraAgentPolicy_('INGEST_BOUNCES_REPLIES'),'AUTO');assert.equal(c.v6AuraAgentPolicy_('PREPARE_CAMPAIGN_PLAN'),'REVIEW');
+  assert.equal(c.v6AuraAgentPolicy_('INGEST_BOUNCES_REPLIES'),'AUTO');assert.equal(c.v6AuraAgentPolicy_('PREPARE_CAMPAIGN_PLAN'),'AUTO','preparing a campaign is AUTO');
   for(const t of ['SEND_CUSTOMER_EMAIL','PUBLISH_SOCIAL_POST','PUBLISH_WORDPRESS','UPDATE_SALESFORCE','CHANGE_PAID_BUDGET','SHARE_DRIVE_FILE'])assert.equal(c.v6AuraAgentPolicy_(t),'APPROVAL_REQUIRED',t);
   for(const t of ['DELETE_DATA','MODIFY_SENT_HISTORY','RESEND_CAMPAIGN_A','CHANGE_SEND_MODE','SOMETHING_NEW',''])assert.equal(c.v6AuraAgentPolicy_(t),'BLOCKED',t);
   assert.equal(c.v6AuraAgentPolicy_('SEND_CUSTOMER_EMAIL',{campaignId:'CMP-CAMPANA-A-HA-PRIORITARIA'}),'BLOCKED');
@@ -106,7 +106,7 @@ test('measurement writes scoped campaign metrics; Campaign A gets no outbound ta
   const m=c.tables.AURA_AGENT_METRICS;
   assert.equal(m.find(x=>x.scope==='currentRun'&&x.metric==='sent').value,214);assert.equal(m.find(x=>x.scope==='historical'&&x.metric==='sent').value,109);assert.equal(m.find(x=>x.scope==='allTime'&&x.metric==='sent').value,323);
   assert.equal(m.find(x=>x.scope==='currentRun'&&x.metric==='openRate').value,'NOT_TRACKED');
-  assert.equal(task(c,':MEASURE:').scope,'REACTIVATION');assert.equal(task(c,':REPLIES:').state,'APPROVAL','follow-up is REVIEW');
+  assert.equal(task(c,':MEASURE:').scope,'REACTIVATION');assert.equal(task(c,':REPLIES:').state,'COMPLETED','internal AM hand-off is AUTO');
   assert(!c.tables.AURA_AGENT_ACTIONS.some(a=>a.external&&a.policy!=='BLOCKED'&&String(a.taskId).includes('CAMPANA-A')),'no outbound action on Campaign A');
   const stale=makeCtx({scopes:{X:Object.assign({},sc['CMP-CAMPANA-A-HA-PRIORITARIA'],{lastSentAt:'2026-01-01T00:00:00Z'})}});stale.v6AuraAgentRunCycle_({now:T0});
   assert(!stale.tables.AURA_AGENT_TASKS.some(t=>t.kind==='MEASUREMENT'),'old campaigns not re-measured daily');
