@@ -79,6 +79,28 @@ const tick=()=>new Promise(r=>setTimeout(r,0));
     assert(h.includes('data-agent-decide="APPROVED"')&&h.includes('data-approval="AP:T1"'));
     assert(h.includes('Sent real (all families, all-time)'));assert(!/RUN_AURA_/.test(h),'users never see RUN_AURA_* names');
   });
+  await test('QA/TEST campaigns excluded from commercial KPI cards, kept as TECHNICAL / QA evidence; 214/109/323 unchanged; dark metric column',async()=>{
+    const b=JSON.parse(JSON.stringify(BUNDLE)),sc=b.data.performance.scopes;
+    const qa=id=>({campaignId:id,currentFamily:'',latestRunId:'',lastSentAt:'2026-10-07',historicalFamilies:{},currentRun:scope({}),currentFamilyRun:scope({}),historical:scope({sent:1,delivered:1}),allTime:scope({sent:1,delivered:1,opened:1,clicked:1}),pipeline:{rfq:0,quote:0,load:0}});
+    ['CMP-AURA-TRACKING-QA','CMP-TRACKING_QA','CMP-TEST','QA'].forEach(id=>sc[id]=qa(id));
+    b.data.agent.recentResults=[{campaignId:'CMP-AURA-TRACKING-QA',scope:'currentRun',metric:'opened',value:1,at:'2026-10-07'},{campaignId:'CMP-CAMPANA-A-HA-PRIORITARIA',scope:'currentRun',metric:'sent',value:214,at:'2026-10-01'}];
+    const e=makeEnv(Object.assign({},BASE,{v6AuraCommandCenter:b}));await e.adapter.connect();
+    vm.runInContext(dashboardSource,e.ctx);const mount={innerHTML:'',querySelector:()=>null};
+    await e.win.DGL_MODULE_RENDERERS['aura-overview'](mount);const h=mount.innerHTML;
+    const commercial=h.split('data-commercial-kpis')[1].split('data-technical-evidence')[0];
+    const technical=h.split('data-technical-evidence')[1].split('</details>')[0];
+    for(const id of ['CMP-AURA-TRACKING-QA','CMP-TRACKING_QA','CMP-TEST','>QA<'])assert(!commercial.includes(id),'commercial KPIs exclude '+id);
+    assert(commercial.includes('CMP-CAMPANA-A-HA-PRIORITARIA'));
+    for(const id of ['CMP-AURA-TRACKING-QA','CMP-TRACKING_QA','CMP-TEST'])assert(technical.includes(id),'technical evidence keeps '+id);
+    assert.equal((technical.match(/TECHNICAL \/ QA/g)||[]).length,4);assert(!technical.includes('CURRENT FAMILY: UNKNOWN'));assert(!h.includes('CURRENT FAMILY: UNKNOWN'));
+    assert(/data-scope="allTime" data-metric="opened">1</.test(technical),'QA OPEN evidence retained');
+    assert(/data-scope="currentRun" data-metric="sent">214</.test(commercial));assert(/data-scope="historical" data-metric="sent">109</.test(commercial));assert(/data-scope="allTime" data-metric="sent">323</.test(commercial));
+    const recent=h.split('data-lane="RECENT RESULTS"')[1].split('</ul>')[0];assert(!recent.includes('TRACKING-QA'));assert(recent.includes('CMP-CAMPANA-A-HA-PRIORITARIA'));
+    assert(/<th scope="row" class="aura-scope-metric">SENT<\/th>/.test(commercial));
+    const css=fs.readFileSync(path.join(root,'assets/css/aura-dashboard-v1.css'),'utf8');
+    const rule=(css.match(/\.aura-scope-table tbody th\.aura-scope-metric\s*\{([^}]*)\}/)||[])[1]||'';
+    assert(/background:\s*transparent/.test(rule),'metric column inherits the dark card surface');assert(!/#edf3fa|#fff\b|white/i.test(rule));
+  });
   await test('older backend without the bundle falls back to the previous per-report calls',async()=>{
     const e=makeEnv(Object.assign({},BASE,{v6AuraCommandCenter:{ok:false,error:'UNKNOWN_ACTION'}}));await e.adapter.connect();e.log.length=0;
     vm.runInContext(dashboardSource,e.ctx);const mount={innerHTML:'',querySelector:()=>null};
