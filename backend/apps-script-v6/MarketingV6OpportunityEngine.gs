@@ -2,12 +2,28 @@ var MKT_V6_DATA_HUB_ID='1FXpoBO658ldbr4V8wCKo0luHU3_kqHwYzAnWijA6lBM';
 // Per-execution read memo, opt-in via v6WithRowsMemo_ (read-only bundles). Each table is read at
 // most once inside the scope; callers get fresh row objects; any upsert invalidates its table.
 var V6_ROWS_MEMO_=null;
-function v6WithRowsMemo_(fn){var prev=V6_ROWS_MEMO_;V6_ROWS_MEMO_=prev||{rows:{},book:null};try{return fn();}finally{V6_ROWS_MEMO_=prev;}}
+// options.exclude = {TABLE:['heavyColumn']} reads those tables without the listed columns
+// (column ranges around them), e.g. the multi-MB MKT_EMAIL_QUEUE.htmlBody for agent cycles.
+function v6WithRowsMemo_(fn,options){var prev=V6_ROWS_MEMO_;V6_ROWS_MEMO_=prev||{rows:{},book:null,exclude:(options&&options.exclude)||{},reads:{}};try{return fn();}finally{V6_ROWS_MEMO_=prev;}}
+function v6ReadProjected_(s,exclude){
+  var lastRow=s.getLastRow(),lastCol=s.getLastColumn();if(lastRow<2||!lastCol)return [];
+  var h=s.getRange(1,1,1,lastCol).getValues()[0],ranges=[],cur=null;
+  h.forEach(function(k,i){if(exclude.indexOf(String(k))>=0){cur=null;return;}if(cur&&cur.end===i-1)cur.end=i;else{cur={start:i,end:i};ranges.push(cur);}});
+  var rows=[];for(var r=0;r<lastRow-1;r++)rows.push({});
+  ranges.forEach(function(g){var vals=s.getRange(2,g.start+1,lastRow-1,g.end-g.start+1).getValues();vals.forEach(function(v,ri){for(var c=0;c<v.length;c++)rows[ri][h[g.start+c]]=v[c];});});
+  return rows;
+}
 function v6RowsMemoInvalidate_(name){if(V6_ROWS_MEMO_)delete V6_ROWS_MEMO_.rows[name];}
 function v6Sheet_(name){if(V6_ROWS_MEMO_){V6_ROWS_MEMO_.book=V6_ROWS_MEMO_.book||SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID);return V6_ROWS_MEMO_.book.getSheetByName(name);}return SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).getSheetByName(name);}
 function v6Rows_(name){
   var memo=V6_ROWS_MEMO_,rows=memo&&memo.rows[name];
-  if(!rows){var s=v6Sheet_(name),v=s?s.getDataRange().getValues():[];if(v.length<2)rows=[];else{var h=v.shift();rows=v.map(function(r){var o={};h.forEach(function(k,i){o[k]=r[i];});return o;});}if(memo)memo.rows[name]=rows;else return rows;}
+  if(!rows){
+    var s=v6Sheet_(name),ex=memo&&memo.exclude&&memo.exclude[name];
+    if(memo&&memo.reads)memo.reads[name]=(memo.reads[name]||0)+1;
+    if(s&&ex&&ex.length)rows=v6ReadProjected_(s,ex);
+    else{var v=s?s.getDataRange().getValues():[];if(v.length<2)rows=[];else{var h=v.shift();rows=v.map(function(r){var o={};h.forEach(function(k,i){o[k]=r[i];});return o;});}}
+    if(memo)memo.rows[name]=rows;else return rows;
+  }
   return rows.map(function(o){return Object.assign({},o);});
 }
 function v6OpportunityPriority_(type){var x=String(type||'').trim().toUpperCase();if(x==='QNB'||x==='FRESH QNB'||x==='QUOTED NOT BOOKED')return 1;if(x==='RETENTION'||x==='RETENTION RISK')return 2;if(x==='REACTIVATION')return 3;if(x==='CROSS-SELL'||x==='CROSS SELL')return 4;if(x==='NURTURE'||x==='RELATIONSHIP RENEWAL')return 5;return 99;}

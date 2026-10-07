@@ -49,12 +49,13 @@ function v6AuraAgentPlanCampaign_(scope, nowIso) {
   var play = AURA_AGENT_PLAYBOOK_[scope];
   if (!play) return { status: 'BLOCKED', error: 'SCOPE_HAS_NO_CAMPAIGN_PLAYBOOK' };
   var elig = v6AuraAgentEligible_(scope), now = new Date(nowIso || new Date().toISOString()).getTime();
-  var recent = {};
-  v6Rows_('MKT_EMAIL_QUEUE').forEach(function (q) {
+  var cache = typeof AURA_AGENT_CYCLE_CACHE_ !== 'undefined' ? AURA_AGENT_CYCLE_CACHE_ : null;
+  var recent = cache && cache.recentSends;
+  if (!recent) { recent = {}; v6Rows_('MKT_EMAIL_QUEUE').forEach(function (q) {
     if (String(q.status).toUpperCase() !== 'SENT') return;
     var at = new Date(q.processedAt || q.sentAt || 0).getTime();
     if (at && now - at <= AURA_AGENT_RECENT_SEND_DAYS_ * 86400000) recent[String(q.email || '').trim().toLowerCase()] = true;
-  });
+  }); if (cache) cache.recentSends = recent; }
   var seen = {}, out = { eligible: 0, invalid: 0, doNotContact: 0, recentlySent: 0, duplicate: 0, recipients: 0 }, langs = { ES: 0, EN: 0, PT: 0, UNRESOLVED: 0 };
   var contacts = v6Rows_('MKT_CONTACTS_SECURE'), blockedEmail = {};
   function isInvalid(c, email) { return !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || /INVALID|BOUNCE/i.test(String(c.emailStatus || '')); }
@@ -91,7 +92,7 @@ function v6AuraAgentAnalyzeOpportunities_(scope) {
   return { status: 'DONE', analysis: { scope: scope, eligibleAccounts: elig.count, topOwners: v6AuraAgentTop_(elig.owners, 5), services: v6AuraAgentTop_(elig.services, 6), windows: v6AuraAgentTop_(elig.windows, 4), dataSources: ['MKT_OPPORTUNITIES'] } };
 }
 function v6AuraAgentMonthlyReport_(nowIso) {
-  var perf = v6AuraEmailPerformance_(), now = new Date(nowIso).getTime(), campaigns = [];
+  var perf = typeof v6AuraAgentPerf_ === 'function' ? v6AuraAgentPerf_() : v6AuraEmailPerformance_(), now = new Date(nowIso).getTime(), campaigns = [];
   Object.keys(perf.scopes || {}).forEach(function (id) {
     var s = perf.scopes[id];
     if (!s.lastSentAt || now - new Date(s.lastSentAt).getTime() > 31 * 86400000) return;

@@ -17,7 +17,8 @@ var AURA_AGENT_MODE_PROP_ = 'AURA_AGENT_MODE';
 var AURA_AGENT_SHADOW_REPORT_PROP_ = 'AURA_AGENT_SHADOW_REPORT_ID';
 
 function v6AuraAgentShadowQueueSnapshot_() {
-  var q = v6Rows_('MKT_EMAIL_QUEUE'), sent = 0, campaignA = 0, statuses = {};
+  // Projected read (no htmlBody): the safety snapshot must not itself hit the Data Hub timeout.
+  var q = typeof v6WithRowsMemo_ === 'function' ? v6WithRowsMemo_(function () { return v6Rows_('MKT_EMAIL_QUEUE'); }, AURA_AGENT_MEMO_OPTIONS_) : v6Rows_('MKT_EMAIL_QUEUE'), sent = 0, campaignA = 0, statuses = {};
   q.forEach(function (r) {
     var s = String(r.status || '').toUpperCase(); statuses[s] = (statuses[s] || 0) + 1;
     if (s === 'SENT') { sent++; if (typeof CAMPANA_A_CAMPAIGN_ID_ !== 'undefined' && r.campaignId === CAMPANA_A_CAMPAIGN_ID_) campaignA++; }
@@ -45,10 +46,9 @@ function AURA_AGENT_SHADOW_ACTIVATE() {
     if (sendMode === 'LIVE') throw new Error('ABORTED_SEND_MODE_IS_LIVE');
     var before = v6AuraAgentRetry_(v6AuraAgentShadowQueueSnapshot_);
     props.setProperty(AURA_AGENT_MODE_PROP_, 'SHADOW');
-    out.hourlyTriggers = v6AuraAgentShadowEnsureSingleTrigger_();
     out.initialRun = v6AuraAgentRunCycle_({ trigger: 'SHADOW_INITIAL' });
-    // A transient failure is recoverable: the hourly trigger (already in place) retries it.
-    if (out.initialRun.status === 'FAILED') out.recovery = 'HOURLY_TRIGGER_WILL_RETRY';
+    if (out.initialRun.status === 'COMPLETED') out.hourlyTriggers = v6AuraAgentShadowEnsureSingleTrigger_();
+    else { ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'auraAgentTick') ScriptApp.deleteTrigger(t); }); out.hourlyTriggers = 0; out.recovery = 'RUNTIME_PAUSED_UNTIL_A_CYCLE_COMPLETES'; }
     var after = v6AuraAgentRetry_(v6AuraAgentShadowQueueSnapshot_);
     var tasks = v6Rows_('AURA_AGENT_TASKS'), actions = v6Rows_('AURA_AGENT_ACTIONS');
     var byState = {}, byKind = {}; tasks.forEach(function (t) { byState[t.state] = (byState[t.state] || 0) + 1; byKind[t.kind] = (byKind[t.kind] || 0) + 1; });
