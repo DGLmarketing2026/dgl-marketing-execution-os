@@ -78,6 +78,21 @@ var AURA_AGENT_EXTERNAL_DISABLED_ = 'EXTERNAL_EXECUTION_DISABLED_PHASE_V1';
 // Transient Sheets/Apps Script service errors ("Service Spreadsheets timed out", "try again")
 // are retried with backoff. Every agent write is an idempotent upsert by deterministic id, so a
 // retried step can never duplicate tasks, decisions, approvals or runs.
+// Agent cycles must finish well inside the 6-minute Apps Script limit; remaining tasks are
+// deferred to the next tick (idempotent) instead of being killed mid-write.
+var AURA_AGENT_TIME_BUDGET_MS_ = 240000;
+var AURA_AGENT_MEMO_OPTIONS_ = { exclude: { MKT_EMAIL_QUEUE: ['htmlBody'] } };
+var AURA_AGENT_CYCLE_CACHE_ = null;
+// Gmail DSN ingestion (Gmail scan + full event reconcile) runs on its own trigger, not inside the
+// agent's critical tick (it was part of the Data Hub timeouts).
+var AURA_AGENT_INGEST_IN_TICK_ = false;
+// Email performance computed at most once per agent cycle (detection, measurement, report).
+function v6AuraAgentPerf_() {
+  if (AURA_AGENT_CYCLE_CACHE_ && AURA_AGENT_CYCLE_CACHE_.perf) return AURA_AGENT_CYCLE_CACHE_.perf;
+  var perf = typeof v6AuraEmailPerformance_ === 'function' ? v6AuraEmailPerformance_() : { scopes: {} };
+  if (AURA_AGENT_CYCLE_CACHE_) AURA_AGENT_CYCLE_CACHE_.perf = perf;
+  return perf;
+}
 var AURA_AGENT_TRANSIENT_RE_ = /timed out|Service Spreadsheets|Service invoked too many times|try again|temporarily unavailable|Internal error/i;
 function v6AuraAgentRetry_(fn, attempts) {
   var max = attempts || 3, last;
@@ -188,8 +203,8 @@ function v6AuraAgentDetect_(nowIso) {
   var day = nowIso.slice(0, 10), hour = nowIso.slice(0, 13), now = new Date(nowIso).getTime(), found = [];
   var dsnTrigger = false;
   try { dsnTrigger = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'auraIngestGmailDsn'; }); } catch (e) {}
-  if (!dsnTrigger) found.push({ taskId: 'AT:' + hour + ':INGEST', kind: 'MAINTENANCE', scope: 'EMAIL', subjectKey: 'GMAIL_DSN', title: 'Ingest bounces and replies', summary: 'Read Gmail delivery notifications and reconcile email events.', observed: 'Hourly maintenance window', dataSource: 'Gmail DSN + MKT_EMAIL_EVENTS', rationale: 'Bounces and replies must be current before any measurement or next send', priority: 20, actions: [{ actionType: 'INGEST_BOUNCES_REPLIES', preview: 'Gmail DSN scan + MKT_EMAIL_EVENTS reconcile' }] });
-  var perf = typeof v6AuraEmailPerformance_ === 'function' ? v6AuraEmailPerformance_() : { scopes: {} };
+  if (AURA_AGENT_INGEST_IN_TICK_ && !dsnTrigger) found.push({ taskId: 'AT:' + hour + ':INGEST', kind: 'MAINTENANCE', scope: 'EMAIL', subjectKey: 'GMAIL_DSN', title: 'Ingest bounces and replies', summary: 'Read Gmail delivery notifications and reconcile email events.', observed: 'Hourly maintenance window', dataSource: 'Gmail DSN + MKT_EMAIL_EVENTS', rationale: 'Bounces and replies must be current before any measurement or next send', priority: 20, actions: [{ actionType: 'INGEST_BOUNCES_REPLIES', preview: 'Gmail DSN scan + MKT_EMAIL_EVENTS reconcile' }] });
+  var perf = v6AuraAgentPerf_();
   Object.keys(perf.scopes || {}).forEach(function (cid) {
     var s = perf.scopes[cid], cur = s.currentRun || {};
     // Only campaigns with SENT evidence in the last 45 days are measured daily.
@@ -214,6 +229,13 @@ function v6AuraAgentDetect_(nowIso) {
 
 // ---- One cycle -------------------------------------------------------------------------------
 function v6AuraAgentRunCycle_(options) {
+  var prevCache = AURA_AGENT_CYCLE_CACHE_;
+  AURA_AGENT_CYCLE_CACHE_ = { perf: null, startedMs: Date.now() };
+  try {
+    return typeof v6WithRowsMemo_ === 'function' ? v6WithRowsMemo_(function () { return v6AuraAgentRunCycleCore_(options); }, AURA_AGENT_MEMO_OPTIONS_) : v6AuraAgentRunCycleCore_(options);
+  } finally { AURA_AGENT_CYCLE_CACHE_ = prevCache; }
+}
+function v6AuraAgentRunCycleCore_(options) {
   var opts = options || {}, now = opts.now ? new Date(opts.now) : new Date(), nowIso = now.toISOString();
   var props = PropertiesService.getScriptProperties(), lease = Number(props.getProperty(AURA_AGENT_LEASE_PROP_) || 0);
   if (lease && now.getTime() - lease < 10 * 60 * 1000) return { status: 'SKIPPED_ALREADY_RUNNING' };
@@ -234,10 +256,11 @@ function v6AuraAgentRunCycle_(options) {
       var task = { taskId: d.taskId, runId: st.runId, kind: d.kind, scope: d.scope, campaignId: d.campaignId || '', subjectKey: d.subjectKey, title: d.title, summary: d.summary, state: 'OBSERVE', intent: d.intent || '', source: d.source || 'AURA_DETECTION', observed: d.observed || d.summary, dataSource: d.dataSource || '', rationale: d.rationale || '', policy: v6AuraAgentTaskPolicy_(d.actions.map(function (a) { return a.actionType; }), { campaignId: d.campaignId }), priority: d.priority, attempts: 0, createdAt: nowIso, updatedAt: nowIso, _actions: d.actions, _new: true };
       st.taskById[task.taskId] = task; st.AURA_AGENT_TASKS.push(task); created++;
     });
-    var stats = { completed: 0, blocked: 0, failed: 0 };
+    var stats = { completed: 0, blocked: 0, failed: 0, deferred: 0 }, budgetStart = (AURA_AGENT_CYCLE_CACHE_ && AURA_AGENT_CYCLE_CACHE_.startedMs) || Date.now();
     st.AURA_AGENT_TASKS.forEach(function (task) {
       if (AURA_AGENT_TERMINAL_[task.state]) return;
       if (opts.onlyExtra && !onlyIds[task.taskId]) return; // a command never advances unrelated work
+      if (Date.now() - budgetStart > (opts.budgetMs || AURA_AGENT_TIME_BUDGET_MS_)) { stats.deferred++; return; } // next tick continues
       try { v6AuraAgentAdvance_(st, task, nowIso); }
       catch (err) {
         task.attempts = Number(task.attempts || 0) + 1; task.lastError = String(err && err.message || err).slice(0, 300);
@@ -248,7 +271,7 @@ function v6AuraAgentRunCycle_(options) {
       v6AuraAgentPut_(st, 'AURA_AGENT_TASKS', v6AuraAgentStripTask_(task));
     });
     v6AuraAgentPut_(st, 'AURA_AGENT_MEMORY', { memoryKey: 'runtime.lastTick', scope: 'RUNTIME', value: JSON.stringify({ runId: st.runId, at: nowIso, trigger: run.trigger }), updatedAt: nowIso });
-    Object.assign(run, { state: 'COMPLETED', finishedAt: new Date().toISOString(), tasksCreated: created, tasksAdvanced: st.advanced, tasksCompleted: stats.completed, tasksBlocked: stats.blocked, tasksFailed: stats.failed });
+    Object.assign(run, { state: 'COMPLETED', finishedAt: new Date().toISOString(), tasksCreated: created, tasksAdvanced: st.advanced, tasksCompleted: stats.completed, tasksBlocked: stats.blocked, tasksFailed: stats.failed, error: stats.deferred ? 'DEFERRED_TASKS=' + stats.deferred : '' });
     v6AuraAgentPut_(st, 'AURA_AGENT_RUNS', run);
     var pending = st.changed;
     v6AuraAgentRetry_(function () { st.changed = pending; v6AuraAgentFlush_(st); });
@@ -352,7 +375,7 @@ function v6AuraAgentAdvance_(st, task, nowIso) {
   }
 }
 function v6AuraAgentMeasureCampaign_(action, st) {
-  st._perf = st._perf || v6AuraEmailPerformance_();
+  st._perf = st._perf || v6AuraAgentPerf_();
   var cid = action.preview, s = (st._perf.scopes || {})[cid];
   if (!s) return { status: 'BLOCKED', error: 'CAMPAIGN_NOT_FOUND' };
   var at = new Date().toISOString();
@@ -382,6 +405,8 @@ function v6AuraAgentDecide_(payload) {
 function auraAgentTick() {
   var r = v6AuraAgentRunCycle_({ trigger: 'TIME_TRIGGER' });
   if (typeof v6AuraAgentShadowTickLog_ === 'function') { try { v6AuraAgentShadowTickLog_(r); } catch (e) {} }
+  // A failed cycle pauses the hourly runtime instead of retrying blindly every hour.
+  if (r && r.status === 'FAILED') { try { ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'auraAgentTick') ScriptApp.deleteTrigger(t); }); r.paused = true; if (typeof v6AuraAgentShadowTickLog_ === 'function') v6AuraAgentShadowTickLog_({ status: 'PAUSED_AFTER_FAILURE', error: r.error }); } catch (e) {} }
   return r;
 }
 function v6AuraAgentTriggerInstalled_() {

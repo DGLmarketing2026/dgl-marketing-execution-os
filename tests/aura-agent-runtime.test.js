@@ -14,7 +14,7 @@ function makeCtx(o){
     v6AuraIngestGmailDsn_:()=>{calls.ingest++;if(o.ingestFails&&calls.ingest<=o.ingestFails)throw new Error('GMAIL_TIMEOUT');return {status:'OK'};},
     v6AuraReconcileEmailEvents_:()=>({written:0}),
     v6AuraEmailPerformance_:()=>({scopes:o.scopes||{}})};
-  vm.createContext(ctx);vm.runInContext(SRC('MarketingV6AuraAgentRuntime.gs'),ctx);vm.runInContext(SRC('MarketingV6AuraAgentIntelligence.gs'),ctx);return ctx;
+  vm.createContext(ctx);vm.runInContext(SRC('MarketingV6AuraAgentRuntime.gs'),ctx);vm.runInContext(SRC('MarketingV6AuraAgentIntelligence.gs'),ctx);if(o.ingestInTick!==false)ctx.AURA_AGENT_INGEST_IN_TICK_=true;return ctx;
 }
 let checks=0;function test(n,fn){fn();checks++;console.log('PASS '+n);}
 const T0='2026-10-06T10:05:00.000Z',T1='2026-10-06T11:05:00.000Z',T2='2026-10-06T12:05:00.000Z',T3='2026-10-07T10:05:00.000Z';
