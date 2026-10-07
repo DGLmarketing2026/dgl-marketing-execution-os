@@ -1,6 +1,15 @@
 var MKT_V6_DATA_HUB_ID='1FXpoBO658ldbr4V8wCKo0luHU3_kqHwYzAnWijA6lBM';
-function v6Sheet_(name){return SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).getSheetByName(name);}
-function v6Rows_(name){var s=v6Sheet_(name),v=s?s.getDataRange().getValues():[];if(v.length<2)return [];var h=v.shift();return v.map(function(r){var o={};h.forEach(function(k,i){o[k]=r[i];});return o;});}
+// Per-execution read memo, opt-in via v6WithRowsMemo_ (read-only bundles). Each table is read at
+// most once inside the scope; callers get fresh row objects; any upsert invalidates its table.
+var V6_ROWS_MEMO_=null;
+function v6WithRowsMemo_(fn){var prev=V6_ROWS_MEMO_;V6_ROWS_MEMO_=prev||{rows:{},book:null};try{return fn();}finally{V6_ROWS_MEMO_=prev;}}
+function v6RowsMemoInvalidate_(name){if(V6_ROWS_MEMO_)delete V6_ROWS_MEMO_.rows[name];}
+function v6Sheet_(name){if(V6_ROWS_MEMO_){V6_ROWS_MEMO_.book=V6_ROWS_MEMO_.book||SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID);return V6_ROWS_MEMO_.book.getSheetByName(name);}return SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).getSheetByName(name);}
+function v6Rows_(name){
+  var memo=V6_ROWS_MEMO_,rows=memo&&memo.rows[name];
+  if(!rows){var s=v6Sheet_(name),v=s?s.getDataRange().getValues():[];if(v.length<2)rows=[];else{var h=v.shift();rows=v.map(function(r){var o={};h.forEach(function(k,i){o[k]=r[i];});return o;});}if(memo)memo.rows[name]=rows;else return rows;}
+  return rows.map(function(o){return Object.assign({},o);});
+}
 function v6OpportunityPriority_(type){var x=String(type||'').trim().toUpperCase();if(x==='QNB'||x==='FRESH QNB'||x==='QUOTED NOT BOOKED')return 1;if(x==='RETENTION'||x==='RETENTION RISK')return 2;if(x==='REACTIVATION')return 3;if(x==='CROSS-SELL'||x==='CROSS SELL')return 4;if(x==='NURTURE'||x==='RELATIONSHIP RENEWAL')return 5;return 99;}
 function v6OpportunityFamily_(type){var x=String(type||'UNKNOWN').trim().toUpperCase();if(x.indexOf('QUOTE')>=0||x.indexOf('QNB')>=0)return 'QNB';if(x.indexOf('RETENTION')>=0)return 'RETENTION';if(x.indexOf('REACTIVATION')>=0)return 'REACTIVATION';if(x.indexOf('CROSS')>=0)return 'CROSS-SELL';if(x.indexOf('NURTURE')>=0||x.indexOf('RENEWAL')>=0)return 'NURTURE';return x;}
 function v6OpportunityWindow_(value){

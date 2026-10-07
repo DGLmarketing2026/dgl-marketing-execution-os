@@ -858,7 +858,12 @@ function v6AuraCampanaACurrentFamilyJob_(job) {
 }
 function v6AuraCampanaAGovernedRender_(creative, job) {
   var vars = { firstName: v6AuraEmailText_(job.firstName), company: v6AuraEmailText_(job.company), service: v6AuraEmailText_(job.service), lane: '' };
-  return { subject: v6AuraCampanaASubject_(creative.subject, vars), htmlBody: v6AuraCreativePersonalize_(creative.htmlBody, vars) };
+  var html = v6AuraCreativePersonalize_(creative.htmlBody, vars);
+  // Engagement tracking is part of the deterministic governed merge (same bytes at build and
+  // at dispatch verification): tracked CTA URLs resolve back to the approved destinations.
+  var trackingBaseUrl = v6AuraEmailText_(job.trackingBaseUrl);
+  if (trackingBaseUrl && typeof v6AuraTrackingApply_ === 'function') html = v6AuraTrackingApply_(html, v6AuraEmailText_(job.jobId), trackingBaseUrl);
+  return { subject: v6AuraCampanaASubject_(creative.subject, vars), htmlBody: html };
 }
 function v6AuraCampanaAVerifyGovernedRender_(job, creativeRows) {
   if (v6AuraEmailText_(job.renderContract) !== CAMPANA_A_RENDER_CONTRACT_) return { blocked: true, error: 'GOVERNED_RENDER_CONTRACT_MISSING' };
@@ -891,7 +896,7 @@ function v6AuraCampanaAJobAlreadyBuilt_(queueById, family, contactId, sequenceSt
 //   - kept as-is when the current logic would build the same job (idempotent repeated DRY_RUN).
 // Retention/other-family rows are never read-matched here (family is part of identity).
 var CAMPANA_A_REFRESH_ALWAYS_STATUSES_ = ['SKIPPED', 'FAILED', 'BLOCKED', 'SUPPRESSED', 'REVIEW_REQUIRED'];
-var CAMPANA_A_REFRESH_COMPARE_FIELDS_ = ['email', 'subject', 'htmlBody', 'replyTo', 'preferredLanguage', 'creativeId', 'creativeVersion', 'creativeApprovalId', 'htmlChecksum', 'recipientContentChecksum', 'renderContract', 'accountStatusOverride', 'stopReasonStage', 'stopOverrideApplied', 'recipientSource'];
+var CAMPANA_A_REFRESH_COMPARE_FIELDS_ = ['email', 'subject', 'htmlBody', 'trackingBaseUrl', 'replyTo', 'preferredLanguage', 'creativeId', 'creativeVersion', 'creativeApprovalId', 'htmlChecksum', 'recipientContentChecksum', 'renderContract', 'accountStatusOverride', 'stopReasonStage', 'stopOverrideApplied', 'recipientSource'];
 function v6AuraCampanaAExistingActivationJob_(queueById, contactId, sequenceStep) {
   var current = queueById[v6AuraCampanaAJobId_(CAMPANA_A_JOB_FAMILY_, contactId, sequenceStep)];
   if (current) return current;
@@ -1101,8 +1106,11 @@ function v6AuraCampanaABuildQueueLocked_() {
     }
     var now = new Date().toISOString();
     var country = tabCountry || v6AuraEmailText_(contact.country || contact.Country || account.country || account.Country || '');
-    var personalizedHtml = v6AuraCreativePersonalize_(creative.htmlBody, vars);
-    var personalizedSubject = v6AuraCampanaASubject_(creative.subject, vars);
+    var trackingConfig = (typeof v6AuraTrackingConfig_ === 'function') ? v6AuraTrackingConfig_() : { enabled: false };
+    var trackingBaseUrl = trackingConfig.enabled ? trackingConfig.baseUrl : '';
+    var governed = v6AuraCampanaAGovernedRender_(creative, { firstName: vars.firstName, company: vars.company, service: vars.service, jobId: (existingJob ? v6AuraEmailText_(existingJob.jobId) : jobId), trackingBaseUrl: trackingBaseUrl });
+    var personalizedHtml = governed.htmlBody;
+    var personalizedSubject = governed.subject;
     var job = {
       jobId: jobId, campaignId: CAMPANA_A_CAMPAIGN_ID_, audienceId: CAMPANA_A_SCOPE_ID_,
       accountId: accountId, contactId: contactId, email: v6AuraEmailText_(r.email),
@@ -1121,7 +1129,7 @@ function v6AuraCampanaABuildQueueLocked_() {
       stopOverrideApplied: overrideCheck.overridable ? 'YES' : 'NO', stopOverrideReason: rawStopped ? overrideCheck.reason : '',
       recipientSource: r.recipientSource, sourceRow: v6AuraEmailText_(r.sourceRow),
       accountStatusOverride: accountStatusOverridden ? currentStage : '',
-      renderContract: CAMPANA_A_RENDER_CONTRACT_, templateId: v6AuraEmailText_(creative.templateId),
+      renderContract: CAMPANA_A_RENDER_CONTRACT_, templateId: v6AuraEmailText_(creative.templateId), trackingBaseUrl: trackingBaseUrl,
       creativeId: creative.creativeId, creativeVersion: creative.creativeVersion,
       creativeApprovalId: creative.approvalId, htmlChecksum: creative.htmlChecksum,
       recipientRenderedChecksum: v6AuraChecksum_(personalizedHtml),

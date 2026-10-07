@@ -1,4 +1,4 @@
-var AURA_EMAIL_EVENT_HEADERS_ = ['eventId','jobId','campaignId','accountId','contactId','email','eventType','occurredAt','source','externalId','reasonCode','reasonText','createdAt'];
+var AURA_EMAIL_EVENT_HEADERS_ = ['eventId','jobId','campaignId','accountId','contactId','email','eventType','occurredAt','source','externalId','reasonCode','reasonText','createdAt','eventCount','lastOccurredAt','ctaId','creativeId','creativeVersion'];
 var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
   MKT_EMAIL_EVENTS:AURA_EMAIL_EVENT_HEADERS_,
   MKT_CAMPAIGNS:['campaignId','campaignName','campaignType','objective','service','scopeId','audienceId','playbookId','messageAngle','language','status','createdAt'],
@@ -61,7 +61,7 @@ var MKT_V6_CONTACT_RECIPIENT_SCHEMA={
   // pass every existing dispatch-time check. This is checksum(subject+htmlBody) on the same
   // already-personalized strings, required (not optional) at dispatch -- see
   // v6AuraJobContentChecksum_ / v6AuraValidateQueuedCreative_ in MarketingV6AuraCreativeApproval.gs.
-  MKT_EMAIL_QUEUE:['jobId','campaignId','audienceId','accountId','contactId','email','firstName','company','service','subject','htmlBody','replyTo','status','gmailDraftId','createdAt','processedAt','error','requestId','amOwner','playbookId','sequenceStep','scheduledAt','approvalId','approvedAt','approvedBy','stopOnResponse','country','preferredLanguage','languageSource','languageReason','stopReasonStage','stopReasonAt','stopReasonCampaignId','stopOverrideApplied','stopOverrideReason','recipientSource','creativeId','creativeVersion','creativeApprovalId','htmlChecksum','recipientRenderedChecksum','recipientContentChecksum','templateId','renderContract','accountStatusOverride','sourceRow','regeneratedAt','previousStatus'],
+  MKT_EMAIL_QUEUE:['jobId','campaignId','audienceId','accountId','contactId','email','firstName','company','service','subject','htmlBody','replyTo','status','gmailDraftId','createdAt','processedAt','error','requestId','amOwner','playbookId','sequenceStep','scheduledAt','approvalId','approvedAt','approvedBy','stopOnResponse','country','preferredLanguage','languageSource','languageReason','stopReasonStage','stopReasonAt','stopReasonCampaignId','stopOverrideApplied','stopOverrideReason','recipientSource','creativeId','creativeVersion','creativeApprovalId','htmlChecksum','recipientRenderedChecksum','recipientContentChecksum','templateId','renderContract','accountStatusOverride','sourceRow','regeneratedAt','previousStatus','trackingBaseUrl','goLiveRunId','promotedAt'],
   // Pre-existing legacy table (MarketingDataHub.gs); listed here only so
   // v6RequireContactRecipientHeaders_/v6EnsureContactRecipientSchema_ can validate it before
   // the dispatcher logs a real send touch into it -- no column added or changed.

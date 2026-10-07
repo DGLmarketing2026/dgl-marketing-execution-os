@@ -1181,6 +1181,12 @@ function getDashboard_() {
  * ========================= */
 
 function doGet(e) {
+  // Public engagement tracking (?aura_t=o|c): HMAC-verified opaque tokens, no PII, no open
+  // redirects (MarketingV6AuraTracking.gs). Every other request continues unchanged.
+  if (typeof v6AuraTrackingHandle_ === "function") {
+    var tracked = v6AuraTrackingHandle_(e);
+    if (tracked) return tracked;
+  }
   var v55 = handleMarketingV55Api_(e, "GET");
   if (v55) return v55;
 

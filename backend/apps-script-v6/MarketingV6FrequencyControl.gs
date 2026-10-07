@@ -4,7 +4,7 @@ function v6DateValue_(value){if(!value)return null;var d=value instanceof Date?v
 function v6DaysSince_(value,now){var d=v6DateValue_(value);return d?Math.floor((now.getTime()-d.getTime())/86400000):null;}
 function v6Priority_(type){return MKT_V6_PRIORITY[String(type||'').trim().toUpperCase()]||99;}
 function v6TableHeaders_(name){var s=v6Sheet_(name);if(!s)throw new Error(name+' NOT FOUND');return {sheet:s,headers:s.getRange(1,1,1,s.getLastColumn()).getValues()[0]};}
-function v6UpsertByKey_(name,keyFields,record){var t=v6TableHeaders_(name),rows=t.sheet.getLastRow()>1?t.sheet.getRange(2,1,t.sheet.getLastRow()-1,t.headers.length).getValues():[],index=-1;for(var i=0;i<rows.length;i++){var match=true;for(var k=0;k<keyFields.length;k++){var col=t.headers.indexOf(keyFields[k]);if(String(rows[i][col]||'')!==String(record[keyFields[k]]||'')){match=false;break;}}if(match){index=i+2;break;}}var values=t.headers.map(function(h){return record[h]==null?'':record[h];});if(index>0)t.sheet.getRange(index,1,1,values.length).setValues([values]);else t.sheet.appendRow(values);return record;}
+function v6UpsertByKey_(name,keyFields,record){if(typeof v6RowsMemoInvalidate_==='function')v6RowsMemoInvalidate_(name);var t=v6TableHeaders_(name),rows=t.sheet.getLastRow()>1?t.sheet.getRange(2,1,t.sheet.getLastRow()-1,t.headers.length).getValues():[],index=-1;for(var i=0;i<rows.length;i++){var match=true;for(var k=0;k<keyFields.length;k++){var col=t.headers.indexOf(keyFields[k]);if(String(rows[i][col]||'')!==String(record[keyFields[k]]||'')){match=false;break;}}if(match){index=i+2;break;}}var values=t.headers.map(function(h){return record[h]==null?'':record[h];});if(index>0)t.sheet.getRange(index,1,1,values.length).setValues([values]);else t.sheet.appendRow(values);return record;}
 // Batch counterpart to v6UpsertByKey_: ONE full-table read + in-memory merge + ONE full-table
 // write for an arbitrary number of records, instead of one read+scan+write PER record. Every
 // per-record v6UpsertByKey_ call re-reads the entire (growing) table before writing, which is
@@ -17,6 +17,7 @@ function v6UpsertByKey_(name,keyFields,record){var t=v6TableHeaders_(name),rows=
 // Never removes or reorders an existing row that no incoming record's key matches.
 function v6BatchUpsertByKey_(name,keyFields,records){
 if(!records||!records.length)return {created:0,updated:0};
+if(typeof v6RowsMemoInvalidate_==='function')v6RowsMemoInvalidate_(name);
 var t=v6TableHeaders_(name),lastRow=t.sheet.getLastRow(),existing=lastRow>1?t.sheet.getRange(2,1,lastRow-1,t.headers.length).getValues():[];
 var keyOf=function(getField){return keyFields.map(function(k){return String(getField(k)||'');}).join('');};
 var indexByKey={};

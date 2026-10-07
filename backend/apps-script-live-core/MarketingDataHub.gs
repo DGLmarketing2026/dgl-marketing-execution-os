@@ -59,7 +59,8 @@ const MKT_HUB_SCHEMAS = {
     'company','service','subject','htmlBody','replyTo','status','gmailDraftId',
     'createdAt','processedAt','error',
     // Append-only: governed Campaign A job fields (PR #14 / #15). Existing columns never move.
-    'templateId','renderContract','accountStatusOverride','sourceRow','regeneratedAt','previousStatus'
+    'templateId','renderContract','accountStatusOverride','sourceRow','regeneratedAt','previousStatus',
+    'trackingBaseUrl','goLiveRunId','promotedAt'
   ]
 };
 
