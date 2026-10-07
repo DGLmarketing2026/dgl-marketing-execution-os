@@ -36,7 +36,7 @@ function handleMarketingV55Api_(e, method) {
   'v55CreateTestDraft',
   'v55ResolveRecipients',
   'v55AudienceStatus',
-  'v55Health','v55Setup','v55Requests','v55CreateRequest','v55UpdateRequest',
+  'v55Health','v55Setup','v55Bootstrap','v55Requests','v55CreateRequest','v55UpdateRequest',
   'v55Campaigns','v55CreateCampaign','v55RequestApproval','v55RecordApproval',
   'v55ActivateCampaign','v55PauseCampaign','v55RecordResponse','v55StopAccount',
  'v55Handoff', 'v55RecordOutcome', 'v55Activity',
@@ -151,6 +151,10 @@ case 'v6AuraRevokeCreativeApproval':
         result = {ok:true,service:'DGL Marketing OS V5.5 Private Backend',version:'5.5',mode:'PRIVATE_BACKEND',claudeConnected:false,hubId:MKT_V55.HUB_ID};
         break;
       case 'v55Setup': result = setupMarketingV55Backend(); break;
+      // App bootstrap in ONE request (was 1 auth probe + 4 parallel reads in 2 waves, each paying
+      // the ~3 s Apps Script round trip). Read-only. A failing dataset degrades to {ok:false};
+      // the V6 opportunities read stays the auth/health authority and fails the whole call.
+      case 'v55Bootstrap': result = mktV55Bootstrap_(req); break;
       case 'v55Requests': result = mktV55ReadAll_(MKT_V55.SHEETS.REQUESTS); break;
       case 'v55CreateRequest': result = createMarketingV55Request_(req.record || req); break;
       case 'v55UpdateRequest': result = updateMarketingV55Request_(req.requestId || req.id, req.patch || req.record || req); break;
@@ -434,6 +438,21 @@ function recordMarketingV55Outcome_(d) {
 function mktV55Ss_(){return SpreadsheetApp.openById(MKT_V55.HUB_ID);}
 function mktV55Sheet_(name){var sh=mktV55Ss_().getSheetByName(name);if(!sh)throw new Error('Missing Data Hub sheet: '+name);return sh;}
 function mktV55Headers_(name){var sh=mktV55Sheet_(name),lastCol=sh.getLastColumn();return lastCol?sh.getRange(1,1,1,lastCol).getValues()[0].map(String):[];}
+function mktV55Bootstrap_(req){
+  function part(fn){try{return {ok:true,data:fn()};}catch(e){return {ok:false,error:String(e&&e.message||e)};}}
+  var run=function(){
+    var out={opportunities:routeMarketingV6_('v6Opportunities',req||{})};
+    out.requests=part(function(){return mktV55ReadAll_(MKT_V55.SHEETS.REQUESTS);});
+    out.campaigns=part(function(){return mktV55ReadAll_(MKT_V55.SHEETS.CAMPAIGNS);});
+    out.activity=part(function(){return mktV55ReadAll_(MKT_V55.SHEETS.ACTIVITY);});
+    out.pipelineSummary=part(function(){return routeMarketingV6_('v6PipelineSummary',req||{});});
+    var report=part(function(){return routeMarketingV6_('v6AuraExecutionReport',req||{});});
+    out.auraReport={ok:report.ok};
+    out.contract='V55_BOOTSTRAP_V1';
+    return out;
+  };
+  return typeof v6WithRowsMemo_==='function'?v6WithRowsMemo_(run):run();
+}
 function mktV55ReadAll_(name){var sh=mktV55Sheet_(name),headers=mktV55Headers_(name),lastRow=sh.getLastRow();if(lastRow<2||!headers.length)return[];return sh.getRange(2,1,lastRow-1,headers.length).getValues().map(function(row){var o={};headers.forEach(function(h,i){o[h]=row[i];});return o;});}
 function mktV55Find_(name,keyName,keyValue){var rows=mktV55ReadAll_(name);for(var i=0;i<rows.length;i++){if(String(rows[i][keyName])===String(keyValue))return rows[i];}return null;}
 
