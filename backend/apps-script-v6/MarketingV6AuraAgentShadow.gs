@@ -43,11 +43,13 @@ function AURA_AGENT_SHADOW_ACTIVATE() {
     var sendMode = String(props.getProperty('AURA_SEND_MODE') || 'DRY_RUN').toUpperCase();
     out.sendModeBefore = sendMode;
     if (sendMode === 'LIVE') throw new Error('ABORTED_SEND_MODE_IS_LIVE');
-    var before = v6AuraAgentShadowQueueSnapshot_();
+    var before = v6AuraAgentRetry_(v6AuraAgentShadowQueueSnapshot_);
     props.setProperty(AURA_AGENT_MODE_PROP_, 'SHADOW');
     out.hourlyTriggers = v6AuraAgentShadowEnsureSingleTrigger_();
     out.initialRun = v6AuraAgentRunCycle_({ trigger: 'SHADOW_INITIAL' });
-    var after = v6AuraAgentShadowQueueSnapshot_();
+    // A transient failure is recoverable: the hourly trigger (already in place) retries it.
+    if (out.initialRun.status === 'FAILED') out.recovery = 'HOURLY_TRIGGER_WILL_RETRY';
+    var after = v6AuraAgentRetry_(v6AuraAgentShadowQueueSnapshot_);
     var tasks = v6Rows_('AURA_AGENT_TASKS'), actions = v6Rows_('AURA_AGENT_ACTIONS');
     var byState = {}, byKind = {}; tasks.forEach(function (t) { byState[t.state] = (byState[t.state] || 0) + 1; byKind[t.kind] = (byKind[t.kind] || 0) + 1; });
     var cc = v6AuraAgentCommandCenter_();
