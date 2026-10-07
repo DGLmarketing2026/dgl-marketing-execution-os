@@ -56,12 +56,18 @@ function v6AuraAgentPlanCampaign_(scope, nowIso) {
     if (at && now - at <= AURA_AGENT_RECENT_SEND_DAYS_ * 86400000) recent[String(q.email || '').trim().toLowerCase()] = true;
   });
   var seen = {}, out = { eligible: 0, invalid: 0, doNotContact: 0, recentlySent: 0, duplicate: 0, recipients: 0 }, langs = { ES: 0, EN: 0, PT: 0, UNRESOLVED: 0 };
-  v6Rows_('MKT_CONTACTS_SECURE').forEach(function (c) {
+  var contacts = v6Rows_('MKT_CONTACTS_SECURE'), blockedEmail = {};
+  function isInvalid(c, email) { return !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || /INVALID|BOUNCE/i.test(String(c.emailStatus || '')); }
+  function isDnc(c) { return v6AuraAgentIsTrue_(c.doNotContact) || /DNC|DO_NOT_CONTACT|UNSUBSCRIBED/i.test(String(c.status || '')); }
+  // Exact-email governance across ALL contact rows (any account): a DNC or invalid flag on one
+  // row blocks that email everywhere, so a duplicate row can never bypass it.
+  contacts.forEach(function (c) { var e = String(c.email || '').trim().toLowerCase(); if (e && (isDnc(c) || isInvalid(c, e))) blockedEmail[e] = isDnc(c) ? 'DNC' : (blockedEmail[e] || 'INVALID'); });
+  contacts.forEach(function (c) {
     if (!elig.accounts[c.accountId]) return;
     out.eligible++;
     var email = String(c.email || '').trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || /INVALID|BOUNCE/i.test(String(c.emailStatus || ''))) { out.invalid++; return; }
-    if (v6AuraAgentIsTrue_(c.doNotContact) || /DNC|DO_NOT_CONTACT|UNSUBSCRIBED/i.test(String(c.status || ''))) { out.doNotContact++; return; }
+    if (isInvalid(c, email) || blockedEmail[email] === 'INVALID') { out.invalid++; return; }
+    if (isDnc(c) || blockedEmail[email] === 'DNC') { out.doNotContact++; return; }
     if (seen[email]) { out.duplicate++; return; }
     seen[email] = true;
     if (recent[email]) { out.recentlySent++; return; }

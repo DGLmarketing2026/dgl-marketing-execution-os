@@ -42,6 +42,12 @@ test('campaign preparation is AUTO and governed: audience, language, creative, e
   assert.equal(c.v6AuraAgentPlanCampaign_('QNB',NOW).plan.creativeSystem,'executive-minimal');
   assert.equal(c.v6AuraAgentPlanCampaign_('SOCIAL',NOW).status,'BLOCKED');
 });
+test('a DNC or invalid flag on any row blocks that exact email everywhere (duplicate rows cannot bypass)',()=>{
+  const c=makeCtx({MKT_OPPORTUNITIES:[opp('A1','Retention'),opp('A2','Retention')],
+    MKT_CONTACTS_SECURE:[contact(1,'A1',{email:'same@x.com',doNotContact:'TRUE'}),contact(2,'A2',{email:'Same@X.com'}),contact(3,'A9',{email:'bad@x.com',emailStatus:'INVALID'}),contact(4,'A1',{email:'bad@x.com'}),contact(5,'A2')]});
+  const p=c.v6AuraAgentPlanCampaign_('RETENTION',NOW).plan;
+  assert.equal(p.contacts.doNotContact,2);assert.equal(p.contacts.invalid,1);assert.equal(p.contacts.recipients,1);
+});
 test('server playbook mirrors the frontend creative library selection',()=>{
   const c=makeCtx(),w={};vm.createContext(w);w.window=w;vm.runInContext(fs.readFileSync('assets/js/creative-library-v5.js','utf8'),w);const L=w.DGL_CREATIVE_LIBRARY_V5;
   for(const [scope,p] of Object.entries(c.AURA_AGENT_PLAYBOOK_)){
