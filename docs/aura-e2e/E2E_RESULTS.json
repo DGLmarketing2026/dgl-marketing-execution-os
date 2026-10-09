@@ -1,0 +1,1122 @@
+{
+  "generatedBy": "tools/aura-e2e/run-e2e.js",
+  "results": [
+    {
+      "stage": "Programación",
+      "name": "AURA instala sus propios triggers horarios y la prueba solo los dispara",
+      "result": "PASS",
+      "evidence": "auraReportIntakeTick c/1h, auraAgentTick c/1h; 10 ejecuciones programadas"
+    },
+    {
+      "stage": "Detección",
+      "name": "El reporte de un remitente interno verificado (que no está en la lista) se detecta en la bandeja de Marketing",
+      "result": "PASS",
+      "evidence": "QA-M1 OK / VERIFIED_INTERNAL_SENDER"
+    },
+    {
+      "stage": "Detección",
+      "name": "Los correos suplantados y externos nunca se abren",
+      "result": "PASS",
+      "evidence": "No hay entradas en el registro para QA-SPOOF ni QA-EXT; 1 no confiable omitido"
+    },
+    {
+      "stage": "Detección",
+      "name": "Un Excel interno que no es un reporte se ignora",
+      "result": "PASS",
+      "evidence": "QA-NOTREPORT NOT_A_MARKETING_REPORT"
+    },
+    {
+      "stage": "Lectura del Excel",
+      "name": "Se lee el XLSX real (6 pestañas) mediante la conversión",
+      "result": "PASS",
+      "evidence": "8 filas aceptadas en las pestañas reconocidas"
+    },
+    {
+      "stage": "Validación",
+      "name": "Las filas sin cuenta o sin responsable se rechazan y registran",
+      "result": "PASS",
+      "evidence": "MISSING ACCOUNT (Cuenta) | MISSING AM OWNER"
+    },
+    {
+      "stage": "Validación",
+      "name": "No se crean oportunidades desde las pestañas de calidad de datos ni desconocidas",
+      "result": "PASS",
+      "evidence": "Se ignoran \"Confirmar datos contacto\" y \"Campana B - nueva\""
+    },
+    {
+      "stage": "Deduplicación",
+      "name": "El mismo archivo reenviado da DUPLICATE_REPORT y no se vuelve a convertir",
+      "result": "PASS",
+      "evidence": "Conversiones tras el duplicado: 2 (v1 + no-reporte)"
+    },
+    {
+      "stage": "Deduplicación",
+      "name": "Una cuenta en dos familias pasa una sola vez a la cola (las demás se suprimen por prioridad)",
+      "result": "PASS",
+      "evidence": "1 oportunidades suprimidas"
+    },
+    {
+      "stage": "Deduplicación",
+      "name": "En una hora sin correo nuevo la recepción no lee el Data Hub",
+      "result": "PASS",
+      "evidence": "Lecturas del registro de ingesta en la hora inactiva: 0"
+    },
+    {
+      "stage": "Interpretación",
+      "name": "Tarea automática de análisis por reporte, con conteos y sin nombres",
+      "result": "PASS",
+      "evidence": "Por familia: {\"Retention\":3,\"Reactivation\":3,\"Cross-Sell\":1,\"Activation\":1}, planificables: {\"RETENTION\":3,\"REACTIVATION\":3,\"CROSS_SELL\":1}"
+    },
+    {
+      "stage": "Preparación",
+      "name": "Planes de campaña Retention/Reactivation/Cross-Sell preparados automáticamente",
+      "result": "PASS",
+      "evidence": "RETENTION: 3 destinatarios; REACTIVATION: 2 destinatarios; CROSS_SELL: 2 destinatarios"
+    },
+    {
+      "stage": "Preparación",
+      "name": "Se aplican las exclusiones de gobernanza (DNC, email inválido, duplicado, envío reciente)",
+      "result": "PASS",
+      "evidence": "RETENTION dnc=1 inválidos=1 dup=1 recientes=0 sinIdioma=0; REACTIVATION dnc=0 inválidos=0 dup=0 recientes=1 sinIdioma=0; CROSS_SELL dnc=0 inválidos=0 dup=0 recientes=0 sinIdioma=0"
+    },
+    {
+      "stage": "Preparación",
+      "name": "Idioma ES/EN/PT resuelto por contacto",
+      "result": "PASS",
+      "evidence": "RETENTION {\"ES\":2,\"EN\":0,\"PT\":1,\"UNRESOLVED\":0}; REACTIVATION {\"ES\":0,\"EN\":2,\"PT\":0,\"UNRESOLVED\":0}; CROSS_SELL {\"ES\":1,\"EN\":1,\"PT\":0,\"UNRESOLVED\":0}"
+    },
+    {
+      "stage": "Aprobación pendiente",
+      "name": "Una aprobación PENDING por familia y ninguna aprobada automáticamente",
+      "result": "PASS",
+      "evidence": "RETENTION: APPROVAL/PENDING; REACTIVATION: APPROVAL/PENDING; CROSS_SELL: APPROVAL/PENDING"
+    },
+    {
+      "stage": "Reporte actualizado",
+      "name": "Un reporte más nuevo genera un análisis nuevo y recalcula el plan pendiente sin duplicar aprobaciones",
+      "result": "PASS",
+      "evidence": "CROSS_SELL cuentas 1 -> 2; aprobaciones: 3"
+    },
+    {
+      "stage": "Seguridad",
+      "name": "Ningún envío: Gmail, MailApp, borradores y llamadas HTTP en 0",
+      "result": "PASS",
+      "evidence": "{\"gmailSend\":0,\"gmailDraft\":0,\"mailApp\":0,\"urlFetch\":0}"
+    },
+    {
+      "stage": "Seguridad",
+      "name": "La cola de envío no cambió y AURA_SEND_MODE sigue en DRY_RUN",
+      "result": "PASS",
+      "evidence": "cola sin cambios=true, modo=DRY_RUN"
+    },
+    {
+      "stage": "Seguridad",
+      "name": "Solo se escribió en tablas internas de AURA (nada de Salesforce, Clientify ni producción)",
+      "result": "PASS",
+      "evidence": "AURA_AGENT_ACTIONS, AURA_AGENT_APPROVALS, AURA_AGENT_DECISIONS, AURA_AGENT_EVENTS, AURA_AGENT_MEMORY, AURA_AGENT_METRICS, AURA_AGENT_RUNS, AURA_AGENT_TASKS, MKT_AURA_GMAIL_OPPORTUNITIES, MKT_AURA_INGEST_LOG, MKT_AURA_INGEST_REJECTIONS, MKT_OPPORTUNITIES"
+    }
+  ],
+  "raw": {
+    "activation": {
+      "status": "ACTIVE",
+      "inboxIsMarketing": true
+    },
+    "triggers": [
+      {
+        "handler": "auraReportIntakeTick",
+        "everyHours": 1,
+        "minute": 10
+      },
+      {
+        "handler": "auraAgentTick",
+        "everyHours": 1,
+        "minute": 38
+      }
+    ],
+    "snapshots": [
+      {
+        "label": "after first report",
+        "at": "2026-10-12T09:59:00.000Z",
+        "log": [
+          {
+            "id": "QA-M1",
+            "status": "OK",
+            "trust": "VERIFIED_INTERNAL_SENDER",
+            "accepted": 8,
+            "rejected": 2
+          },
+          {
+            "id": "QA-NOTREPORT",
+            "status": "NOT_A_MARKETING_REPORT",
+            "trust": "VERIFIED_INTERNAL_SENDER",
+            "accepted": 0,
+            "rejected": 0
+          }
+        ],
+        "tasks": [
+          {
+            "id": "AT:2026-10-12:OPP:RETENTION",
+            "kind": "OPPORTUNITY",
+            "scope": "RETENTION",
+            "state": "APPROVAL",
+            "policy": "APPROVAL_REQUIRED",
+            "error": ""
+          },
+          {
+            "id": "AT:2026-10-12:OPP:REACTIVATION",
+            "kind": "OPPORTUNITY",
+            "scope": "REACTIVATION",
+            "state": "APPROVAL",
+            "policy": "APPROVAL_REQUIRED",
+            "error": ""
+          },
+          {
+            "id": "AT:2026-10-12:OPP:CROSS_SELL",
+            "kind": "OPPORTUNITY",
+            "scope": "CROSS_SELL",
+            "state": "APPROVAL",
+            "policy": "APPROVAL_REQUIRED",
+            "error": ""
+          },
+          {
+            "id": "AT:REPORT:ING-80B3BFCE0B86",
+            "kind": "REPORT",
+            "scope": "ANALYTICS",
+            "state": "COMPLETED",
+            "policy": "AUTO",
+            "error": ""
+          }
+        ],
+        "approvals": [
+          {
+            "id": "AP:AT:2026-10-12:OPP:RETENTION",
+            "scope": "RETENTION",
+            "status": "PENDING"
+          },
+          {
+            "id": "AP:AT:2026-10-12:OPP:REACTIVATION",
+            "scope": "REACTIVATION",
+            "status": "PENDING"
+          },
+          {
+            "id": "AP:AT:2026-10-12:OPP:CROSS_SELL",
+            "scope": "CROSS_SELL",
+            "status": "PENDING"
+          }
+        ]
+      },
+      {
+        "label": "after duplicate",
+        "at": "2026-10-12T10:59:00.000Z",
+        "log": [
+          {
+            "id": "QA-M1",
+            "status": "OK",
+            "trust": "VERIFIED_INTERNAL_SENDER",
+            "accepted": 8,
+            "rejected": 2
+          },
+          {
+            "id": "QA-NOTREPORT",
+            "status": "NOT_A_MARKETING_REPORT",
+            "trust": "VERIFIED_INTERNAL_SENDER",
+            "accepted": 0,
+            "rejected": 0
+          },
+          {
+            "id": "QA-M2",
+            "status": "DUPLICATE_REPORT",
+            "trust": "ALLOWLISTED_SENDER",
+            "accepted": 0,
+            "rejected": 0
+          }
+        ],
+        "tasks": [
+          {
+            "id": "AT:2026-10-12:OPP:RETENTION",
+            "kind": "OPPORTUNITY",
+            "scope": "RETENTION",
+            "state": "APPROVAL",
+            "policy": "APPROVAL_REQUIRED",
+            "error": ""
+          },
+          {
+            "id": "AT:2026-10-12:OPP:REACTIVATION",
+            "kind": "OPPORTUNITY",
+            "scope": "REACTIVATION",
+            "state": "APPROVAL",
+            "policy": "APPROVAL_REQUIRED",
+            "error": ""
+          },
+          {
+            "id": "AT:2026-10-12:OPP:CROSS_SELL",
+            "kind": "OPPORTUNITY",
+            "scope": "CROSS_SELL",
+            "state": "APPROVAL",
+            "policy": "APPROVAL_REQUIRED",
+            "error": ""
+          },
+          {
+            "id": "AT:REPORT:ING-80B3BFCE0B86",
+            "kind": "REPORT",
+            "scope": "ANALYTICS",
+            "state": "COMPLETED",
+            "policy": "AUTO",
+            "error": ""
+          }
+        ],
+        "approvals": [
+          {
+            "id": "AP:AT:2026-10-12:OPP:RETENTION",
+            "scope": "RETENTION",
+            "status": "PENDING"
+          },
+          {
+            "id": "AP:AT:2026-10-12:OPP:REACTIVATION",
+            "scope": "REACTIVATION",
+            "status": "PENDING"
+          },
+          {
+            "id": "AP:AT:2026-10-12:OPP:CROSS_SELL",
+            "scope": "CROSS_SELL",
+            "status": "PENDING"
+          }
+        ]
+      },
+      {
+        "label": "idle hour",
+        "at": "2026-10-12T11:59:00.000Z",
+        "log": [
+          {
+            "id": "QA-M1",
+            "status": "OK",
+            "trust": "VERIFIED_INTERNAL_SENDER",
+            "accepted": 8,
+            "rejected": 2
+          },
+          {
+            "id": "QA-NOTREPORT",
+            "status": "NOT_A_MARKETING_REPORT",
+            "trust": "VERIFIED_INTERNAL_SENDER",
+            "accepted": 0,
+            "rejected": 0
+          },
+          {
+            "id": "QA-M2",
+            "status": "DUPLICATE_REPORT",
+            "trust": "ALLOWLISTED_SENDER",
+            "accepted": 0,
+            "rejected": 0
+          }
+        ],
+        "tasks": [
+          {
+            "id": "AT:2026-10-12:OPP:RETENTION",
+            "kind": "OPPORTUNITY",
+            "scope": "RETENTION",
+            "state": "APPROVAL",
+            "policy": "APPROVAL_REQUIRED",
+            "error": ""
+          },
+          {
+            "id": "AT:2026-10-12:OPP:REACTIVATION",
+            "kind": "OPPORTUNITY",
+            "scope": "REACTIVATION",
+            "state": "APPROVAL",
+            "policy": "APPROVAL_REQUIRED",
+            "error": ""
+          },
+          {
+            "id": "AT:2026-10-12:OPP:CROSS_SELL",
+            "kind": "OPPORTUNITY",
+            "scope": "CROSS_SELL",
+            "state": "APPROVAL",
+            "policy": "APPROVAL_REQUIRED",
+            "error": ""
+          },
+          {
+            "id": "AT:REPORT:ING-80B3BFCE0B86",
+            "kind": "REPORT",
+            "scope": "ANALYTICS",
+            "state": "COMPLETED",
+            "policy": "AUTO",
+            "error": ""
+          }
+        ],
+        "approvals": [
+          {
+            "id": "AP:AT:2026-10-12:OPP:RETENTION",
+            "scope": "RETENTION",
+            "status": "PENDING"
+          },
+          {
+            "id": "AP:AT:2026-10-12:OPP:REACTIVATION",
+            "scope": "REACTIVATION",
+            "status": "PENDING"
+          },
+          {
+            "id": "AP:AT:2026-10-12:OPP:CROSS_SELL",
+            "scope": "CROSS_SELL",
+            "status": "PENDING"
+          }
+        ]
+      },
+      {
+        "label": "after updated report",
+        "at": "2026-10-12T13:59:00.000Z",
+        "log": [
+          {
+            "id": "QA-M1",
+            "status": "OK",
+            "trust": "VERIFIED_INTERNAL_SENDER",
+            "accepted": 8,
+            "rejected": 2
+          },
+          {
+            "id": "QA-NOTREPORT",
+            "status": "NOT_A_MARKETING_REPORT",
+            "trust": "VERIFIED_INTERNAL_SENDER",
+            "accepted": 0,
+            "rejected": 0
+          },
+          {
+            "id": "QA-M2",
+            "status": "DUPLICATE_REPORT",
+            "trust": "ALLOWLISTED_SENDER",
+            "accepted": 0,
+            "rejected": 0
+          },
+          {
+            "id": "QA-M3",
+            "status": "OK",
+            "trust": "VERIFIED_INTERNAL_SENDER",
+            "accepted": 9,
+            "rejected": 2
+          }
+        ],
+        "tasks": [
+          {
+            "id": "AT:2026-10-12:OPP:RETENTION",
+            "kind": "OPPORTUNITY",
+            "scope": "RETENTION",
+            "state": "APPROVAL",
+            "policy": "APPROVAL_REQUIRED",
+            "error": ""
+          },
+          {
+            "id": "AT:2026-10-12:OPP:REACTIVATION",
+            "kind": "OPPORTUNITY",
+            "scope": "REACTIVATION",
+            "state": "APPROVAL",
+            "policy": "APPROVAL_REQUIRED",
+            "error": ""
+          },
+          {
+            "id": "AT:2026-10-12:OPP:CROSS_SELL",
+            "kind": "OPPORTUNITY",
+            "scope": "CROSS_SELL",
+            "state": "APPROVAL",
+            "policy": "APPROVAL_REQUIRED",
+            "error": ""
+          },
+          {
+            "id": "AT:REPORT:ING-80B3BFCE0B86",
+            "kind": "REPORT",
+            "scope": "ANALYTICS",
+            "state": "COMPLETED",
+            "policy": "AUTO",
+            "error": ""
+          },
+          {
+            "id": "AT:REPORT:ING-D08FA9674B26",
+            "kind": "REPORT",
+            "scope": "ANALYTICS",
+            "state": "COMPLETED",
+            "policy": "AUTO",
+            "error": ""
+          }
+        ],
+        "approvals": [
+          {
+            "id": "AP:AT:2026-10-12:OPP:RETENTION",
+            "scope": "RETENTION",
+            "status": "PENDING"
+          },
+          {
+            "id": "AP:AT:2026-10-12:OPP:REACTIVATION",
+            "scope": "REACTIVATION",
+            "status": "PENDING"
+          },
+          {
+            "id": "AP:AT:2026-10-12:OPP:CROSS_SELL",
+            "scope": "CROSS_SELL",
+            "status": "PENDING"
+          }
+        ]
+      }
+    ],
+    "plansV1": [
+      {
+        "taskId": "AT:2026-10-12:OPP:RETENTION",
+        "status": "DONE",
+        "plan": {
+          "planVersion": 2,
+          "scope": "RETENTION",
+          "objective": "Retention",
+          "eligibleAccounts": 3,
+          "contacts": {
+            "eligible": 6,
+            "invalid": 1,
+            "doNotContact": 1,
+            "recentlySent": 0,
+            "duplicate": 1,
+            "languageUnresolved": 0,
+            "recipients": 3
+          },
+          "languages": {
+            "ES": 2,
+            "EN": 0,
+            "PT": 1,
+            "UNRESOLVED": 0
+          },
+          "languageSources": {
+            "ACCOUNT_COUNTRY": 3
+          },
+          "languageConfidence": {
+            "HIGH": 0,
+            "MEDIUM": 3,
+            "NONE": 0
+          },
+          "service": "Multiservicio",
+          "creativeSystem": "editorial-white",
+          "angle": "Stay Close",
+          "cta": "Reply",
+          "topOwners": [
+            {
+              "key": "AM Uno QA",
+              "count": 2
+            },
+            {
+              "key": "AM Dos QA",
+              "count": 1
+            }
+          ],
+          "sourceReportId": "ING-80B3BFCE0B86",
+          "governance": "Exact-email dedupe, DNC, invalid email and 30-day resend protection applied; contact frequency and exclusions are re-applied by the governed build.",
+          "dataSources": [
+            "MKT_OPPORTUNITIES",
+            "MKT_CONTACTS_SECURE",
+            "MKT_ACCOUNTS",
+            "MKT_EMAIL_QUEUE"
+          ],
+          "approvalRequired": "SEND_CUSTOMER_EMAIL (one approval for the whole campaign)"
+        }
+      },
+      {
+        "taskId": "AT:2026-10-12:OPP:REACTIVATION",
+        "status": "DONE",
+        "plan": {
+          "planVersion": 2,
+          "scope": "REACTIVATION",
+          "objective": "Reactivation",
+          "eligibleAccounts": 2,
+          "contacts": {
+            "eligible": 3,
+            "invalid": 0,
+            "doNotContact": 0,
+            "recentlySent": 1,
+            "duplicate": 0,
+            "languageUnresolved": 0,
+            "recipients": 2
+          },
+          "languages": {
+            "ES": 0,
+            "EN": 2,
+            "PT": 0,
+            "UNRESOLVED": 0
+          },
+          "languageSources": {
+            "ACCOUNT_COUNTRY": 2
+          },
+          "languageConfidence": {
+            "HIGH": 0,
+            "MEDIUM": 2,
+            "NONE": 0
+          },
+          "service": "Multiservicio",
+          "creativeSystem": "editorial-white",
+          "angle": "Previous Relationship",
+          "cta": "Generate Quote",
+          "topOwners": [
+            {
+              "key": "AM Tres QA",
+              "count": 2
+            }
+          ],
+          "sourceReportId": "ING-80B3BFCE0B86",
+          "governance": "Exact-email dedupe, DNC, invalid email and 30-day resend protection applied; contact frequency and exclusions are re-applied by the governed build.",
+          "dataSources": [
+            "MKT_OPPORTUNITIES",
+            "MKT_CONTACTS_SECURE",
+            "MKT_ACCOUNTS",
+            "MKT_EMAIL_QUEUE"
+          ],
+          "approvalRequired": "SEND_CUSTOMER_EMAIL (one approval for the whole campaign)"
+        }
+      },
+      {
+        "taskId": "AT:2026-10-12:OPP:CROSS_SELL",
+        "status": "DONE",
+        "plan": {
+          "planVersion": 2,
+          "scope": "CROSS_SELL",
+          "objective": "Cross-Sell",
+          "eligibleAccounts": 1,
+          "contacts": {
+            "eligible": 2,
+            "invalid": 0,
+            "doNotContact": 0,
+            "recentlySent": 0,
+            "duplicate": 0,
+            "languageUnresolved": 0,
+            "recipients": 2
+          },
+          "languages": {
+            "ES": 1,
+            "EN": 1,
+            "PT": 0,
+            "UNRESOLVED": 0
+          },
+          "languageSources": {
+            "ACCOUNT_COUNTRY": 1,
+            "CONTACT_EXPLICIT": 1
+          },
+          "languageConfidence": {
+            "HIGH": 1,
+            "MEDIUM": 1,
+            "NONE": 0
+          },
+          "service": "Multiservicio",
+          "creativeSystem": "service-architecture",
+          "angle": "Additional Capability",
+          "cta": "Generate Quote",
+          "topOwners": [
+            {
+              "key": "AM Dos QA",
+              "count": 1
+            }
+          ],
+          "sourceReportId": "ING-80B3BFCE0B86",
+          "governance": "Exact-email dedupe, DNC, invalid email and 30-day resend protection applied; contact frequency and exclusions are re-applied by the governed build.",
+          "dataSources": [
+            "MKT_OPPORTUNITIES",
+            "MKT_CONTACTS_SECURE",
+            "MKT_ACCOUNTS",
+            "MKT_EMAIL_QUEUE"
+          ],
+          "approvalRequired": "SEND_CUSTOMER_EMAIL (one approval for the whole campaign)"
+        }
+      }
+    ],
+    "plansV2": [
+      {
+        "taskId": "AT:2026-10-12:OPP:RETENTION",
+        "status": "DONE",
+        "plan": {
+          "planVersion": 2,
+          "scope": "RETENTION",
+          "objective": "Retention",
+          "eligibleAccounts": 3,
+          "contacts": {
+            "eligible": 6,
+            "invalid": 1,
+            "doNotContact": 1,
+            "recentlySent": 0,
+            "duplicate": 1,
+            "languageUnresolved": 0,
+            "recipients": 3
+          },
+          "languages": {
+            "ES": 2,
+            "EN": 0,
+            "PT": 1,
+            "UNRESOLVED": 0
+          },
+          "languageSources": {
+            "ACCOUNT_COUNTRY": 3
+          },
+          "languageConfidence": {
+            "HIGH": 0,
+            "MEDIUM": 3,
+            "NONE": 0
+          },
+          "service": "Multiservicio",
+          "creativeSystem": "editorial-white",
+          "angle": "Stay Close",
+          "cta": "Reply",
+          "topOwners": [
+            {
+              "key": "AM Uno QA",
+              "count": 2
+            },
+            {
+              "key": "AM Dos QA",
+              "count": 1
+            }
+          ],
+          "sourceReportId": "ING-D08FA9674B26",
+          "governance": "Exact-email dedupe, DNC, invalid email and 30-day resend protection applied; contact frequency and exclusions are re-applied by the governed build.",
+          "dataSources": [
+            "MKT_OPPORTUNITIES",
+            "MKT_CONTACTS_SECURE",
+            "MKT_ACCOUNTS",
+            "MKT_EMAIL_QUEUE"
+          ],
+          "approvalRequired": "SEND_CUSTOMER_EMAIL (one approval for the whole campaign)"
+        }
+      },
+      {
+        "taskId": "AT:2026-10-12:OPP:REACTIVATION",
+        "status": "DONE",
+        "plan": {
+          "planVersion": 2,
+          "scope": "REACTIVATION",
+          "objective": "Reactivation",
+          "eligibleAccounts": 2,
+          "contacts": {
+            "eligible": 3,
+            "invalid": 0,
+            "doNotContact": 0,
+            "recentlySent": 1,
+            "duplicate": 0,
+            "languageUnresolved": 0,
+            "recipients": 2
+          },
+          "languages": {
+            "ES": 0,
+            "EN": 2,
+            "PT": 0,
+            "UNRESOLVED": 0
+          },
+          "languageSources": {
+            "ACCOUNT_COUNTRY": 2
+          },
+          "languageConfidence": {
+            "HIGH": 0,
+            "MEDIUM": 2,
+            "NONE": 0
+          },
+          "service": "Multiservicio",
+          "creativeSystem": "editorial-white",
+          "angle": "Previous Relationship",
+          "cta": "Generate Quote",
+          "topOwners": [
+            {
+              "key": "AM Tres QA",
+              "count": 2
+            }
+          ],
+          "sourceReportId": "ING-D08FA9674B26",
+          "governance": "Exact-email dedupe, DNC, invalid email and 30-day resend protection applied; contact frequency and exclusions are re-applied by the governed build.",
+          "dataSources": [
+            "MKT_OPPORTUNITIES",
+            "MKT_CONTACTS_SECURE",
+            "MKT_ACCOUNTS",
+            "MKT_EMAIL_QUEUE"
+          ],
+          "approvalRequired": "SEND_CUSTOMER_EMAIL (one approval for the whole campaign)"
+        }
+      },
+      {
+        "taskId": "AT:2026-10-12:OPP:CROSS_SELL",
+        "status": "DONE",
+        "plan": {
+          "planVersion": 2,
+          "scope": "CROSS_SELL",
+          "objective": "Cross-Sell",
+          "eligibleAccounts": 2,
+          "contacts": {
+            "eligible": 3,
+            "invalid": 0,
+            "doNotContact": 0,
+            "recentlySent": 0,
+            "duplicate": 0,
+            "languageUnresolved": 0,
+            "recipients": 3
+          },
+          "languages": {
+            "ES": 2,
+            "EN": 1,
+            "PT": 0,
+            "UNRESOLVED": 0
+          },
+          "languageSources": {
+            "ACCOUNT_COUNTRY": 2,
+            "CONTACT_EXPLICIT": 1
+          },
+          "languageConfidence": {
+            "HIGH": 1,
+            "MEDIUM": 2,
+            "NONE": 0
+          },
+          "service": "Multiservicio",
+          "creativeSystem": "service-architecture",
+          "angle": "Additional Capability",
+          "cta": "Generate Quote",
+          "topOwners": [
+            {
+              "key": "AM Dos QA",
+              "count": 2
+            }
+          ],
+          "sourceReportId": "ING-D08FA9674B26",
+          "governance": "Exact-email dedupe, DNC, invalid email and 30-day resend protection applied; contact frequency and exclusions are re-applied by the governed build.",
+          "dataSources": [
+            "MKT_OPPORTUNITIES",
+            "MKT_CONTACTS_SECURE",
+            "MKT_ACCOUNTS",
+            "MKT_EMAIL_QUEUE"
+          ],
+          "approvalRequired": "SEND_CUSTOMER_EMAIL (one approval for the whole campaign)"
+        }
+      }
+    ],
+    "reportActions": [
+      {
+        "taskId": "AT:REPORT:ING-80B3BFCE0B86",
+        "status": "DONE",
+        "analysis": {
+          "rows": 8,
+          "accounts": 7,
+          "rejectedRows": 2,
+          "byFamily": {
+            "Retention": 3,
+            "Reactivation": 3,
+            "Cross-Sell": 1,
+            "Activation": 1
+          },
+          "bySheet": {
+            "Retencion prioritaria": 3,
+            "Recuperacion FTL": 3,
+            "Expansion de servicio": 1,
+            "Campana A - HA prioritaria": 1
+          },
+          "topOwners": [
+            {
+              "key": "AM Uno QA",
+              "count": 4
+            },
+            {
+              "key": "AM Dos QA",
+              "count": 2
+            },
+            {
+              "key": "AM Tres QA",
+              "count": 2
+            }
+          ],
+          "campaignScopes": {
+            "RETENTION": 3,
+            "REACTIVATION": 3,
+            "CROSS_SELL": 1
+          },
+          "nextStep": "Campaign plans for these families are prepared automatically and wait for one approval in AURA. Nothing is sent without that approval.",
+          "dataSources": [
+            "MKT_AURA_GMAIL_OPPORTUNITIES",
+            "MKT_AURA_INGEST_REJECTIONS"
+          ]
+        }
+      },
+      {
+        "taskId": "AT:REPORT:ING-D08FA9674B26",
+        "status": "DONE",
+        "analysis": {
+          "rows": 9,
+          "accounts": 8,
+          "rejectedRows": 2,
+          "byFamily": {
+            "Retention": 3,
+            "Reactivation": 3,
+            "Cross-Sell": 2,
+            "Activation": 1
+          },
+          "bySheet": {
+            "Retencion prioritaria": 3,
+            "Recuperacion FTL": 3,
+            "Expansion de servicio": 2,
+            "Campana A - HA prioritaria": 1
+          },
+          "topOwners": [
+            {
+              "key": "AM Uno QA",
+              "count": 4
+            },
+            {
+              "key": "AM Dos QA",
+              "count": 3
+            },
+            {
+              "key": "AM Tres QA",
+              "count": 2
+            }
+          ],
+          "campaignScopes": {
+            "RETENTION": 3,
+            "REACTIVATION": 3,
+            "CROSS_SELL": 2
+          },
+          "nextStep": "Campaign plans for these families are prepared automatically and wait for one approval in AURA. Nothing is sent without that approval.",
+          "dataSources": [
+            "MKT_AURA_GMAIL_OPPORTUNITIES",
+            "MKT_AURA_INGEST_REJECTIONS"
+          ]
+        }
+      }
+    ],
+    "decisions": 5,
+    "opportunities": [
+      {
+        "type": "Retention",
+        "status": "DETECTED",
+        "reason": "",
+        "source": "GMAIL_AM_REPORT"
+      },
+      {
+        "type": "Retention",
+        "status": "DETECTED",
+        "reason": "",
+        "source": "GMAIL_AM_REPORT"
+      },
+      {
+        "type": "Retention",
+        "status": "DETECTED",
+        "reason": "",
+        "source": "GMAIL_AM_REPORT"
+      },
+      {
+        "type": "Reactivation",
+        "status": "DETECTED",
+        "reason": "",
+        "source": "GMAIL_AM_REPORT"
+      },
+      {
+        "type": "Reactivation",
+        "status": "SUPPRESSED",
+        "reason": "HIGHER PRIORITY SIGNAL",
+        "source": "GMAIL_AM_REPORT"
+      },
+      {
+        "type": "Reactivation",
+        "status": "DETECTED",
+        "reason": "",
+        "source": "GMAIL_AM_REPORT"
+      },
+      {
+        "type": "Cross-Sell",
+        "status": "DETECTED",
+        "reason": "",
+        "source": "GMAIL_AM_REPORT"
+      },
+      {
+        "type": "Activation",
+        "status": "DETECTED",
+        "reason": "",
+        "source": "GMAIL_AM_REPORT"
+      },
+      {
+        "type": "Cross-Sell",
+        "status": "DETECTED",
+        "reason": "",
+        "source": "GMAIL_AM_REPORT"
+      }
+    ],
+    "rejections": [
+      {
+        "message": "QA-M1",
+        "sheet": "Retencion prioritaria",
+        "reason": "MISSING ACCOUNT (Cuenta)"
+      },
+      {
+        "message": "QA-M1",
+        "sheet": "Retencion prioritaria",
+        "reason": "MISSING AM OWNER"
+      },
+      {
+        "message": "QA-M3",
+        "sheet": "Retencion prioritaria",
+        "reason": "MISSING ACCOUNT (Cuenta)"
+      },
+      {
+        "message": "QA-M3",
+        "sheet": "Retencion prioritaria",
+        "reason": "MISSING AM OWNER"
+      }
+    ],
+    "labels": {
+      "QA-M1": [
+        "AURA/AM-REPORTS",
+        "AURA/PROCESSED"
+      ],
+      "QA-SPOOF": [],
+      "QA-EXT": [],
+      "QA-NOTREPORT": [],
+      "QA-M2": [
+        "AURA/AM-REPORTS",
+        "AURA/PROCESSED"
+      ],
+      "QA-M3": [
+        "AURA/AM-REPORTS",
+        "AURA/PROCESSED"
+      ]
+    },
+    "conversionsAfterDup": 2,
+    "idleLogReads": 0,
+    "audit": {
+      "written": {
+        "AURA_AGENT_MEMORY": 6,
+        "AURA_AGENT_RUNS": 6,
+        "MKT_AURA_GMAIL_OPPORTUNITIES": 2,
+        "MKT_AURA_INGEST_REJECTIONS": 2,
+        "MKT_AURA_INGEST_LOG": 4,
+        "MKT_OPPORTUNITIES": 2,
+        "AURA_AGENT_EVENTS": 2,
+        "AURA_AGENT_DECISIONS": 2,
+        "AURA_AGENT_ACTIONS": 2,
+        "AURA_AGENT_APPROVALS": 1,
+        "AURA_AGENT_TASKS": 5,
+        "AURA_AGENT_METRICS": 2
+      },
+      "external": {
+        "gmailSend": 0,
+        "gmailDraft": 0,
+        "mailApp": 0,
+        "urlFetch": 0
+      },
+      "driveConversions": 3,
+      "ingestLogReads": 3,
+      "tickLog": [
+        {
+          "at": "2026-10-12T08:38:00.000Z",
+          "handler": "auraAgentTick",
+          "status": "COMPLETED",
+          "run": {
+            "created": 0,
+            "advanced": 0
+          }
+        },
+        {
+          "at": "2026-10-12T09:10:00.000Z",
+          "handler": "auraReportIntakeTick",
+          "status": "OK",
+          "ingest": {
+            "processed": 2,
+            "ok": 1,
+            "duplicates": 0,
+            "notReports": 1,
+            "untrusted": 1
+          },
+          "refresh": "REPORT_SOURCE_SYNCED"
+        },
+        {
+          "at": "2026-10-12T09:38:00.000Z",
+          "handler": "auraAgentTick",
+          "status": "COMPLETED",
+          "run": {
+            "created": 4,
+            "advanced": 24
+          }
+        },
+        {
+          "at": "2026-10-12T10:10:00.000Z",
+          "handler": "auraReportIntakeTick",
+          "status": "OK",
+          "ingest": {
+            "processed": 1,
+            "ok": 0,
+            "duplicates": 1,
+            "notReports": 0,
+            "untrusted": 1
+          }
+        },
+        {
+          "at": "2026-10-12T10:38:00.000Z",
+          "handler": "auraAgentTick",
+          "status": "COMPLETED",
+          "run": {
+            "created": 0,
+            "advanced": 0
+          }
+        },
+        {
+          "at": "2026-10-12T11:10:00.000Z",
+          "handler": "auraReportIntakeTick",
+          "status": "OK",
+          "ingest": {
+            "processed": 0,
+            "ok": 0,
+            "duplicates": 0,
+            "notReports": 0,
+            "untrusted": 1
+          }
+        },
+        {
+          "at": "2026-10-12T11:38:00.000Z",
+          "handler": "auraAgentTick",
+          "status": "COMPLETED",
+          "run": {
+            "created": 0,
+            "advanced": 0
+          }
+        },
+        {
+          "at": "2026-10-12T12:38:00.000Z",
+          "handler": "auraAgentTick",
+          "status": "COMPLETED",
+          "run": {
+            "created": 0,
+            "advanced": 0
+          }
+        },
+        {
+          "at": "2026-10-12T13:10:00.000Z",
+          "handler": "auraReportIntakeTick",
+          "status": "OK",
+          "ingest": {
+            "processed": 1,
+            "ok": 1,
+            "duplicates": 0,
+            "notReports": 0,
+            "untrusted": 1
+          },
+          "refresh": "REPORT_SOURCE_SYNCED"
+        },
+        {
+          "at": "2026-10-12T13:38:00.000Z",
+          "handler": "auraAgentTick",
+          "status": "COMPLETED",
+          "run": {
+            "created": 1,
+            "advanced": 12
+          }
+        }
+      ],
+      "handler": ""
+    },
+    "queueUnchanged": true,
+    "sendMode": "DRY_RUN",
+    "tablesWritten": [
+      "AURA_AGENT_ACTIONS",
+      "AURA_AGENT_APPROVALS",
+      "AURA_AGENT_DECISIONS",
+      "AURA_AGENT_EVENTS",
+      "AURA_AGENT_MEMORY",
+      "AURA_AGENT_METRICS",
+      "AURA_AGENT_RUNS",
+      "AURA_AGENT_TASKS",
+      "MKT_AURA_GMAIL_OPPORTUNITIES",
+      "MKT_AURA_INGEST_LOG",
+      "MKT_AURA_INGEST_REJECTIONS",
+      "MKT_OPPORTUNITIES"
+    ]
+  }
+}
