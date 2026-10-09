@@ -13,7 +13,14 @@
     retention: {}, campanaA: { realSendsDetected: 323 }, execution: { records: [] }, latestRun: null };
   Object.assign(A, { isConnected: () => true, getConnectionState: () => ({ state: "PRIVATE_BACKEND", mode: "PRIVATE_BACKEND", connected: true }),
     v6Opportunities: async () => ({ status: "READY", groups, summary: { totalSignals: 345, eligibleAccounts: 345 } }), v6PipelineSummary: async () => ({}),
-    v6AuraCommandCenter: async () => bundle, campaignStudioList: async () => ({ campaigns: [{ campaignId: "CMP-CAMPANA-A-HA-PRIORITARIA", campaignName: "Campaña A · HA prioritaria", campaignType: "Reactivation", service: "Multiservicio", status: "ACTIVE" }] }) });
+    v6AuraCommandCenter: async () => bundle,
+    // Synthetic Campaign Studio context (no backend call from the QA page).
+    campaignStudioContext: async campaignId => ({ campaignId, campaignName: "Campaña A · HA prioritaria (QA)", campaignType: "Reactivation", objective: "Reactivation", service: "Multiservicio", messageAngle: "", status: "ACTIVE",
+      requiredLanguages: ["ES", "EN"], approvedCreativeVariants: {}, missingCreativeVariants: ["ES", "EN"], creativeSetStatus: "PENDING", approvalStatus: "PENDING", audienceResolved: true, testDraftReviewRequired: false, missingTestDrafts: [], approvedCreatives: {} }),
+    getLatestApprovedCreative: async () => null,
+    // Synthetic approvals: recorded in memory only; the next Command Center read reflects them.
+    agentDecide: async (approvalId, decision) => { bundle.agent.waitingApproval = bundle.agent.waitingApproval.filter(t => t.approvalId !== approvalId); bundle.agent.priorities = bundle.agent.priorities.filter(t => t.approvalId !== approvalId); bundle.agent.opportunities = bundle.agent.opportunities.map(t => t.approvalId === approvalId ? Object.assign({}, t, { approvalStatus: decision, state: decision === "APPROVED" ? "BLOCKED" : "CANCELLED", blockReason: decision === "APPROVED" ? "EXTERNAL_EXECUTION_DISABLED_PHASE_V1" : "" }) : t); g.__qaDecisions = (g.__qaDecisions || []).concat([{ approvalId, decision }]); return { status: "RECORDED" }; },
+    agentRunNow: async () => ({ status: "COMPLETED" }), campaignStudioList: async () => ({ campaigns: [{ campaignId: "CMP-CAMPANA-A-HA-PRIORITARIA", campaignName: "Campaña A · HA prioritaria", campaignType: "Reactivation", service: "Multiservicio", status: "ACTIVE" }] }) });
 })(window);
 
 document.addEventListener("DOMContentLoaded", () => { const b = document.createElement("div"); b.className = "gos-fixture-banner"; b.textContent = "DATOS DE PRUEBA — esta página usa un fixture de QA, no datos reales. Para datos reales use /growth/ y conecte el backend."; b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;padding:6px 12px;background:#F5B544;color:#2A1A00;font:700 12px Inter,sans-serif;text-align:center"; document.body.appendChild(b); document.body.style.paddingTop = "28px"; });

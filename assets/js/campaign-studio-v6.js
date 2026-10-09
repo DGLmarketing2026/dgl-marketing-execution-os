@@ -14,7 +14,7 @@ function objectiveOf(context){return Lib().normalizeObjective(context.objective|
 function selectionFor(context){return Render().selection({objective:objectiveOf(context),service:context.service,angle:context.messageAngle});}
 function autoSystem(context){return selectionFor(context).systemId;}
 function validSystem(id){return !!(id&&Lib().CREATIVE_SYSTEMS[id]);}
-let model=null,mount=null,epoch=0;
+let model=null,mount=null,epoch=0,inFlight=0;
 function navigationId(){
   const q=new URLSearchParams((g.location.hash||"").split("?")[1]||"");
   if(q.has("campaignId"))return q.get("campaignId")||"";
@@ -259,7 +259,7 @@ function preview(){
   const status=mount.querySelector("[data-variant-status]");if(status)status.textContent=variantStatus(model.variants[model.language]);
 }
 async function render(container,explicitId){
-  mount=container;ensureStyles();const ticket=++epoch,id=explicitId===undefined?navigationId():explicitId;model=null;
+  mount=container;ensureStyles();const ticket=++epoch,id=explicitId===undefined?navigationId():explicitId;model=null;inFlight++;
   container.innerHTML='<div class="cs6"><div class="cs6-head"><div><div class="cs6-eyebrow">GOVERNED CAMPAIGN STUDIO</div><h2>'+(id?'Loading campaign…':'Select a campaign')+'</h2></div></div><p class="cs6-muted">Loading private backend…</p></div>';
   try{
     if(!api()?.isConnected?.())throw Error("Connect the private backend to open Campaign Studio.");
@@ -295,8 +295,13 @@ async function render(container,explicitId){
     draw();
     listWarm.then(()=>{});
   }catch(e){if(ticket===epoch)container.innerHTML='<div class="cs6"><div class="cs6-head"><div><div class="cs6-eyebrow">GOVERNED CAMPAIGN STUDIO</div><h2>Select a campaign</h2></div></div><p class="cs6-alert" role="alert">'+E(e.message)+'</p></div>';}
+  finally{inFlight--;}
 }
 g.DGL_CAMPAIGN_STUDIO_V6={version:"governed-premium-v4",previewHtml,filterCampaigns,normalizeCampaign,loadCampaignList,openCampaign,INTAKE_QUESTION,INTAKE_OPTIONS,autoSystem,render,createModel,canApproveSet,variantStatus,selectLanguage,editCopy,changeLayout,emailHtml,validateBrand,navigationId,getState:()=>model};
 g.DGL_MODULE_RENDERERS=g.DGL_MODULE_RENDERERS||{};g.DGL_MODULE_RENDERERS["campaign-studio"]=render;
-g.addEventListener?.("dgl:v55-backend-change",()=>{if(g.location?.hash.includes("campaign-studio")&&!model&&mount)render(mount);});
+// Re-render only when the backend actually becomes connected, never while a render is in flight.
+// A failing context call emits a backend-change event from inside the render; re-rendering on that
+// event re-issued the same failing call in a synchronous promise chain and froze the page.
+let lastBackendState=null;
+g.addEventListener?.("dgl:v55-backend-change",e=>{const s=e?.detail?.state||"";const becameConnected=s==="PRIVATE_BACKEND"&&lastBackendState!=="PRIVATE_BACKEND";lastBackendState=s;if(!becameConnected||inFlight)return;if(g.location?.hash.includes("campaign-studio")&&!model&&mount)render(mount);});
 })(window);
