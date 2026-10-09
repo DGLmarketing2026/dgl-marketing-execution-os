@@ -58,6 +58,15 @@
   ] };
   const ALL = SPACES.concat([ADMIN]);
   const NEW_VIEWS = { inicio: renderInicio, admin: renderAdmin };
+  // Where each view's content comes from — shown to the user so reference/example content is never
+  // mistaken for live business data.
+  //   live      = private backend data (requires "Conectar datos")
+  //   reference = policy/configuration text, no business data
+  //   example   = illustrative content of a capability not operating yet
+  const VIEW_SOURCE = { "governance": "reference", "account-360": "reference", "content-library": "reference", "agent-control": "example", "admin": "reference" };
+  const SOURCE_LABEL = { live: "Datos del backend privado", reference: "Referencia · sin datos en vivo", example: "Contenido de ejemplo · capacidad pendiente" };
+  const sourceOf = id => VIEW_SOURCE[id] || "live";
+  const viewResults = {}; // session-only render results (memory, never browser storage)
   const LEGACY_IDS = [].concat(...ALL.map(s => s.tabs.map(t => t.id))).filter(id => !NEW_VIEWS[id]);
 
   const esc = v => String(v == null ? "" : v).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -78,7 +87,7 @@
       </aside>
       <div class="gos-main">
         <header class="gos-top">
-          <div class="gos-title"><span class="gos-eyebrow" id="gosEyebrow"></span><h1 id="gosTitle"></h1></div>
+          <div class="gos-title"><span class="gos-eyebrow" id="gosEyebrow"></span><h1 id="gosTitle"></h1><span class="gos-source" id="gosSource"></span></div>
           <div class="gos-top-actions">
             <span class="gos-conn" id="gosConn"></span>
             <a class="gos-btn gos-btn-ghost" href="../index.html" title="Abrir la versión actual de Marketing OS">Versión actual</a>
@@ -103,6 +112,7 @@
 
   function connHtml() {
     const st = (adapter() && adapter().getConnectionState && adapter().getConnectionState()) || {};
+    if (global.DGL_GROWTH_QA_FIXTURE) return `<span class="gos-pill gos-pill-qa"><i></i>Datos de prueba (QA)</span>`;
     if (connected()) return `<span class="gos-pill gos-pill-ok"><i></i>Datos en vivo</span>`;
     if (st.state === "CONNECTING") return `<span class="gos-pill"><i></i>Conectando…</span>`;
     return `<button class="gos-btn gos-btn-primary" data-gos-connect>Conectar datos</button>`;
@@ -119,6 +129,8 @@
     document.getElementById("gosTabs").innerHTML = tabsHtml(space, id);
     document.getElementById("gosTabs").hidden = space.tabs.length < 2;
     document.getElementById("gosConn").innerHTML = connHtml();
+    const src = sourceOf(id), live = connected();
+    document.getElementById("gosSource").innerHTML = `<i class="gos-dot gos-dot-${src === "live" ? (live ? "ok" : "idle") : src}"></i>${global.DGL_GROWTH_QA_FIXTURE && src === "live" ? "Datos de prueba (QA) · no reales" : src === "live" && !live ? "Requiere conectar datos" : SOURCE_LABEL[src]}`;
     const mount = document.getElementById("mainContent");
     mount.dataset.view = id;
     mount.innerHTML = `<div class="gos-skeleton" aria-busy="true"><div></div><div></div><div></div></div>`;
@@ -126,8 +138,8 @@
     try {
       const r = run ? run(mount) : null;
       if (!run) mount.innerHTML = emptyState("Vista no disponible", "Este módulo no está cargado en esta vista previa.");
-      Promise.resolve(r).catch(err => { mount.innerHTML = emptyState("No se pudo cargar esta vista", err && err.message); }).then(icons);
-    } catch (err) { mount.innerHTML = emptyState("No se pudo cargar esta vista", err && err.message); }
+      Promise.resolve(r).then(() => { viewResults[id] = { ok: !!run, connected: live, at: new Date() }; }, err => { viewResults[id] = { ok: false, connected: live, error: String(err && err.message || err), at: new Date() }; mount.innerHTML = emptyState("No se pudo cargar esta vista", err && err.message); }).then(icons);
+    } catch (err) { viewResults[id] = { ok: false, connected: live, error: String(err && err.message || err), at: new Date() }; mount.innerHTML = emptyState("No se pudo cargar esta vista", err && err.message); }
     icons();
   }
   function icons() { if (global.lucide && global.lucide.createIcons) global.lucide.createIcons(); }
@@ -175,12 +187,24 @@
   }
 
   // ---- Administración: technical diagnostics kept out of the daily experience.
+  // Read-only smoke test: renders every view once in this session and reports what loaded.
+  async function checkAllViews() {
+    const ids = [].concat(...SPACES.map(s => s.tabs.map(t => t.id))).concat(ADMIN.tabs.map(t => t.id).filter(id => id !== "admin"));
+    for (const id of ids) { global.location.hash = "#/" + id; await new Promise(r => setTimeout(r, 1500)); }
+    global.location.hash = "#/admin";
+  }
+  function viewStatusTable() {
+    const all = SPACES.concat([ADMIN]);
+    return `<table class="gos-table gos-table-status"><thead><tr><th>Espacio</th><th>Vista</th><th>Origen</th><th>Comprobación en esta sesión</th></tr></thead><tbody>${all.map(sp => sp.tabs.filter(t => t.id !== "admin").map(t => { const r = viewResults[t.id], src = sourceOf(t.id); return `<tr><td>${esc(sp.label)}</td><td><a href="#/${t.id}">${esc(t.label)}</a></td><td><span class="gos-tag gos-tag-${src}">${esc(SOURCE_LABEL[src])}</span></td><td>${r ? (r.ok ? (src === "live" ? (r.connected ? "Cargó con datos en vivo" : "Cargó sin conexión (pide conectar)") : "Cargó") : "Error: " + esc(r.error || "")) : "Sin comprobar"}</td></tr>`; }).join("")).join("")}</tbody></table>`;
+  }
   function renderAdmin(mount) {
     const ad = adapter(), st = (ad && ad.getConnectionState && ad.getConnectionState()) || {}, diag = global.DGL_BACKEND_DIAGNOSTIC || {}, m = (ad && ad.getRequestMetrics && ad.getRequestMetrics()) || {};
     const rows = [["Estado de conexión", st.state || "—"], ["Modo", st.mode || "—"], ["Requests en esta sesión", m.requests], ["Lecturas desde caché", m.cacheHits], ["Requests deduplicados", m.dedupeHits]].concat(Object.keys(diag).map(k => [k, diag[k]]));
     mount.innerHTML = `<section class="gos-panel"><div class="gos-panel-head"><h3>Diagnóstico de la plataforma</h3></div>
       <table class="gos-table"><tbody>${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v == null || v === "" ? "—" : v)}</td></tr>`).join("")}</tbody></table>
       <p class="gos-muted">Solo lectura. La configuración de backend, triggers y Script Properties se gestiona en Apps Script; este espacio no ejecuta cambios.</p></section>
+      <section class="gos-panel"><div class="gos-panel-head"><h3>Estado de las vistas</h3><button class="gos-btn gos-btn-ghost gos-btn-sm" data-gos-check>Comprobar todas las vistas</button></div>
+      <p class="gos-muted">Abre cada vista una vez (solo lectura) y registra si cargó. Conecta los datos antes para comprobarlas con información real.</p>${viewStatusTable()}</section>
       ${(m.last || []).length ? `<section class="gos-panel"><div class="gos-panel-head"><h3>Últimas llamadas al backend</h3></div><table class="gos-table"><thead><tr><th>Acción</th><th>ms</th><th>OK</th></tr></thead><tbody>${m.last.map(r => `<tr><td>${esc(r.action)}</td><td>${fmt(r.ms)}</td><td>${r.ok ? "Sí" : "No"}</td></tr>`).join("")}</tbody></table></section>` : ""}`;
   }
 
@@ -191,6 +215,7 @@
       global.addEventListener("dgl:v55-backend-change", () => { const c = document.getElementById("gosConn"); if (c) c.innerHTML = connHtml(); if (routeId() === "inicio" || routeId() === "admin") render(); icons(); });
       document.addEventListener("click", async e => {
         if (e.target.closest("[data-gos-connect]")) { try { await adapter().connect(); } catch (_) {} render(); }
+        if (e.target.closest("[data-gos-check]")) checkAllViews();
       });
       if (!global.location.hash) global.location.replace("#/inicio");
       render();
@@ -199,6 +224,6 @@
       if (global.__dglBootFail) global.__dglBootFail("Error al iniciar Growth OS: " + (err && err.message ? err.message : err));
     }
   }
-  global.DGL_GROWTH_OS = { SPACES, ADMIN, LEGACY_IDS, spaceFor, routeId };
+  global.DGL_GROWTH_OS = { SPACES, ADMIN, LEGACY_IDS, spaceFor, routeId, sourceOf, viewResults };
   document.addEventListener("DOMContentLoaded", init);
 })(window);

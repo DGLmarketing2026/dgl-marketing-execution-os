@@ -135,3 +135,18 @@ body { font-family: Inter, -apple-system, "Segoe UI", sans-serif; color: var(--t
   .quick-actions-fab, .bottom-nav { display: none !important; }
 }
 @media (max-width: 420px) { .gos-grid-4 { grid-template-columns: 1fr 1fr; gap: 10px; } .gos-card { padding: 14px; } .gos-card strong { font-size: 24px; } }
+
+/* Data-source honesty: every view states where its content comes from. */
+.gos-source { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11.5px; color: var(--text-secondary); }
+.gos-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.gos-dot-ok { background: var(--secondary); }
+.gos-dot-reference { background: #7DB7FF; }
+.gos-dot-example { background: #F5B544; }
+.gos-tag { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; background: rgba(255,255,255,.06); color: var(--text-secondary); }
+.gos-tag-live { color: #CFF5A4; background: rgba(119,184,42,.14); }
+.gos-tag-reference { color: #BFDBFF; background: rgba(125,183,255,.14); }
+.gos-tag-example { color: #FAD58A; background: rgba(245,181,68,.14); }
+.gos-table-status th { width: auto; }
+.gos-table-status a { color: #fff; }
+@media (max-width: 860px) { .gos-table-status { font-size: 12px; } .gos-table-status th:first-child, .gos-table-status td:first-child { display: none; } }
+.gos-pill-qa { color: #FAD58A; } .gos-pill-qa i { background: #F5B544; }

@@ -2,6 +2,7 @@
 // Shapes mirror real backend responses; values are aggregate counts from the 2026-10-07 shadow
 // run (no customer names, emails or accounts).
 (function (g) {
+  g.DGL_GROWTH_QA_FIXTURE = true;
   const A = g.DGL_MARKETING_BACKEND_ADAPTER_V55; if (!A) return;
   const sc = o => Object.assign({ sent: 0, delivered: 0, bounced: 0, failed: 0, replied: 0, opened: null, clicked: null, openRate: null, ctr: null, ctor: null }, o);
   const groups = [["QNB", 243], ["Retention", 66], ["Reactivation", 19], ["Cross-sell", 17]].map(([t, n], i) => ({ groupId: "G" + i, amOwner: "AM " + (i + 1), opportunityType: t, service: ["FTL", "LTL", "Drayage", "Multiservicio"][i], window: "", eligibleAccounts: n, detectedAccounts: n, suppressedAccounts: 0, priority: i + 1, campaignStatus: "OPPORTUNITY DETECTED", nextAction: "Evaluate campaign eligibility" }));
@@ -14,3 +15,5 @@
     v6Opportunities: async () => ({ status: "READY", groups, summary: { totalSignals: 345, eligibleAccounts: 345 } }), v6PipelineSummary: async () => ({}),
     v6AuraCommandCenter: async () => bundle, campaignStudioList: async () => ({ campaigns: [{ campaignId: "CMP-CAMPANA-A-HA-PRIORITARIA", campaignName: "Campaña A · HA prioritaria", campaignType: "Reactivation", service: "Multiservicio", status: "ACTIVE" }] }) });
 })(window);
+
+document.addEventListener("DOMContentLoaded", () => { const b = document.createElement("div"); b.className = "gos-fixture-banner"; b.textContent = "DATOS DE PRUEBA — esta página usa un fixture de QA, no datos reales. Para datos reales use /growth/ y conecte el backend."; b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;padding:6px 12px;background:#F5B544;color:#2A1A00;font:700 12px Inter,sans-serif;text-align:center"; document.body.appendChild(b); document.body.style.paddingTop = "28px"; });
