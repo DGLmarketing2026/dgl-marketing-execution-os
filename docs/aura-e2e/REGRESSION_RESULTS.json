@@ -1,0 +1,402 @@
+[
+  {
+    "file": "acquisition-automation-v2-static.test.js",
+    "pass": true,
+    "output": "PASS acquisition-automation-v2-static 14 checks"
+  },
+  {
+    "file": "acquisition-backend-multilingual.test.js",
+    "pass": true,
+    "output": "PASS: production generates the English-only landing variant, all fields populated\nPASS: Brazil/LATAM signals still generate exactly the English variant, correctly marked default\nPASS: signal + language idempotency holds across repeated scheduler runs\nPASS: multilingual capability preserved internally (MKT_V6_ACQ_LANGUAGES_ALL) while production scope is English-only (MKT_V6_ACQ_LANGUAGES)\nPASS: market routing defaults (USA/International->EN, LATAM->ES, Brazil->PT-BR)\nPASS: EN/ES/PT-BR landing content is real per-language copy with SEO metadata, no literal 53' in pt-BR\nPASS: no absolute capacity/time-guarantee phrases in generated copy\nPASS: no invented New Business owner when Salesforce has not returned one\nPASS: no PII or hardcoded lead fixtures in the acquisition engine source\nAcquisition backend multilingual: ALL PASS"
+  },
+  {
+    "file": "acquisition-frontend-multilingual.test.js",
+    "pass": true,
+    "output": "PASS: acquisition script load order is Automation V2 -> Multilingual V4 -> Visual V3\nPASS: FTL/LTL/Drayage headlines match the canonical EN/ES/PT-BR copy exactly in both landing and creative content\nPASS: every service generates all 3 languages with every required landing and creative field populated\nPASS: frontend market routing (USA/International->EN, LATAM->ES, Brazil->PT-BR)\nPASS: no absolute capacity/time-guarantee phrases in the frontend multilingual module\nPASS: pt-BR FTL copy uses natural Brazilian trucking terminology (\"pés\") instead of a literal translation\nPASS: FTL/LTL/Drayage map to their real design system and a real, existing repository asset\nPASS: acquisition visual layer never invents a New Business owner name\nPASS: no PII in the frontend acquisition multilingual/visual modules\nAcquisition frontend multilingual: ALL PASS"
+  },
+  {
+    "file": "acquisition-landing-report.test.js",
+    "pass": true,
+    "output": "PASS: landing report has the exact requested fields, real lead counts, honest blanks for visits/conversion rate\nPASS: landing report CSV archives automatically to Drive, no manual export required\nPASS: landing report archive falls back to the shared results archive folder when no dedicated folder is configured\nPASS: router exposes v6AcqLandingReport\nAcquisition automatic landing report: ALL PASS"
+  },
+  {
+    "file": "acquisition-public-runtime.test.js",
+    "pass": true,
+    "output": "PASS: EN real landing renders full design + language switch + SEO metadata\nPASS: ES real landing renders its own localized content\nPASS: PT-BR real landing renders native Portuguese content with no Spanish fallback\nPASS: public form submission appends to the private Data Hub only, with the honeypot untouched\nPASS: honeypot still blocks bot submissions after the redesign\nAcquisition public runtime: ALL PASS"
+  },
+  {
+    "file": "acquisition-wordpress-automation.test.js",
+    "pass": true,
+    "output": "PASS: bimonthly cycle math (Sep->Nov->Jan->Mar->May->Jul, 2 months each)\nPASS: the hourly heartbeat never opens the same cycle twice\nPASS: WordPress publisher upserts by campaign+service+language, never duplicates a page\nPASS: production publishes only the English WordPress page variant, even for a non-English market signal\nPASS: automated WordPress QA produced a recorded result (FAIL)\nPASS: QA WordPress page variant(s) created private + noindex, matching the active (English-only) language policy\nPASS: the synthetic QA lead is isolated to MKT_ACQ_QA_LEADS, never reaches MKT_ACQ_LEADS, and is cleaned up after the run\nPASS: QA leads never trigger Salesforce routing, even when a Salesforce endpoint is configured\nPASS: closing a cycle persists a CLOSED result record and archives a CSV automatically\nPASS: no PII in the new WordPress automation source files\nPASS: WordPress credentials are never referenced or embedded in any frontend file\nPASS: GA4 connector contract never fabricates traffic/conversion data\nAcquisition WordPress automation: ALL PASS"
+  },
+  {
+    "file": "aura-agent-datahub-performance.test.js",
+    "pass": true,
+    "output": "  opens=1 fullReads={\"AURA_AGENT_RUNS\":1,\"AURA_AGENT_TASKS\":1,\"AURA_AGENT_DECISIONS\":1,\"AURA_AGENT_ACTIONS\":1,\"AURA_AGENT_APPROVALS\":1,\"AURA_AGENT_EVENTS\":1,\"AURA_AGENT_MEMORY\":1,\"AURA_AGENT_METRICS\":1,\"MKT_EMAIL_EVENTS\":1,\"MKT_RESPONSES\":1,\"MKT_CAMPAIGNS\":1,\"MKT_CONTACTS_SECURE\":1,\"MKT_ACCOUNTS\":1,\"MKT_OPPORTUNITIES\":1} rangeReads={\"MKT_EMAIL_QUEUE\":2} htmlBodyReads=0 writes={\"AURA_AGENT_RUNS\":2,\"AURA_AGENT_TASKS\":2,\"AURA_AGENT_DECISIONS\":2,\"AURA_AGENT_ACTIONS\":2,\"AURA_AGENT_APPROVALS\":2,\"AURA_AGENT_EVENTS\":2,\"AURA_AGENT_MEMORY\":2,\"AURA_AGENT_METRICS\":2}\nPASS agent cycle completes against the Data Hub fake\nPASS Data Hub opened exactly once per cycle\nPASS each table fully read at most once (no reads inside loops)\nPASS MKT_EMAIL_QUEUE read without the heavy htmlBody column\nPASS no queue writes; Campaign A 214 + Retention 109 SENT rows unchanged\nPASS no external actions; send mode untouched\nPASS tasks and decisions persisted\n  API path: opens=0 apiCalls=[\"get\",\"batchGet\",\"batchGet\",\"batchUpdate\",\"values.batchUpdate\"] htmlBodyReads=0 writes={\"AURA_AGENT_EVENTS\":1,\"AURA_AGENT_DECISIONS\":1,\"AURA_AGENT_ACTIONS\":1,\"AURA_AGENT_METRICS\":1,\"AURA_AGENT_TASKS\":1,\"AURA_AGENT_APPROVALS\":1,\"AURA_AGENT_MEMORY\":1,\"AURA_AGENT_RUNS\":1}\nPASS Sheets API path completes with ZERO SpreadsheetApp opens\nPASS one metadata call, one header batchGet, one data batchGet, one structure + one values write\nPASS API path: no htmlBody, no queue writes, Campaign A unchanged\nPASS agent tables written through the API; run records dataPath SHEETS_API\nPASS API failure fails closed (no partial writes)\n12/12 agent Data Hub performance checks passed"
+  },
+  {
+    "file": "aura-agent-intelligence.test.js",
+    "pass": true,
+    "output": "PASS command model understands the target instructions (EN + ES)\nPASS campaign preparation is AUTO and governed: audience, language, creative, exclusions — counts only\nPASS a DNC or invalid flag on any row blocks that exact email everywhere (duplicate rows cannot bypass)\nPASS server playbook mirrors the frontend creative library selection\nPASS \"Run the next reactivation campaign\": prepared before approval, ONE approval, no send in V1\nPASS decision ledger records observed, source, decision, why, priority, plan, approval, execution, metric, next action\nPASS not-connected channels are reported honestly; external publishing stays gated\nPASS monthly report and today priorities are AUTO and persisted\nPASS Campaign A stays closed: recent-send protection and outbound policy\nPASS command endpoint is allow-listed, audited and routed; UI exposes the command bar\n10/10 agent intelligence checks passed"
+  },
+  {
+    "file": "aura-agent-runtime.test.js",
+    "pass": true,
+    "output": "PASS lifecycle transitions are validated\nPASS approval policy: unknown BLOCKED, external never AUTO, Campaign A outbound BLOCKED\nPASS channel adapters expose PREPARE/PREVIEW/EXECUTE/VERIFY/MEASURE and never execute external actions\nPASS AUTO task runs the full lifecycle unattended and logs every transition\nPASS cycle is idempotent: a repeated tick creates no duplicate tasks or approvals\nPASS approval gate: approved campaign runs internal steps, external send stays blocked (no email)\nPASS rejected approval cancels the task\nPASS failure recovery: transient error retries on the next tick, persistent error blocks after max attempts\nPASS concurrent tick is skipped while a lease is held\nPASS measurement writes scoped campaign metrics; Campaign A gets no outbound task\nPASS trigger activation is explicit and idempotent; command center groups tasks\nPASS runtime source never sends, publishes or touches send mode / SENT history\nPASS transient Sheets timeouts are retried with backoff; the cycle completes without duplicates\nPASS Gmail DSN ingestion is not duplicated when its dedicated trigger exists\n14/14 agent runtime checks passed"
+  },
+  {
+    "file": "aura-agent-shadow.test.js",
+    "pass": true,
+    "output": "PASS activation keeps ONE trigger, runs one tick, proves no queue/SENT change\nPASS re-activation is idempotent (no duplicate trigger)\nPASS hourly ticks append a compact audit line\nPASS aborts without changes when AURA_SEND_MODE is LIVE\nPASS a failed controlled cycle leaves NO hourly trigger\nPASS a failed hourly tick pauses the runtime\nPASS shadow tooling never sends, publishes, writes the queue or changes send mode\n7/7 shadow checks passed"
+  },
+  {
+    "file": "aura-automation-tick.test.js",
+    "pass": true,
+    "output": "aura automation test 1 (one tick builds all four families automatically): PASS\naura automation test 2 (tick is idempotent — no duplicate campaigns/executions/report rows on re-run): PASS\naura automation test 3 (safe terminal state: READY TO SEND / SEND PROVIDER REQUIRED, never an actual send, email fully archived): PASS\naura automation test 3b (server-side email generation reuses the real Campaign Studio copy strategy, all 4 families, archived as real HTML): PASS\naura automation test 4 (pipeline-derived metrics are real and campaign-scoped, never fabricated or leaked): PASS\naura automation test 5 (automatic per-owner + consolidated CSV, archived without manual export): PASS\naura automation test 6 (router exposes v6AuraAutomationTick): PASS\naura automation test 7 (the existing hourly Acquisition heartbeat also calls AURA -- one trigger, not two): PASS\nAURA automatic campaign execution tick: ALL PASS"
+  },
+  {
+    "file": "aura-campaign-execution-final.test.js",
+    "pass": true,
+    "output": "aura-campaign-execution-final: structural fixture (no duplicates): 227 data / 224 contact / 224 email / 3 unsendable, no whole-run failure: PASS\naura-campaign-execution-final: source validation is structural, never a hardcoded count: PASS\naura-campaign-execution-final: exact normalized email is the only dedupe: repeated mailbox sends once, distinct emails all receive: PASS\naura-campaign-execution-final: verified live source facts: 227 / 224 / 224 / 221 unique / 3 duplicate extra / 3 unsendable, no whole-run failure: PASS\naura-campaign-execution-final: real failure RUN-CAMPANA-A-87C2A811: stale pre-PR14 Activation jobs are refreshed, SENT and history untouched: PASS\naura-campaign-execution-final: read-only live source stats runner parses the real tab layout (231 physical rows): PASS\naura-campaign-execution-final: same-account contacts stay independent recipients (no collapse by account/domain/company): PASS\naura-campaign-execution-final: CLOSED account does not automatically suppress an explicit source contact: PASS\naura-campaign-execution-final: SUPPRESSED account does not automatically suppress an explicit source contact: PASS\naura-campaign-execution-final: OWNER REQUIRED account does not automatically suppress an explicit source contact: PASS\naura-campaign-execution-final: frequency control is contact-level: PASS\naura-campaign-execution-final: true DNC blocked: PASS\naura-campaign-execution-final: invalid email blocked: PASS\naura-campaign-execution-final: hard bounce blocked: PASS\naura-campaign-execution-final: duplicate source rows for the same contact are excluded, never double-queued: PASS\naura-campaign-execution-final: cross-family Retention/Activation is not duplicate; same-family duplicate detection still works: PASS\naura-campaign-execution-final: historical 109 SENT preserved byte-for-byte and repeated DRY_RUN build is idempotent: PASS\naura-campaign-execution-final: Activation never inherits Reactivation copy (intake names, all languages, fail-closed): PASS\naura-campaign-execution-final: premium V5 visual systems work in governed V6 (no generic renderer regression): PASS\naura-campaign-execution-final: automatic design selection uses the whole library by objective + campaignType + service + angle: PASS\naura-campaign-execution-final: the single intake question; the backend never fixes a design: PASS\naura-campaign-execution-final: automatic language per contact (EN / ES / PT): PASS\naura-campaign-execution-final: PREVIEW = GOVERNED = TEST DRAFT = DRY_RUN = DISPATCH HTML (checksums fail closed): PASS\naura-campaign-execution-final: real emails sent by this suite: 0 (fake transport only, DRY_RUN default): PASS\naura-campaign-execution-final: legacy generic creative shown as legacy, never overwritten: PASS\naura-campaign-execution-final: ALL 25 PASS"
+  },
+  {
+    "file": "aura-command-center-frontend.test.js",
+    "pass": true,
+    "output": "PASS connect = ONE bootstrap request; datasets applied; failed part degrades only itself\nPASS older backend without bootstrap falls back to the previous connect path\nPASS bootstrap auth rejection clears the token and reports AUTH_ERROR\nPASS cached reads, in-flight dedupe, force and write invalidation\nPASS post-mutation refresh is ONE bootstrap request (was 5, then 3)\nPASS Command Center loads in ONE request and renders scoped KPIs and approval controls\nPASS older backend without the bundle falls back to the previous per-report calls\n7/7 command center frontend checks passed"
+  },
+  {
+    "file": "aura-command-center-performance.test.js",
+    "pass": true,
+    "output": "PASS memo reads each table once, returns independent row copies, invalidates on write\n  BEFORE reads=22 opens=22 requests=7 (2 waves) | AFTER reads=16 opens=1 requests=1\nPASS bundle vs previous Overview calls: fewer sheet reads, one spreadsheet open, one request\nPASS a failing section degrades without failing the bundle\nPASS bundle and agent endpoints are routed and allow-listed; bundle is read-only\n4/4 command center performance checks passed"
+  },
+  {
+    "file": "aura-e2e-report-intake.test.js",
+    "pass": true,
+    "output": "PASS [Programación] AURA instala sus propios triggers horarios y la prueba solo los dispara\nPASS [Detección] El reporte de un remitente interno verificado (que no está en la lista) se detecta en la bandeja de Marketing\nPASS [Detección] Los correos suplantados y externos nunca se abren\nPASS [Detección] Un Excel interno que no es un reporte se ignora\nPASS [Lectura del Excel] Se lee el XLSX real (6 pestañas) mediante la conversión\nPASS [Validación] Las filas sin cuenta o sin responsable se rechazan y registran\nPASS [Validación] No se crean oportunidades desde las pestañas de calidad de datos ni desconocidas\nPASS [Deduplicación] El mismo archivo reenviado da DUPLICATE_REPORT y no se vuelve a convertir\nPASS [Deduplicación] Una cuenta en dos familias pasa una sola vez a la cola (las demás se suprimen por prioridad)\nPASS [Deduplicación] En una hora sin correo nuevo la recepción no lee el Data Hub\nPASS [Interpretación] Tarea automática de análisis por reporte, con conteos y sin nombres\nPASS [Preparación] Planes de campaña Retention/Reactivation/Cross-Sell preparados automáticamente\nPASS [Preparación] Se aplican las exclusiones de gobernanza (DNC, email inválido, duplicado, envío reciente)\nPASS [Preparación] Idioma ES/EN/PT resuelto por contacto\nPASS [Aprobación pendiente] Una aprobación PENDING por familia y ninguna aprobada automáticamente\nPASS [Reporte actualizado] Un reporte más nuevo genera un análisis nuevo y recalcula el plan pendiente sin duplicar aprobaciones\nPASS [Seguridad] Ningún envío: Gmail, MailApp, borradores y llamadas HTTP en 0\nPASS [Seguridad] La cola de envío no cambió y AURA_SEND_MODE sigue en DRY_RUN\nPASS [Seguridad] Solo se escribió en tablas internas de AURA (nada de Salesforce, Clientify ni producción)\n19/19 AURA end-to-end report intake checks passed"
+  },
+  {
+    "file": "aura-email-performance-audit.test.js",
+    "pass": true,
+    "output": "PASS schema bootstrap, hourly trigger, durable paging/retry, BLOCKED contact eligibility/manual clear, unchanged mode, all six event dates"
+  },
+  {
+    "file": "aura-email-performance-ui.test.js",
+    "pass": true,
+    "output": "PASS UI render, actual KPI clicks, search events, filtered download, diagnostic preservation, no NaN"
+  },
+  {
+    "file": "aura-email-performance.test.js",
+    "pass": true,
+    "output": "PASS SENT and FAILED counts\nPASS OPEN and CLICK remain null without tracking\nPASS hard bounce invalidation and permanent exclusion\nPASS DSN idempotency\nPASS blocked does not invalidate or retry\nPASS soft bounce does not invalidate\nPASS ambiguous DSN does not misattribute\nPASS reply tied to campaign and recipient\nPASS KPI filtering sent and failed\nPASS search and campaign/status/date filters\nPASS UTF8 CSV includes only filtered rows and NOT_TRACKED\nPASS CSV formula injection and quoting\nPASS no NaN or fabricated delivery/open/click\nPASS private endpoint allowlist and router\nPASS governed events table created and extended without replacing data\nPASS source reconciliation preserves actual evidence and is idempotent\nPASS KPI scopes separate current run, current family, historical and all-time (Campaign A 214/109/323)\n17/17 performance checks passed\nPASS per-job tracking keeps untracked sends N/A"
+  },
+  {
+    "file": "aura-email-tracking.test.js",
+    "pass": true,
+    "output": "PASS config requires flag and an Apps Script /exec base URL\nPASS token round-trips, carries no PII and rejects tampering\nPASS apply rewrites only approved CTAs, adds one pixel, is deterministic and PII-free\nPASS OPEN is recorded once, repeats only increment eventCount\nPASS CLICK attributes job+CTA and redirects only to the approved destination\nPASS no open redirect: injected url, bad index, unknown or unsent job do nothing\nPASS non-tracking requests fall through to the normal router\nPASS tracking never mutates the SENT job row\nPASS OR/CTR/CTOR use delivered and unique-open denominators\nPASS governed Campaign A render includes tracking and dispatch verification re-derives it\nPASS web app routes tracking first and keeps the existing router for everything else\nPASS CTA index travels as aura_c (Apps Script rejects ?c=2+), legacy c still accepted\nPASS signature is the raw HMAC (full entropy); lossy legacy tokens remain verifiable\n13/13 tracking checks passed"
+  },
+  {
+    "file": "aura-execution-report-ui.test.js",
+    "pass": true,
+    "output": "PASS: Account & Campaign Reports renders from the live v6AuraExecutionReport endpoint\nPASS: every AURA KPI is sourced from the live summary object, never a hard-coded literal\nPASS: full AURA report renders KPIs, ready/blocked/results tables and owner + family grouping from real data\nPASS: owner/status/search filters apply in place via delegated change/input listeners, without reloading the module\nPASS: AURA report auto-refreshes every 60s and cleans up the timer when navigating away\nPASS: a failed refresh keeps the last real numbers on screen and is honestly labeled stale, never a false zero\nPASS: with no cache and an unreachable backend, AURA report shows an explicit unavailable state, never zeros\nPASS: Command Center shows one compact AURA status card linking to #/account-campaign-reports\nPASS: AURA reporting frontend code carries no PII field names or embedded data\nPASS: the existing 24-owner Safe Data Hub recovery snapshot is untouched by the AURA reporting change\nPASS: an empty Blocked table explains itself truthfully and never implies an error\nAURA live execution report UI: ALL PASS"
+  },
+  {
+    "file": "aura-execution-report.test.js",
+    "pass": true,
+    "output": "PASS: v6AuraExecutionReport_ endpoint and router case exist\nPASS: frontend adapter exposes v6AuraExecutionReport\nPASS: v6AuraExecutionReport_ returns real, computed aggregates — never hard-coded totals\nPASS: v6AuraExecutionReport_ never leaks PII/account identity, only safe operational fields\nPASS: an empty report sheet yields real zeros, not fabricated demo data\nAURA live execution report endpoint: ALL PASS"
+  },
+  {
+    "file": "aura-gmail-ingest.test.js",
+    "pass": true,
+    "output": "PASS: only messages from an allowlisted sender are ever processed\nPASS: with no AURA_GMAIL_ALLOWED_SENDERS configured, an unverified sender is never processed\nPASS: \"Retencion prioritaria\" rows map to real Retention opportunities with real account/owner/reason\nPASS: \"Recuperacion FTL\" rows map to real Reactivation opportunities\nPASS: \"Expansion de servicio\" rows map to real Cross-Sell opportunities\nPASS: Gmail ingestion never fabricates a QNB family (QNB continues to come from its existing, unrelated source)\nPASS: the \"Confirmar datos contacto\" data-quality worklist never becomes a fabricated campaign opportunity\nPASS: a row missing its account is rejected and logged, never silently dropped or invented\nPASS: messageId-based idempotency — a message is never processed twice\nPASS: a re-sent, updated report for the same account updates the existing opportunity instead of duplicating it\nPASS: a malformed report is logged as FAILED without corrupting or erasing previously ingested good data\nPASS: a CSV attachment is parsed directly, without any Drive/XLSX conversion\nPASS: an inline Google Sheet link from an allowlisted sender is read directly, no attachment required\nPASS: dataset/header identification scans past title and summary rows to the real header row\nPASS: router exposes v6AuraGmailFreshness\nPASS: frontend adapter exposes v6AuraGmailFreshness\nPASS: Gmail ingest runs before AURA automation, inside the same single hourly heartbeat\nPASS: Gmail-sourced opportunities are merged into the existing governed opportunity refresh, not a parallel table nobody reads\nPASS: no account/contact PII or email addresses in the Gmail freshness frontend code\nPASS: no hardcoded contact PII in the Gmail ingestion module source\nAURA Gmail ingestion: ALL PASS"
+  },
+  {
+    "file": "aura-intake-atomic-safety.test.js",
+    "pass": true,
+    "output": "PASS atomic replacement, retained backup, failed transaction unchanged, explicit recovery, invalid backup blocked\nPASS QA dispatcher and LIVE toggle blocked before queue reads"
+  },
+  {
+    "file": "aura-language-resolution.test.js",
+    "pass": true,
+    "output": "PASS priority: explicit > source system > prior governed send > country > ccTLD; EN fallbacks and conflicts ignored; no EN default\nPASS UNRESOLVED contacts are held back (not send-ready); plan reports languages, sources, confidence; HIGH-only backfill\nPASS stale plans waiting for approval are refreshed; no send-ready recipients -> task BLOCKED, approval WITHDRAWN\nPASS hub backfill writes only the 4 language cells of rows without a language\n4/4 language resolution checks passed"
+  },
+  {
+    "file": "aura-overview-kpi-ui.test.js",
+    "pass": true,
+    "output": "PASS QA campaigns excluded from commercial KPI cards and classified TECHNICAL / QA\nPASS Campaign A 214 / 109 / 323 unchanged; QA OPEN/CLICK evidence still available\nPASS performance table and KPIs exclude QA by default; toggle / filter keep technical evidence reachable\nPASS METRIC column uses the dark theme\n4/4 overview KPI/UI checks passed"
+  },
+  {
+    "file": "aura-platform-visibility.test.js",
+    "pass": true,
+    "output": "PASS: Gmail ingestion pipeline file is untouched by the platform-visibility work\nPASS: v6AuraGmailPanel / v6AuraIngestHistory / v6AuraSourceBreakdown are defined, routed and exposed to the frontend\nPASS: Gmail panel honestly reports NO_REPORT_RECEIVED when the log is empty, never a fabricated report\nPASS: Gmail panel surfaces the real latest ingest log row, never a hard-coded example\nPASS: ingest history exposes only the safe column set, newest first, no internal identifiers\nPASS: source breakdown derives real Gmail vs NOVA counts from MKT_OPPORTUNITIES, never hard-coded\nPASS: campaign source label is derived per-scope from real opportunity sourceReport, never guessed\nPASS: v6AuraExecutionReport_ summary carries real per-family campaign counts and honest engagement totals\nPASS: frontend renders the Command Center ingestion panel, Source Breakdown, Ingest History and extended filters/columns\nPASS: auraEngagementCell shows NOT SENT YET when sent=0, and the real number once something was actually sent\nPASS: Acquisition (FTL/LTL/Drayage, English-only production) is untouched by the platform-visibility work\nAURA platform visibility: ALL PASS"
+  },
+  {
+    "file": "aura-report-intake-info.test.js",
+    "pass": true,
+    "output": "PASS inbox is info@dglus.com (a sender mailbox in AURA_GMAIL_SOURCE_MAILBOX is not used as the inbox)\nPASS AURA must run as info@dglus.com; otherwise it reports INBOX_NOT_CONNECTED and reads nothing\nPASS a report from any authenticated @dglus.com sender is detected, read and normalized\nPASS unauthenticated, failed-DMARC, look-alike and external senders are never opened\nPASS same file re-sent is DUPLICATE_REPORT; seen messages are skipped without reading the Data Hub\nPASS non-report spreadsheets from colleagues are ignored (logged once, no label, not counted as a report)\nPASS auraReportIntakeTick: report -> opportunities refresh, idempotent, never sends\nPASS agent: one AUTO analysis task per report (counts only), plans refreshed on a newer report, sends still gated\n8/8 AURA report intake (info@dglus.com) checks passed\nPASS QA and LIVE blocked before services; empty identity and failed activation never ACTIVE\nPASS authenticated allowlist and pagination over 121 threads\nPASS FAILED retries back off 1h/2h and stop at three attempts"
+  },
+  {
+    "file": "aura-retention-nan.test.js",
+    "pass": true,
+    "output": "PASS: retention string NaN sanitized in both renderers; numeric values unchanged"
+  },
+  {
+    "file": "aura-sent-email-audit-ui.test.js",
+    "pass": true,
+    "output": "PASS sent-email modal, on-demand job fetch, exact sandboxed preview/download, missing body, filters, pagination, CSV and recipient/account labels"
+  },
+  {
+    "file": "aura-sent-email-audit.test.js",
+    "pass": true,
+    "output": "PASS historical fixture: 109 sent recipients / 23 unique accounts; exact immutable payload, provenance, checksums, auth, metadata-only reconciliation"
+  },
+  {
+    "file": "backend-connection-v2.test.js",
+    "pass": true,
+    "output": "PASS: V6 success establishes connection even if v55Activity fails\nPASS: V6 success establishes connection even if every optional legacy read fails\nPASS: an actual backend-reported auth failure rejects connection, clears the token, and is a distinct AUTH_ERROR state\nPASS: a non-auth V6 failure (network/timeout/malformed) never clears the stored token\nPASS: a timeout is classified as BACKEND_ERROR, not AUTH_ERROR, and preserves the token\nPASS: window.DGL_BACKEND_DIAGNOSTIC carries only the safe allowlisted fields, never the token\nPASS: connect() sets CONNECTING immediately, before the V6 read resolves\nPASS: CONNECTING renders \"CONNECTING TO AURA...\", never a false REQUIRED state\nPASS: AUTH_ERROR renders \"PRIVATE BACKEND AUTHENTICATION FAILED\", never a generic message\nPASS: BACKEND_ERROR renders \"AURA BACKEND TEMPORARILY UNAVAILABLE\" with a retry action\nPASS: DISCONNECTED never renders a fabricated \"0 owners / 0 signals\" Command Center\nPASS: Retention/Reactivation/QNB/Cross-Sell never show \"0 owners\" in any error or connecting state\nPASS: AURA report and Gmail panel routes still render once PRIVATE_BACKEND is reached\nAURA connection fix (V6 authority, honest error states): ALL PASS"
+  },
+  {
+    "file": "campaign-a-activation-jobid.test.js",
+    "pass": true,
+    "output": "campana-a jobid test 1 (Retention + Activation coexist; 109 SENT/152 STOPPED/1 FAILED untouched): PASS\ncampana-a jobid test 2 (repeated Activation builds are idempotent, never duplicate): PASS\ncampana-a jobid test 3 (legacy-format Activation jobs are refreshed in place, never duplicated): PASS\ncampana-a jobid test 4 (missing set approval / per-language creative fails closed): PASS"
+  },
+  {
+    "file": "campaign-a-go-live.test.js",
+    "pass": true,
+    "output": "campaign-a go-live: happy path: promotes exactly EXPECTED, sends the exact DRY_RUN HTML, always back to DRY_RUN, persisted log: PASS\ncampaign-a go-live: count mismatch aborts: nothing promoted, nothing sent, DRY_RUN kept: PASS\ncampaign-a go-live: a job whose HTML drifted from the approved creative fails validation and aborts the whole go-live: PASS\ncampaign-a go-live: creative set not approved, unsuccessful DRY_RUN, wrong family or other PENDING work abort before promotion: PASS\ncampaign-a go-live: preflight not ready after promotion: promotion reverted to DRY_RUN, nothing sent, DRY_RUN kept: PASS\ncampaign-a go-live: a recipient failure still returns AURA_SEND_MODE to DRY_RUN and is reported: PASS\ncampaign-a go-live: the shared hourly dispatcher never picks Campaign A PENDING jobs: PASS\ncampaign-a go-live: the public RUN_AURA_CAMPANA_A_GO_LIVE delegates only to the governed go-live: PASS\ncampaign-a go-live: ALL 8 PASS"
+  },
+  {
+    "file": "campaign-a-reactivation.test.js",
+    "pass": true,
+    "output": "campaign-a reactivation test 1 (canonical context is Reactivation / Previous Relationship): PASS\ncampaign-a reactivation test 2 (service-neutral Reactivation copy EN/ES/PT with {{firstName}}/{{company}}; no Activation copy): PASS"
+  },
+  {
+    "file": "campaign-studio-governed.test.js",
+    "pass": true,
+    "output": "PASS governed Campaign Studio: cell-only idempotent persistence, foreign/formula/approval metadata, canonical private audience, complete ES/EN/PT gates, independent revocation, no fallback, real PNG brand validation, exact draft HTML, immutable 109 SENT, unchanged send mode."
+  },
+  {
+    "file": "campaign-studio-multilingual.test.js",
+    "pass": true,
+    "output": "PASS: Retention produces distinct EN/ES/PT-BR copy (no pt-BR->es fallback)\nPASS: Reactivation produces distinct EN/ES/PT-BR copy (no pt-BR->es fallback)\nPASS: Cross-Sell produces distinct EN/ES/PT-BR copy (no pt-BR->es fallback)\nPASS: Quoted Not Booked produces distinct EN/ES/PT-BR copy (no pt-BR->es fallback)\nPASS: Service Campaign produces distinct EN/ES/PT-BR copy (no pt-BR->es fallback)\nPASS: Lane Campaign produces distinct EN/ES/PT-BR copy (no pt-BR->es fallback)\nPASS: pt-BR copy uses genuine Portuguese vocabulary across Retention/Cross-Sell/Reactivation/QNB\nPASS: CTA button label is localized per language\nPASS: Campaign Studio brief bar never regresses to literal \"undefined\" text after a field change\nPASS: Approve Creative persists the full creative (subject/preheader/htmlBody/textBody/heroUrl/logoUrl/language), not just a status flag\nPASS: every path that changes the rendered creative after approval (generate/field edit/creative-system switch) invalidates state.approved, state.approvedCreative, AND the backend record\nPASS: Approve Creative fails closed -- no campaignId, no connected backend, or an incomplete persisted record all block approval\nPASS: emailHtml() emits absolute assets/ URLs and a functional mailto: CTA, with no post-processing step left anywhere\nCampaign Studio multilingual (EN/ES/PT-BR) copy generation: ALL PASS"
+  },
+  {
+    "file": "campaign-studio-no-freeze.test.js",
+    "pass": true,
+    "output": "PASS failing context + backend-change event: one request, error shown, no loop\nPASS real reconnect still refreshes Studio exactly once\n2/2 Campaign Studio no-freeze checks passed"
+  },
+  {
+    "file": "campaign-studio-preview-tokens.test.js",
+    "pass": true,
+    "output": "PASS {{company}} resolved in the personalized preview from the (synthetic QA) contact record; approved HTML keeps tokens\nPASS without verified data the variables are shown as marked placeholders\nPASS 4-step flow, \"Detalles técnicos\" panel, states and connection errors explained\nPASS QA fixture rejects Studio write actions explicitly, no simulated approval\n4/4 Campaign Studio preview checks passed"
+  },
+  {
+    "file": "campaign-studio-selector.test.js",
+    "pass": true,
+    "output": "campaign-studio selector test 1 (compact searchable/filterable list, cached): PASS\ncampaign-studio selector test 2 (Campaign A workspace, EN/ES/PT actual renderer HTML, preview-only gallery): PASS"
+  },
+  {
+    "file": "campaign-studio-v6-language-layering.test.js",
+    "pass": true,
+    "output": "PASS: campaign-studio-v6 language layering -- bare ES/EN/PT codes through the real copy-engine-v5 + copy-experience-v1 chain each produce genuine, distinct language content (regression test for the PT->ES visual QA defect)\nPASS: lowercase \"pt\" language code also resolves to genuine Portuguese copy\nPASS: Activation copy through the real copy-experience-v1 chain equals the canonical service-neutral copy and passes the Campaign A backend copy rules"
+  },
+  {
+    "file": "creative-intelligence.test.js",
+    "pass": true,
+    "output": "PASS every system has a complete treatment and resolveTreatment returns all 10 dimensions\nPASS selection is unchanged: treatment follows the existing selection rules\nPASS registry is extensible and validated\nPASS reference hook never pretends an analysis that was not supplied\nPASS responsive contract: every system ships the mobile stack, fluid hero, wrapping CTA and 28px headline\nPASS every system CTA is functional (mailto/https) and picked up by AURA tracking\n6/6 creative intelligence checks passed"
+  },
+  {
+    "file": "email-queue-render-contract-schema.test.js",
+    "pass": true,
+    "output": "email-queue render-contract schema test 1 (v6 migration appends governed columns, preserves history, idempotent): PASS\nemail-queue render-contract schema test 2 (Data Hub schema appends governed columns, idempotent): PASS"
+  },
+  {
+    "file": "global-kpi-formatting.test.js",
+    "pass": true,
+    "output": "PASS global KPI formats and real AURA integration"
+  },
+  {
+    "file": "growth-os-shell.test.js",
+    "pass": true,
+    "output": "PASS five daily spaces; technical administration separated\nPASS all 33 existing routes remain reachable, each exactly once\nPASS daily work vs. technical/placeholder views split correctly\nPASS isolated entry reuses the production modules unchanged (only the shell differs)\nPASS QA fixture never loaded by product pages; preview is noindex\nPASS shell is read-only and stores nothing in the browser\n6/6 Growth OS shell checks passed"
+  },
+  {
+    "file": "lifecycle-safe-data-hub-recovery.test.js",
+    "pass": true,
+    "output": "PASS: all 24 governed AM owners are present in the Safe Data Hub recovery snapshot\nPASS: Campaign Opportunities renders Safe Data Hub Recovery with all 24 owners when disconnected\nPASS: Safe Data Hub recovery snapshot carries only owner-level aggregates, no account/contact PII\nPASS: Safe Data Hub recovery covers every Existing Account Growth route (scopeView included)\nPASS: Retention / Nurture renders Safe Data Hub Recovery when disconnected (never a false empty state)\nLifecycle Safe Data Hub recovery: ALL PASS"
+  },
+  {
+    "file": "live-apps-script-reconciliation.test.js",
+    "pass": true,
+    "output": "reconciliation test 1 (all live-only production files present, project loads as one namespace): PASS\nreconciliation test 2 (no duplicate top-level function across the push set): PASS\nreconciliation test 3 (exactly one doGet and one doPost, both in DGL_Core): PASS\nreconciliation test 4 (published landing page: lead recorded in MKT_ACQ_LEADS via doPost submitLead): PASS\nreconciliation test 5 (PRIVATE_QA page: lead isolated to MKT_ACQ_QA_LEADS; client qa flag ignored): PASS\nreconciliation test 6 (honeypot + invalid submissions rejected, nothing written): PASS\nreconciliation test 7 (API key still enforced for non-public actions; health public): PASS\nreconciliation test 8 (no PII/ids/secrets in reconciled files; config via Script Properties): PASS\nreconciliation test 9 (moved-to-config values fail closed when unset, behave identically when set): PASS\nreconciliation test 10 (PR #9 governance + PR #11 Activation jobId fix preserved): PASS"
+  },
+  {
+    "file": "platform-performance-v1.test.js",
+    "pass": true,
+    "output": "PASS v55Bootstrap aggregates auth probe + datasets + pipeline summary in one memoized execution\nPASS Campaign Studio context bundles approved creatives server-side (read-only, memoized)\nPASS Studio uses the bundled creatives and only falls back to per-language reads\nPASS icon library is minified and non-blocking; icons render on load\nPASS after connect, Reactivation / Retention / QNB data comes from the bootstrap (0 extra requests)\n5/5 platform performance checks passed"
+  },
+  {
+    "file": "v5-activation-frontend.test.js",
+    "pass": true,
+    "output": "PASS: creative-library-v5.js has a dedicated Activation objective + asset resolution\nPASS: copy-engine-v5.js has a dedicated ACTIVATION block matching backend copy exactly, no fallback\nPASS: campaign-sequences-v4.js has a dedicated Activation sequence, no fallback\nPASS: marketing-playbooks-v55.js resolves ACTIVATION -> ACTIVATION_ACCOUNT\nPASS: campaign-studio-v5.js deriveCampaignName() has a dedicated Activation branch\nALL v5-activation-frontend checks passed"
+  },
+  {
+    "file": "v55-audience-bridge.test.js",
+    "pass": true,
+    "output": "V5.5 AM Request audience scope bridge: PASS"
+  },
+  {
+    "file": "v55-backend-adapter.test.js",
+    "pass": true,
+    "output": "V5.5 private backend adapter contract: PASS"
+  },
+  {
+    "file": "v55-gmail-test-draft.test.js",
+    "pass": true,
+    "output": "V5.5 real Gmail test draft frontend: PASS"
+  },
+  {
+    "file": "v55-legacy-status-visibility.test.js",
+    "pass": true,
+    "output": "V5.5 legacy backend status visibility: PASS"
+  },
+  {
+    "file": "v55-live-workflow.test.js",
+    "pass": true,
+    "output": "V5.5 connected workflow: PASS"
+  },
+  {
+    "file": "v55-recipient-resolution.test.js",
+    "pass": true,
+    "output": "V5.5 private recipient resolution UI: PASS"
+  },
+  {
+    "file": "v55-validation.test.js",
+    "pass": true,
+    "output": "V5.5 deterministic validation: 16 assertions passed"
+  },
+  {
+    "file": "v6-aura-bootstrap.test.js",
+    "pass": true,
+    "output": "bootstrap test 1 (Data Hub inaccessible -> BLOCKED_DATA_HUB_ACCESS, nothing else attempted): PASS\nbootstrap test 3 (MKT_RETENTION_RUN_SUMMARY auto-creates with correct headers when missing): PASS\nbootstrap test 4 (MKT_RETENTION_RUN_SUMMARY already exists with data -> left alone, not recreated/cleared): PASS\nbootstrap test 1 (running bootstrap twice never duplicates the Drive folder, reused via Script Property): PASS\nbootstrap test 2 (stored folder id deleted -> name lookup, then create-if-still-missing, property updated either way): PASS\nbootstrap test 6 (STALE freshness -> BOOTSTRAP_BLOCKED_STALE_DATA, no Retention cycle, no CSV, recovery trigger scheduled once): PASS\nbootstrap test 6b (a subsequent successful run cleans up the one-shot recovery trigger): PASS\nbootstrap test 7 (FRESH freshness -> full detect->suppress->scope->CSV->summary cycle runs, retentionCycle populated): PASS\nbootstrap test 8 (contactIngestion reports SOURCE_NOT_CONFIGURED when the optional hook does not exist): PASS\nbootstrap test 9 (trigger install/reinstall is idempotent across repeated bootstrap runs, never duplicated): PASS\nbootstrap test 10 (a real runtime exception is caught, logged as RUN_FAILED with the real error, and schedules recovery): PASS\nbootstrap test (router exposes v6AuraBootstrapAndRun): PASS\nV6 AURA bootstrap: ALL PASS"
+  },
+  {
+    "file": "v6-aura-bridge.test.js",
+    "pass": true,
+    "output": "aura bridge test 1 (evaluate retention aggregates + automatic scope build): PASS\naura bridge test 1b (auto build scopes groups correctly, excludes suppressed/other families): PASS\naura bridge test 2 (consolidated status, safe aggregates only): PASS\naura bridge test 3 (ensure campaign scope is idempotent): PASS\naura bridge test 4 (account stop: closes fresh, preserves advanced stage): PASS\naura bridge test 5 (AM handoff preserves stage, refuses without pipeline record): PASS\naura bridge test 6 (QUOTE/LOAD event aliases, no fabricated revenue): PASS\naura bridge test 7 (freshness gate blocks STALE source before any write): PASS\naura bridge test 7b (FRESH source proceeds through evaluate normally): PASS\naura bridge test 8 (double run is idempotent, no growth in opportunities/scopes): PASS\nV6 AURA Retention Bridge: ALL PASS"
+  },
+  {
+    "file": "v6-aura-campana-a.test.js",
+    "pass": true,
+    "output": "campana-a test 1 (Campana A is recognized; Campana B and every other tab are never processed): PASS\ncampana-a test 2 (dedicated-account registry contains only Campana A accounts): PASS\ncampana-a test 3 (multiple eligible contacts of the same account are never collapsed to one job): PASS\ncampana-a test 4 (an explicit reliable language signal wins over country): PASS\ncampana-a test 5 (Brazil -> PT, LATAM Spanish-speaking -> ES, USA -> EN, unknown -> EN fallback): PASS\ncampana-a test 6 (generic names never used; real names personalize; no-name subject uses the real Activation template, no fallback to Retention): PASS\ncampana-a test 7 (reply-to always resolves to the canonical DGL identity; status stays DRY_RUN, zero real sends): PASS\ncampana-a test 8 (suppression (real DNC) and stopOnResponse both still hold under the new tab-primary resolver): PASS\ncampana-a test 9 (full QA audit reports accurate language/name/reply-to counts, and does not falsely flag an unrelated tab): PASS\ncampana-a test 9b (the audit correctly flags Campana B if it is ever found processed): PASS\ncampana-a test 10 (regenerate forces DRY_RUN even if LIVE was left on, zero real sends): PASS\ncampana-a test 11 (dedicated-account exclusion filter keeps Campana A accounts out of the shared family pipeline): PASS\ncampana-a test 12 (RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN logs the full result and a flat summary with every required field): PASS\ncampana-a test 12b (every named stage logs a real-time START/END marker in order, and the redundant Gmail-reprocess fallback is explicitly logged as skipped): PASS\ncampana-a test 13 (source spreadsheet id resolves from property, falls back to the real default): PASS\ncampana-a test 14 (an inaccessible source spreadsheet fails closed with SPREADSHEET_NOT_ACCESSIBLE): PASS\ncampana-a test 15 (a missing exact-name tab fails closed with TAB_NOT_FOUND, listing what does exist): PASS\ncampana-a test 16 (reading the live source spreadsheet directly ingests real rows the rest of the pipeline picks up): PASS\ncampana-a test 17 (zero accounts from the source fails closed: SOURCE_EMPTY_OR_NOT_FOUND, audit never clean:true): PASS\ncampana-a test 18 (full end-to-end regenerate against a real readable source produces real accounts/recipients/jobs, zero real sends): PASS\ncampana-a test 19 (real headers and per-row country/contact/email are captured before any accept/reject decision): PASS\ncampana-a test 20 (the Campana A tab's own country is the primary source, ahead of the matched account's record, with a named reason): PASS\ncampana-a test 21 (a full-word language value like Spanish/English/Portuguese is recognized, still ranked above the tab country): PASS\ncampana-a test 22 (STOPPED breakdown reports exact real counts by stage and by the prior campaign that caused it): PASS\ncampana-a test 23 (match report recovers a legitimate \"Corp\" spelling difference deterministically, reports a real unmatched account with a reason): PASS\ncampana-a test 24 (match report correctly evaluates whether the tab already provides usable contact/email columns): PASS\ncampana-a test 25 (a legitimate account-name spelling difference now recovers the real contact into the queue, not just a diagnostic report): PASS\ncampana-a test 26 (governed stale-cross-family override: only a stale, different-family, non-terminal response is overridden -- never CLOSED/SUPPRESSED or an ongoing engaged relationship): PASS\ncampana-a test 27 (STOPPED breakdown reports accurate override counts and reasons): PASS\ncampana-a test 28 (preflight suppresses only the failing job, by specific reason, without blocking the rest of the campaign): PASS\ncampana-a test 29 (preflight correctly reports not-ready-for-live when nothing is safely sendable, and runs automatically inside regenerate): PASS\ncampana-a test 30 (regenerate installs the dispatcher trigger idempotently, never duplicated): PASS\ncampana-a test 31 (performance regression guard: MKT_EMAIL_QUEUE written via one batch call and MKT_ACCOUNTS read once, regardless of contact count -- the O(n^2) upsert loop that caused the real production timeout is gone): PASS\ncampana-a test 32 (direct-spreadsheet ingest writes both MKT_AURA_GMAIL_OPPORTUNITIES and MKT_AURA_CAMPANA_A_SOURCE_ROWS via one batch call each, regardless of source row count): PASS\ncampana-a test 33 (every required profiling field -- SOURCE_READ_MS through TOTAL_MS -- is present on the regenerate result): PASS\ncampana-a test 34 (an exceeded time budget checkpoints cleanly before processing further contacts, reporting resume information, never silently losing progress): PASS\ncampana-a test 35 (a saved checkpoint resumes from the exact saved index without reprocessing earlier recipients, and clears itself on successful completion): PASS\ncampana-a test 36 (a contact present only on the Campana A tab is a real, personalized recipient, never silently dropped): PASS\ncampana-a test 37 (a tab email and a MKT_CONTACTS_SECURE email that match exactly, case-insensitively, merge into one MERGED recipient; MKT_CONTACTS_SECURE firstName wins): PASS\ncampana-a test 38 (MKT_CONTACTS_SECURE DNC still governs a MERGED recipient -- enrichment does not weaken governance): PASS\ncampana-a test 39 (a malformed tab email is still excluded by strict format validation, never relaxed): PASS\ncampana-a test 40 (account-level stopOnResponse still fully protects a CAMPANA_A_SOURCE-only recipient): PASS\ncampana-a test 41 (a MKT_CONTACTS_SECURE-only contact outside the authoritative source is diagnostic only, never queued): PASS\ncampana-a test 42 (the audit reports an accurate byRecipientSource breakdown from the durable job records): PASS\ncampana-a test 42b (Campana A's own dispatch batch blocks a job with no creative-approval reference, even under LIVE): PASS\ncampana-a test 43 (every run persists a full, durable audit row -- readable without the Apps Script execution log, never overwritten by a later run): PASS\nV6 AURA Campana A (dedicated tab, per-contact language, name reliability): ALL PASS\nPASS separate current canonical and historical sent family audit"
+  },
+  {
+    "file": "v6-aura-creative-approval.test.js",
+    "pass": true,
+    "output": "creative-approval test 1 (checksum is deterministic and content-sensitive): PASS\ncreative-approval test 2 (persist rejects an incomplete approval payload): PASS\ncreative-approval test 3 (each approval creates a new, immutable, monotonically-versioned row): PASS\ncreative-approval test 4 (latest-approved lookup always returns the highest version): PASS\ncreative-approval test 5 (per-language approved-creative lookup never collides across ES/EN/PT): PASS\ncreative-approval test 6 (personalization substitutes only firstName/company/service/lane, nothing else): PASS\ncreative-approval test 7 (build-time resolver: missing -> BLOCK, tampered -> BLOCK, valid -> real personalized output with both checksum levels): PASS\ncreative-approval test 8 (dispatch-time re-validator blocks every drift/tamper scenario without ever re-rendering): PASS\ncreative-approval test 9 (customer-visible internal-label detector catches every classification term, leaves real copy clean): PASS\ncreative-approval test 10 (Test Draft exact-match normalizes only MIME/encoding noise, never a real content difference): PASS\ncreative-approval test 11 (MKT_CAMPAIGN_CREATIVES sheet creation is idempotent): PASS\ncreative-approval test 12 (persist hard-blocks internal classification vocabulary in subject/htmlBody/textBody): PASS\ncreative-approval test 13 (persist hard-blocks relative assets/ URLs and href=\"#\"/\"\" CTAs; absolute URL + mailto: CTA is accepted): PASS\ncreative-approval test 14 (v6AuraApproveCreative_ throws CREATIVE_APPROVAL_PERSISTENCE_INCOMPLETE on any incomplete persisted record): PASS\ncreative-approval test 15 (revoke flips status only, preserves every other column, is idempotent, and every resolver excludes the revoked row): PASS\ncreative-approval test 16 (canonical contentChecksum catches subject-only drift that htmlChecksum alone would miss): PASS\ncreative-approval test 17 (v6AuraValidateCreativeOrBlock_ fails closed on a missing OR a throwing validator, never {blocked:false}): PASS\ncreative-approval test 18 (dispatch independently revalidates approvalId, creativeVersion, and current status -- a revoke after queueing blocks even an otherwise-untampered job): PASS\ncreative-approval test 19 (v6AuraVerifyAndCreateTestDraft_ is real end-to-end: blocks on no approval, blocks on Studio/Stored mismatch, actually calls GmailApp.createDraft, and independently verifies the real created draft): PASS\ncreative-approval test 20 (per-job recipientContentChecksum covers subject+htmlBody -- subject-only drift on a queued job blocks, and a missing field blocks too): PASS\ncreative-approval test 21 (dispatch independently recomputes checksum(creative.htmlBody) and canonicalContentChecksum(creative...) fresh from stored content, catching storage-level corruption a job-vs-creative comparison alone would miss): PASS\ncreative-approval test 22 (revocation is fail-closed: a failed row write still blocks the creative everywhere via the Properties ledger, throws a real error rather than a soft warning, and a later retry can still fully recover the row): PASS\nV6 AURA creative approval (Iniciativa 2 -- Campaign Studio canonical source, checksums, gates): ALL PASS"
+  },
+  {
+    "file": "v6-aura-email-dispatcher.test.js",
+    "pass": true,
+    "output": "dispatcher test 1 (build produces a real personalized PENDING job from the approved creative): PASS\ndispatcher test 2 (a non-ELIGIBLE recipient row is never queued): PASS\ndispatcher test 3 (queue build is idempotent, never resets a terminal job): PASS\ndispatcher test 4 (policy-review campaign queues REVIEW_REQUIRED, not PENDING): PASS\ndispatcher test 5 (DRY_RUN validates everything, including the creative-approval chain, but never sends): PASS\ndispatcher test 6 (LIVE mode sends the exact queued HTML, records touch, and can be disabled again): PASS\ndispatcher test 7 (an active exclusion suppresses a job at dispatch time, never sent): PASS\ndispatcher test 8 (stopOnResponse: a RESPONDED account never receives a queued send): PASS\ndispatcher test 9 (frequency cap skips the send, no duplicated frequency logic): PASS\ndispatcher test 10 (duplicate-sent guard prevents a real double-send): PASS\ndispatcher test 11 (auraInstallTriggers is idempotent, never duplicates): PASS\ndispatcher test 12 (pre-LIVE audit: a well-formed job is reported clean): PASS\ndispatcher test 13 (pre-LIVE audit: every real problem category is detected, including a real SENT job): PASS\ndispatcher test 14 (build resolves the canonical reply-to; approved-creative HTML reaches the job unchanged): PASS\ndispatcher test 15 (an invalid/missing configured reply-to blocks LIVE, build-time and dispatch-time): PASS\ndispatcher test 16 (repair fixes existing broken jobs from the approved creative in place, never touches a SENT job): PASS\ndispatcher test 17 (regenerate runs repair+build+dispatch+audit without ever touching AURA_SEND_MODE): PASS\ndispatcher test 18 (build blocks with CREATIVE_NOT_APPROVED when no approved creative exists): PASS\ndispatcher test 19 (build blocks with CREATIVE_VERSION_MISMATCH when the stored checksum no longer matches): PASS\ndispatcher test 20 (dispatch-time defense in depth blocks a job with no creative-approval reference, even under LIVE): PASS\ndispatcher test 21 (dispatch-time defense in depth blocks a job whose htmlBody drifted after queueing): PASS\nV6 AURA email dispatcher (queue build + DRY_RUN/LIVE dispatch + gates + Iniciativa 2 creative approval): ALL PASS"
+  },
+  {
+    "file": "v6-aura-gmail-process-message.test.js",
+    "pass": true,
+    "output": "gmail-process-message test 1 (a message with many accepted rows writes MKT_AURA_GMAIL_OPPORTUNITIES via one batch call, never one per row): PASS\ngmail-process-message test 2 (reprocessing the same account updates the existing row in place, never duplicates): PASS\ngmail-process-message test 3 (rejected rows are recorded via one batch call and never block the accepted rows in the same message): PASS\nV6 AURA Gmail message processing (batched opportunity/rejection writes): ALL PASS"
+  },
+  {
+    "file": "v6-aura-run-log.test.js",
+    "pass": true,
+    "output": "run log test 1 (v6AuraLogStage_ is idempotent per runId+stage): PASS\nrun log test 2 (logging failure is swallowed, never breaks the caller): PASS\nrun log test 3 (last-run status file is a single file updated in place, no PII fields): PASS\nrun log test 4 (one-shot recovery trigger: scheduled once, never duplicated, cleaned up on success): PASS\nrun log test 5 (one-shot cleanup never removes the canonical 6-hour trigger): PASS\nV6 AURA run log + one-shot recovery: ALL PASS"
+  },
+  {
+    "file": "v6-auto-bootstrap.test.js",
+    "pass": true,
+    "output": "bridge auto-bootstrap PASS"
+  },
+  {
+    "file": "v6-canonical-identity.test.js",
+    "pass": true,
+    "output": "canonical identity test 1 (SALESFORCE_EXPORT account resolves salesforceAccountId): PASS\ncanonical identity test 2 (missing externalAccountId stays UNRESOLVED): PASS\ncanonical identity test 3 (SALESFORCE_EXPORT contact resolves salesforceContactId): PASS\ncanonical identity test 4 (missing externalContactId stays UNRESOLVED): PASS\ncanonical identity test 5 (non-Salesforce source stays UNRESOLVED, no false positive match): PASS\ncanonical identity test 6 (audit safe aggregates, MISSING vs UNRESOLVED distinction): PASS\nV6 canonical identity bridge: ALL PASS"
+  },
+  {
+    "file": "v6-commercial-outcomes.test.js",
+    "pass": true,
+    "output": "commercial outcomes test (resolves accountId, copies Monto untransformed): PASS\ncommercial outcomes test (unmatched account writes nothing): PASS\ncommercial outcomes test (account without crosswalk id is unresolved): PASS\ncommercial outcomes test (multi-campaign concurrency preserves campaignId): PASS\nV6 commercial outcomes ingestion: ALL PASS"
+  },
+  {
+    "file": "v6-contact-ingestion.test.js",
+    "pass": true,
+    "output": "V6 authoritative contact ingestion: PASS"
+  },
+  {
+    "file": "v6-data-freshness.test.js",
+    "pass": true,
+    "output": "data freshness test 1 (1h ago -> FRESH): PASS\ndata freshness test 2 (10h ago -> STALE): PASS\ndata freshness test 3 (5.9h ago -> still FRESH, just under threshold): PASS\ndata freshness test 4 (checks the real MKT_V6_REPORT_SOURCE_ID spreadsheet): PASS\nV6 data freshness gate: ALL PASS"
+  },
+  {
+    "file": "v6-live-opportunities-ui.test.js",
+    "pass": true,
+    "output": "V6 automated live opportunities frontend: PASS"
+  },
+  {
+    "file": "v6-no-pii-in-repo.test.js",
+    "pass": true,
+    "output": "no-PII-in-repo scan: 62 files checked (backend/apps-script-v6/, docs/, repo root), 0 email addresses outside the minimal allowlist: PASS"
+  },
+  {
+    "file": "v6-pipeline-bulk-sync.test.js",
+    "pass": true,
+    "output": "V6 bulk pipeline sync: PASS"
+  },
+  {
+    "file": "v6-production-backend.test.js",
+    "pass": true,
+    "output": "V6 production backend hardening: PASS"
+  },
+  {
+    "file": "v6-recipient-resolution-production.test.js",
+    "pass": true,
+    "output": "V6 production recipient resolution contract: PASS"
+  },
+  {
+    "file": "v6-report-ingestion.test.js",
+    "pass": true,
+    "output": "V6 private report ingestion: PASS"
+  },
+  {
+    "file": "v6-response-events.test.js",
+    "pass": true,
+    "output": "response events test (REPLY -> RESPONDED + handoff pending): PASS\nresponse events test (RFQ -> RFQ RECEIVED): PASS\nresponse events test (BOUNCE -> emailStatus INVALID, pipeline untouched): PASS\nresponse events test (UNSUBSCRIBE -> active exclusion, pipeline untouched): PASS\nresponse events test (CLICK/OTHER/SENT/DELIVERED/OPEN/SOFT_BOUNCE -> IGNORED, no side effects): PASS\nresponse events test (HARD_BOUNCE aliases onto BOUNCE handling): PASS\nresponse events test (SPAM_COMPLAINT registers its own exclusion reason): PASS\nV6 response event classifier: ALL PASS"
+  },
+  {
+    "file": "v6-retention-am-activity.test.js",
+    "pass": true,
+    "output": "retention test 1 (base detection with AM Intelligence context): PASS\nretention test 2 (sin dueno regression): PASS\nretention test 3 (cross-priority regression): PASS\nretention test 4 (clear no-management bucket): PASS\nretention test 5 (ambiguous bucket stays suppressed in pipeline): PASS\nretention test 6 (bucket vs gestion contradiction): PASS\nretention test 7 (missing AM Intelligence match is held, not auto-detected): PASS\nV6 retention AM activity join: ALL PASS"
+  },
+  {
+    "file": "v6-retention-report.test.js",
+    "pass": true,
+    "output": "retention report test 1 (dry run STALE short-circuits, no report reads): PASS\nretention report test 2 (dry run category classification with synthetic data): PASS\nretention report test 2b (suppressedTotal counts HIGHER PRIORITY SIGNAL rows the 3 named buckets miss): PASS\nretention report test 3 (v6AuraDecisionFor_ — one assertion per branch, 10 branches + 2 precedence checks): PASS\nretention report test 4 (AM CSV report: columns, decision join, no PII): PASS\nretention report test 4b (Handoffs CSV: exact 13 columns, correct filter set, most-recent responseDate, no PII): PASS\nretention report test 5 (run summary write + read-back, unknown runId is NOT FOUND): PASS\nretention report test 6 (run cycle: STALE never generates a CSV or summary): PASS\nretention report test 7 (run cycle: FRESH source produces AM CSV + Handoffs CSV + persisted summary): PASS\nV6 retention report/pilot: ALL PASS"
+  },
+  {
+    "file": "v6-safe-opportunity-aggregates.test.js",
+    "pass": true,
+    "output": "V6 safe opportunity aggregates: PASS"
+  },
+  {
+    "file": "v6-schema-migration.test.js",
+    "pass": true,
+    "output": "V6 additive contact schema migration: PASS"
+  },
+  {
+    "file": "v6-source-arbitration.test.js",
+    "pass": true,
+    "output": "source arbitration test 1 (NOVA fresh short-circuits, Gmail never checked): PASS\nsource arbitration test 2 (NOVA stale, valid current AM Gmail source fills in): PASS\nsource arbitration test 2b (rowsRejected>0 does not block; no invented reject-rate threshold): PASS\nsource arbitration test 3 (Gmail AGING, not CURRENT -> STALE_SOURCE): PASS\nsource arbitration test 4 (Gmail CURRENT but zero accepted rows -> STALE_SOURCE): PASS\nsource arbitration test 5 (no Gmail report ever received -> STALE_SOURCE): PASS\nsource arbitration test 6 (Gmail ingestion not deployed -> fail closed, no crash): PASS\nsource arbitration test 7 (v6RefreshOpportunitiesFromReports_ folds in Gmail-sourced opportunities): PASS\nsource arbitration test 8 (cross-source priority suppression reconciles Gmail + NOVA signals for the same account): PASS\nV6 source arbitration + Gmail fold-in: ALL PASS"
+  },
+  {
+    "file": "v6-validation.test.js",
+    "pass": true,
+    "output": "V6 validation tests passed."
+  }
+]

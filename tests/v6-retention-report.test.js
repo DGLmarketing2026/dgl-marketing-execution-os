@@ -94,6 +94,7 @@ function makeContext(tables,files,props,folders){
     };
   };
   ctx.__tables=tables;ctx.__files=files;
+  require('./helpers/atomic-sheets-fake')(ctx);
   return ctx;
 }
 

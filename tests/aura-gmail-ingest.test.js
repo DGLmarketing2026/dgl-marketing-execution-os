@@ -22,6 +22,7 @@ function fakeMessage(id,from,subject,dateIso,body,attachments){
   return {
     getId:()=>id, getFrom:()=>from, getSubject:()=>subject,
     getDate:()=>new Date(dateIso), getPlainBody:()=>body||'',
+    getHeader:()=> {const d=from.replace(/.*@/,'').replace(/>.*/,'');return "mx.google.com; dmarc=pass header.from="+d;},
     getAttachments:()=>attachments||[]
   };
 }
@@ -57,7 +58,7 @@ function workbookFromSheets(sheetDefs){
 function makeContext(props,tables){
   tables=tables||{};
   var ctx={
-    Date:Date,String:String,Array:Array,Object:Object,Number:Number,Math:Math,console:console,
+    Session:{getEffectiveUser:()=>({getEmail:()=>"info@dglus.com"})},Date:Date,String:String,Array:Array,Object:Object,Number:Number,Math:Math,console:console,
     PropertiesService:{getScriptProperties:()=>({getProperty:k=>Object.prototype.hasOwnProperty.call(props,k)?props[k]:null,setProperty:(k,v)=>{props[k]=v;}})},
     Utilities:{
       computeDigest:(algo,text)=>{var h=0;for(var i=0;i<text.length;i++){h=(h*31+text.charCodeAt(i))|0;}var bytes=[];for(var b=0;b<8;b++){bytes.push((h>>(b*4))&0xff);}return bytes;},
@@ -170,14 +171,18 @@ function runTick(props,tables,threads){
   console.log('PASS: only messages from an allowlisted sender are ever processed');
 })();
 
-// 2. No allowlist configured -> safe no-op (fail closed)
+// 2. No allowlist configured -> only Gmail-authenticated senders of the trusted internal domain
+// are opened (2026-10-09: the inbox no longer depends on one sender); everyone else stays closed.
 (function testNoAllowlistFailsClosed(){
   var atts=[xlsxAttachment([retentionSheet([GOOD_ROW])])];
   var thread=fakeThread('T-2',[fakeMessage('MSG-2',LUIS,'x','2026-09-10T13:00:00.000Z','',atts)]);
-  var {result}=runTick({},{},[thread]);
-  assert.equal(result.status,'NO_ALLOWED_SENDERS');
+  var {result,ctx}=runTick({},{},[thread]);
+  assert.equal(result.status,'OK');
   assert.equal(result.messagesProcessed,0);
-  console.log('PASS: with no AURA_GMAIL_ALLOWED_SENDERS configured, ingestion is a safe no-op');
+  assert.equal((ctx.__tables.MKT_AURA_INGEST_LOG||[]).length,0);
+  var none=runTick({AURA_GMAIL_TRUSTED_DOMAINS:'NONE'},{},[thread]).result;
+  assert.equal(none.status,'NO_TRUSTED_SOURCES','no allowlist and no trusted domain: safe no-op');
+  console.log('PASS: with no AURA_GMAIL_ALLOWED_SENDERS configured, an unverified sender is never processed');
 })();
 
 // 3. Retention mapping: "Retencion prioritaria" rows become Retention opportunities

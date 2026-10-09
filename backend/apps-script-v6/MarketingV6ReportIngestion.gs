@@ -1,6 +1,6 @@
 var MKT_V6_REPORT_SOURCE_ID='1XPZC_VUPLsmta--MPXi4MHswz9oiYxKbiq58a_khPp4';
 
-function v6ReportRows_(sheetName){
+function v6ReportRows_(sheetName){if(String(PropertiesService.getScriptProperties().getProperty('AURA_ENVIRONMENT')||'PRODUCTION').toUpperCase()!=='PRODUCTION')throw new Error('QA_GOOGLE_ACCESS_BLOCKED');
   var s=SpreadsheetApp.openById(MKT_V6_REPORT_SOURCE_ID).getSheetByName(sheetName);
   if(!s)return [];
   var values=s.getDataRange().getValues();
@@ -170,14 +170,42 @@ function v6ApplyPrioritySuppression_(rows){
   return rows;
 }
 
+// Atomic Sheets transaction: retain a snapshot and replace values together.
 function v6WriteOpportunities_(rows){
-  var s=v6Sheet_('MKT_OPPORTUNITIES');
-  if(!s)throw new Error('MKT_OPPORTUNITIES missing');
-  var headers=s.getRange(1,1,1,s.getLastColumn()).getValues()[0].filter(function(h){return String(h||'').trim()!=='';});
-  if(s.getLastRow()>1)s.getRange(2,1,s.getLastRow()-1,headers.length).clearContent();
-  if(!rows.length)return;
-  var values=rows.map(function(r){return headers.map(function(h){return r[h]==null?'':r[h];});});
-  s.getRange(2,1,values.length,headers.length).setValues(values);
+  if(String(PropertiesService.getScriptProperties().getProperty('AURA_ENVIRONMENT')||'PRODUCTION').toUpperCase()!=='PRODUCTION')throw new Error('QA_GOOGLE_ACCESS_BLOCKED');
+  var lock=LockService.getDocumentLock()||LockService.getScriptLock();
+  var ownsLock=!lock.hasLock();
+  if(ownsLock&&!lock.tryLock(30000))throw new Error('OPPORTUNITY_UPDATE_BUSY');
+  try {
+    var s=v6Sheet_('MKT_OPPORTUNITIES');if(!s)throw new Error('MKT_OPPORTUNITIES missing');
+    var headers=s.getRange(1,1,1,s.getLastColumn()).getValues()[0].filter(function(h){return String(h||'').trim()!=='';});
+    if(headers.indexOf('opportunityId')<0)throw new Error('INVALID_OPPORTUNITY_SCHEMA');
+    var values=[headers].concat(rows.map(function(r){return headers.map(function(h){return r[h]==null?'':r[h];});}));
+    var requests=[{duplicateSheet:{sourceSheetId:s.getSheetId(),newSheetName:'AURA_OPP_BACKUP_'+Date.now()+'_'+Utilities.getUuid().slice(0,8)}}];
+    if(values.length>s.getMaxRows())requests.push({appendDimension:{sheetId:s.getSheetId(),dimension:'ROWS',length:values.length-s.getMaxRows()}});
+    requests.push({updateCells:{range:{sheetId:s.getSheetId()},rows:values.map(function(row){return {values:row.map(function(v){return {userEnteredValue:typeof v==='number'?{numberValue:v}:typeof v==='boolean'?{boolValue:v}:{stringValue:String(v)}};})};}),fields:'userEnteredValue'}});
+    var result=Sheets.Spreadsheets.batchUpdate({requests:requests},s.getParent().getId());
+    if(typeof v6RowsMemoInvalidate_==='function')v6RowsMemoInvalidate_('MKT_OPPORTUNITIES');
+    return {status:'UPDATED',backupSheetId:result.replies[0].duplicateSheet.properties.sheetId};
+  } finally {if(ownsLock)lock.releaseLock();}
+}
+function v6RestoreOpportunitiesBackup_(backupSheetId){
+  if(String(PropertiesService.getScriptProperties().getProperty('AURA_ENVIRONMENT')||'PRODUCTION').toUpperCase()!=='PRODUCTION')throw new Error('QA_GOOGLE_ACCESS_BLOCKED');
+  var lock=LockService.getDocumentLock()||LockService.getScriptLock();
+  var ownsLock=!lock.hasLock();
+  if(ownsLock&&!lock.tryLock(30000))throw new Error('OPPORTUNITY_UPDATE_BUSY');
+  try {
+    var target=v6Sheet_('MKT_OPPORTUNITIES'),book=target.getParent();
+    var backup=book.getSheets().filter(function(s){return s.getSheetId()===Number(backupSheetId)&&/^AURA_OPP_BACKUP_/.test(s.getName());})[0];
+    if(!backup)throw new Error('INVALID_OPPORTUNITY_BACKUP');
+    var requests=[];
+    if(backup.getLastRow()>target.getMaxRows())requests.push({appendDimension:{sheetId:target.getSheetId(),dimension:'ROWS',length:backup.getLastRow()-target.getMaxRows()}});
+    requests.push({updateCells:{range:{sheetId:target.getSheetId()},fields:'userEnteredValue'}});
+    requests.push({copyPaste:{source:{sheetId:backup.getSheetId(),startRowIndex:0,endRowIndex:backup.getLastRow(),startColumnIndex:0,endColumnIndex:backup.getLastColumn()},destination:{sheetId:target.getSheetId(),startRowIndex:0,startColumnIndex:0},pasteType:'PASTE_VALUES'}});
+    Sheets.Spreadsheets.batchUpdate({requests:requests},book.getId());
+    if(typeof v6RowsMemoInvalidate_==='function')v6RowsMemoInvalidate_('MKT_OPPORTUNITIES');
+    return {status:'RESTORED'};
+  }finally{if(ownsLock)lock.releaseLock();}
 }
 
 function v6OpportunityMetrics_(rows){
