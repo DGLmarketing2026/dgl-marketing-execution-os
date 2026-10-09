@@ -1,0 +1,1162 @@
+{
+ "generatedFrom": "main",
+ "frontend": {
+  "loaded": [
+   "components/kpi-cards.js",
+   "components/campaign-cards.js",
+   "components/tables.js",
+   "components/modals.js",
+   "components/filters.js",
+   "components/sidebar.js",
+   "components/header.js",
+   "assets/js/creative-library-v5.js",
+   "assets/js/creative-render-v5.js",
+   "assets/js/copy-engine-v5.js",
+   "assets/js/copy-experience-v1.js",
+   "assets/js/campaign-sequences-v4.js",
+   "assets/js/marketing-playbooks-v55.js",
+   "assets/js/marketing-backend-adapter-v55.js",
+   "assets/js/aura-dashboard-v1.js",
+   "assets/js/acquisition-backend-adapter-v1.js",
+   "assets/js/marketing-opportunity-engine-v6.js",
+   "assets/js/marketing-frequency-control-v6.js",
+   "assets/js/creative-orchestration-v6.js",
+   "assets/js/copy-engine-v6.js",
+   "assets/js/campaign-execution-v6.js",
+   "assets/js/marketing-automation-v55.js",
+   "assets/js/campaign-studio-v5.js",
+   "assets/js/campaign-scope-bridge-v6.js",
+   "assets/js/campaign-studio-v6.js",
+   "assets/js/account-campaign-pipeline-v6.js",
+   "assets/js/lifecycle-modules-v6.js",
+   "assets/js/agent-control-v1.js",
+   "assets/js/system-integrity-v6.js",
+   "assets/js/acquisition-experience-v1.js",
+   "assets/js/acquisition-automation-v2.js",
+   "assets/js/acquisition-multilingual-v4.js",
+   "assets/js/acquisition-visual-v3.js",
+   "assets/js/interactions.js",
+   "assets/js/app.js"
+  ],
+  "notLoaded": [
+   {
+    "file": "assets/js/account-growth-os-v112.js",
+    "lines": 365,
+    "definesGlobals": [
+     "DGL_MODULE_RENDERERS",
+     "DGL_ACCOUNT_GROWTH"
+    ],
+    "referencedByTests": [],
+    "globalsAlsoDefinedByLoadedFiles": [
+     "DGL_MODULE_RENDERERS"
+    ]
+   },
+   {
+    "file": "assets/js/ai-copy-engine-v4.js",
+    "lines": 162,
+    "definesGlobals": [
+     "DGL_COPY_ENGINE_V4"
+    ],
+    "referencedByTests": [],
+    "globalsAlsoDefinedByLoadedFiles": []
+   },
+   {
+    "file": "assets/js/campaign-audience-bridge-v55.js",
+    "lines": 43,
+    "definesGlobals": [
+     "DGL_CAMPAIGN_AUDIENCE_BRIDGE_V55"
+    ],
+    "referencedByTests": [
+     "v55-audience-bridge.test.js",
+     "v55-legacy-status-visibility.test.js",
+     "v55-recipient-resolution.test.js"
+    ],
+    "globalsAlsoDefinedByLoadedFiles": []
+   },
+   {
+    "file": "assets/js/campaign-opportunities-v6.js",
+    "lines": 21,
+    "definesGlobals": [
+     "DGL_CAMPAIGN_OPPORTUNITIES_V6",
+     "DGL_MODULE_RENDERERS"
+    ],
+    "referencedByTests": [
+     "v6-live-opportunities-ui.test.js",
+     "v6-safe-opportunity-aggregates.test.js",
+     "v6-validation.test.js"
+    ],
+    "globalsAlsoDefinedByLoadedFiles": [
+     "DGL_MODULE_RENDERERS"
+    ]
+   },
+   {
+    "file": "assets/js/campaign-opportunity-center-v5.js",
+    "lines": 42,
+    "definesGlobals": [
+     "DGL_AM_REQUESTS",
+     "DGL_MODULE_RENDERERS"
+    ],
+    "referencedByTests": [
+     "v55-backend-adapter.test.js",
+     "v6-live-opportunities-ui.test.js"
+    ],
+    "globalsAlsoDefinedByLoadedFiles": [
+     "DGL_MODULE_RENDERERS"
+    ]
+   },
+   {
+    "file": "assets/js/campaign-studio-v3.js",
+    "lines": 402,
+    "definesGlobals": [
+     "DGL_MODULE_RENDERERS",
+     "DGL_CAMPAIGN_STUDIO"
+    ],
+    "referencedByTests": [],
+    "globalsAlsoDefinedByLoadedFiles": [
+     "DGL_MODULE_RENDERERS"
+    ]
+   },
+   {
+    "file": "assets/js/campaign-studio-v4.js",
+    "lines": 549,
+    "definesGlobals": [
+     "DGL_MODULE_RENDERERS",
+     "DGL_CAMPAIGN_STUDIO_V4"
+    ],
+    "referencedByTests": [],
+    "globalsAlsoDefinedByLoadedFiles": [
+     "DGL_MODULE_RENDERERS"
+    ]
+   },
+   {
+    "file": "assets/js/charts.js",
+    "lines": 239,
+    "definesGlobals": [
+     "DGL_CHARTS"
+    ],
+    "referencedByTests": [],
+    "globalsAlsoDefinedByLoadedFiles": []
+   },
+   {
+    "file": "assets/js/creative-library-v4.js",
+    "lines": 187,
+    "definesGlobals": [
+     "DGL_CREATIVE_LIBRARY_V4"
+    ],
+    "referencedByTests": [],
+    "globalsAlsoDefinedByLoadedFiles": []
+   },
+   {
+    "file": "assets/js/data.js",
+    "lines": 482,
+    "definesGlobals": [
+     "DGL_DATA",
+     "DGL_API"
+    ],
+    "referencedByTests": [],
+    "globalsAlsoDefinedByLoadedFiles": []
+   },
+   {
+    "file": "assets/js/google-apps-script-bridge.js",
+    "lines": 772,
+    "definesGlobals": [
+     "DGL_API"
+    ],
+    "referencedByTests": [
+     "v55-backend-adapter.test.js",
+     "v55-legacy-status-visibility.test.js",
+     "v6-validation.test.js"
+    ],
+    "globalsAlsoDefinedByLoadedFiles": []
+   },
+   {
+    "file": "assets/js/marketing-agent-contract-v1.js",
+    "lines": 61,
+    "definesGlobals": [
+     "DGL_AGENT_PERMISSIONS",
+     "DGL_MARKETING_STOP_CONDITIONS",
+     "DGL_MARKETING_AGENT_CONTRACT"
+    ],
+    "referencedByTests": [],
+    "globalsAlsoDefinedByLoadedFiles": [
+     "DGL_MARKETING_STOP_CONDITIONS"
+    ]
+   },
+   {
+    "file": "assets/js/marketing-campaign-os-v2.js",
+    "lines": 513,
+    "definesGlobals": [
+     "DGL_MODULE_RENDERERS",
+     "DGL_MARKETING_CAMPAIGN_OS"
+    ],
+    "referencedByTests": [],
+    "globalsAlsoDefinedByLoadedFiles": [
+     "DGL_MODULE_RENDERERS"
+    ]
+   },
+   {
+    "file": "assets/js/marketing-os-v54-modules.js",
+    "lines": 16,
+    "definesGlobals": [],
+    "referencedByTests": [],
+    "globalsAlsoDefinedByLoadedFiles": []
+   },
+   {
+    "file": "assets/js/marketing-os-v6.js",
+    "lines": 8,
+    "definesGlobals": [],
+    "referencedByTests": [
+     "v6-validation.test.js"
+    ],
+    "globalsAlsoDefinedByLoadedFiles": []
+   },
+   {
+    "file": "assets/js/modules.js",
+    "lines": 810,
+    "definesGlobals": [
+     "DGL_MODULE_RENDERERS",
+     "DGL_MODULE_HELPERS"
+    ],
+    "referencedByTests": [],
+    "globalsAlsoDefinedByLoadedFiles": [
+     "DGL_MODULE_RENDERERS"
+    ]
+   }
+  ],
+  "duplicateGlobals": [
+   {
+    "global": "DGL_MODULE_RENDERERS",
+    "files": [
+     "assets/js/account-campaign-pipeline-v6.js",
+     "assets/js/account-growth-os-v112.js",
+     "assets/js/agent-control-v1.js",
+     "assets/js/aura-dashboard-v1.js",
+     "assets/js/campaign-opportunities-v6.js",
+     "assets/js/campaign-opportunity-center-v5.js",
+     "assets/js/campaign-studio-v3.js",
+     "assets/js/campaign-studio-v4.js",
+     "assets/js/campaign-studio-v5.js",
+     "assets/js/marketing-campaign-os-v2.js",
+     "assets/js/modules.js"
+    ]
+   },
+   {
+    "global": "DGL_API",
+    "files": [
+     "assets/js/data.js",
+     "assets/js/google-apps-script-bridge.js"
+    ]
+   },
+   {
+    "global": "DGL_MARKETING_STOP_CONDITIONS",
+    "files": [
+     "assets/js/marketing-agent-contract-v1.js",
+     "assets/js/marketing-playbooks-v55.js"
+    ]
+   },
+   {
+    "global": "DGL_UI",
+    "files": [
+     "components/campaign-cards.js",
+     "components/filters.js",
+     "components/header.js",
+     "components/kpi-cards.js",
+     "components/modals.js",
+     "components/sidebar.js",
+     "components/tables.js"
+    ]
+   }
+  ],
+  "routes": [
+   {
+    "group": "COMMAND",
+    "id": "command-center",
+    "label": "Marketing Campaign Command Center",
+    "rendererFiles": [
+     "assets/js/account-growth-os-v112.js",
+     "assets/js/marketing-campaign-os-v2.js",
+     "assets/js/marketing-os-v54-modules.js",
+     "assets/js/marketing-os-v6.js",
+     "assets/js/modules.js"
+    ]
+   },
+   {
+    "group": "AURA",
+    "id": "aura-overview",
+    "label": "AURA Overview",
+    "rendererFiles": [
+     "assets/js/aura-dashboard-v1.js"
+    ]
+   },
+   {
+    "group": "EXISTING ACCOUNT GROWTH",
+    "id": "campaign-opportunities",
+    "label": "Campaign Opportunities",
+    "rendererFiles": [
+     "assets/js/campaign-opportunities-v6.js"
+    ]
+   },
+   {
+    "group": "EXISTING ACCOUNT GROWTH",
+    "id": "retention",
+    "label": "Retention / Nurture",
+    "rendererFiles": [
+     "assets/js/marketing-os-v54-modules.js",
+     "assets/js/modules.js"
+    ]
+   },
+   {
+    "group": "EXISTING ACCOUNT GROWTH",
+    "id": "reactivation",
+    "label": "Reactivation Campaigns",
+    "rendererFiles": [
+     "assets/js/marketing-os-v54-modules.js",
+     "assets/js/modules.js"
+    ]
+   },
+   {
+    "group": "EXISTING ACCOUNT GROWTH",
+    "id": "quoted-not-booked",
+    "label": "Quoted Not Booked",
+    "rendererFiles": [
+     "assets/js/marketing-os-v54-modules.js",
+     "assets/js/modules.js"
+    ]
+   },
+   {
+    "group": "EXISTING ACCOUNT GROWTH",
+    "id": "growth",
+    "label": "Cross-Sell Campaigns",
+    "rendererFiles": [
+     "assets/js/marketing-os-v54-modules.js",
+     "assets/js/modules.js"
+    ]
+   },
+   {
+    "group": "CAMPAIGN OPERATIONS",
+    "id": "campaign-execution",
+    "label": "Campaign Control",
+    "rendererFiles": [
+     "assets/js/marketing-os-v54-modules.js",
+     "assets/js/marketing-os-v6.js",
+     "assets/js/modules.js"
+    ]
+   },
+   {
+    "group": "CAMPAIGN OPERATIONS",
+    "id": "campaign-studio",
+    "label": "Campaign Studio",
+    "rendererFiles": [
+     "assets/js/campaign-audience-bridge-v55.js",
+     "assets/js/campaign-scope-bridge-v6.js",
+     "assets/js/campaign-studio-v3.js",
+     "assets/js/campaign-studio-v4.js",
+     "assets/js/campaign-studio-v5.js",
+     "assets/js/campaign-studio-v6.js"
+    ]
+   },
+   {
+    "group": "CAMPAIGN OPERATIONS",
+    "id": "email-marketing",
+    "label": "Customer Email Campaigns",
+    "rendererFiles": [
+     "assets/js/marketing-os-v54-modules.js",
+     "assets/js/modules.js"
+    ]
+   },
+   {
+    "group": "NEW BUSINESS ACQUISITION",
+    "id": "acquisition-command-center",
+    "label": "Acquisition Command Center",
+    "rendererFiles": [
+     "assets/js/acquisition-experience-v1.js"
+    ]
+   },
+   {
+    "group": "NEW BUSINESS ACQUISITION",
+    "id": "landing-pages",
+    "label": "Landing Pages",
+    "rendererFiles": [
+     "assets/js/acquisition-experience-v1.js"
+    ]
+   },
+   {
+    "group": "NEW BUSINESS ACQUISITION",
+    "id": "channel-orchestration",
+    "label": "Channel Orchestration",
+    "rendererFiles": [
+     "assets/js/acquisition-experience-v1.js",
+     "assets/js/marketing-campaign-os-v2.js"
+    ]
+   },
+   {
+    "group": "NEW BUSINESS ACQUISITION",
+    "id": "paid-media",
+    "label": "Paid Media",
+    "rendererFiles": [
+     "assets/js/acquisition-experience-v1.js"
+    ]
+   },
+   {
+    "group": "NEW BUSINESS ACQUISITION",
+    "id": "linkedin-acquisition",
+    "label": "LinkedIn Acquisition",
+    "rendererFiles": [
+     "assets/js/acquisition-experience-v1.js"
+    ]
+   },
+   {
+    "group": "NEW BUSINESS ACQUISITION",
+    "id": "outbound-acquisition",
+    "label": "Outbound / Lead Nurture",
+    "rendererFiles": [
+     "assets/js/acquisition-experience-v1.js"
+    ]
+   },
+   {
+    "group": "NEW BUSINESS ACQUISITION",
+    "id": "lead-capture",
+    "label": "Lead Capture",
+    "rendererFiles": [
+     "assets/js/acquisition-experience-v1.js"
+    ]
+   },
+   {
+    "group": "NEW BUSINESS ACQUISITION",
+    "id": "lead-routing",
+    "label": "Lead Routing",
+    "rendererFiles": [
+     "assets/js/acquisition-experience-v1.js"
+    ]
+   },
+   {
+    "group": "NEW BUSINESS ACQUISITION",
+    "id": "acquisition-attribution",
+    "label": "Acquisition Attribution",
+    "rendererFiles": [
+     "assets/js/acquisition-experience-v1.js"
+    ]
+   },
+   {
+    "group": "NEW BUSINESS ACQUISITION",
+    "id": "automation-playbooks",
+    "label": "Acquisition Journeys",
+    "rendererFiles": [
+     "assets/js/acquisition-experience-v1.js",
+     "assets/js/marketing-os-v54-modules.js",
+     "assets/js/modules.js"
+    ]
+   },
+   {
+    "group": "CONTENT",
+    "id": "content-library",
+    "label": "Content & Asset Library",
+    "rendererFiles": [
+     "assets/js/acquisition-experience-v1.js",
+     "assets/js/modules.js"
+    ]
+   },
+   {
+    "group": "CAMPAIGNS BY SERVICE",
+    "id": "service-marketing",
+    "label": "Service Campaign Overview",
+    "rendererFiles": [
+     "assets/js/marketing-campaign-os-v2.js",
+     "assets/js/marketing-os-v54-modules.js"
+    ]
+   },
+   {
+    "group": "CAMPAIGNS BY SERVICE",
+    "id": "ftl-marketing",
+    "label": "FTL Campaigns",
+    "rendererFiles": [
+     "assets/js/marketing-campaign-os-v2.js",
+     "assets/js/marketing-os-v54-modules.js"
+    ]
+   },
+   {
+    "group": "CAMPAIGNS BY SERVICE",
+    "id": "ltl-marketing",
+    "label": "LTL Campaigns",
+    "rendererFiles": [
+     "assets/js/marketing-campaign-os-v2.js",
+     "assets/js/marketing-os-v54-modules.js"
+    ]
+   },
+   {
+    "group": "CAMPAIGNS BY SERVICE",
+    "id": "drayage-marketing",
+    "label": "Drayage Campaigns",
+    "rendererFiles": [
+     "assets/js/marketing-campaign-os-v2.js",
+     "assets/js/marketing-os-v54-modules.js"
+    ]
+   },
+   {
+    "group": "ACCOUNTS",
+    "id": "account-campaign-pipeline",
+    "label": "Account Campaign Pipeline",
+    "rendererFiles": [
+     "assets/js/account-campaign-pipeline-v6.js"
+    ]
+   },
+   {
+    "group": "ACCOUNTS",
+    "id": "priority-queue",
+    "label": "Account Priority Queue",
+    "rendererFiles": [
+     "assets/js/account-growth-os-v112.js"
+    ]
+   },
+   {
+    "group": "ACCOUNTS",
+    "id": "account-360",
+    "label": "Account 360",
+    "rendererFiles": [
+     "assets/js/account-growth-os-v112.js"
+    ]
+   },
+   {
+    "group": "ANALYTICS",
+    "id": "campaign-attribution",
+    "label": "Existing Account Attribution",
+    "rendererFiles": [
+     "assets/js/marketing-campaign-os-v2.js"
+    ]
+   },
+   {
+    "group": "ANALYTICS",
+    "id": "analytics",
+    "label": "Marketing Analytics",
+    "rendererFiles": [
+     "assets/js/modules.js"
+    ]
+   },
+   {
+    "group": "ANALYTICS",
+    "id": "account-campaign-reports",
+    "label": "Account & Campaign Reports",
+    "rendererFiles": [
+     "assets/js/marketing-os-v54-modules.js"
+    ]
+   },
+   {
+    "group": "FUTURE ARCHITECTURE",
+    "id": "agent-control",
+    "label": "AURA Control · Future",
+    "rendererFiles": [
+     "assets/js/agent-control-v1.js"
+    ]
+   },
+   {
+    "group": "ADMIN",
+    "id": "governance",
+    "label": "Governance & Approvals",
+    "rendererFiles": [
+     "assets/js/marketing-os-v54-modules.js",
+     "assets/js/modules.js"
+    ]
+   }
+  ],
+  "fileUses": {
+   "components/kpi-cards.js": {
+    "defines": [
+     "DGL_UI"
+    ],
+    "uses": []
+   },
+   "components/campaign-cards.js": {
+    "defines": [
+     "DGL_UI"
+    ],
+    "uses": []
+   },
+   "components/tables.js": {
+    "defines": [
+     "DGL_UI"
+    ],
+    "uses": []
+   },
+   "components/modals.js": {
+    "defines": [
+     "DGL_UI"
+    ],
+    "uses": []
+   },
+   "components/filters.js": {
+    "defines": [
+     "DGL_UI"
+    ],
+    "uses": []
+   },
+   "components/sidebar.js": {
+    "defines": [
+     "DGL_UI"
+    ],
+    "uses": [
+     "DGL_MODULES"
+    ]
+   },
+   "components/header.js": {
+    "defines": [
+     "DGL_UI"
+    ],
+    "uses": []
+   },
+   "assets/js/creative-library-v5.js": {
+    "defines": [
+     "DGL_CREATIVE_LIBRARY_V5"
+    ],
+    "uses": []
+   },
+   "assets/js/creative-render-v5.js": {
+    "defines": [
+     "DGL_CREATIVE_RENDER_V5"
+    ],
+    "uses": [
+     "DGL_CREATIVE_LIBRARY_V5"
+    ]
+   },
+   "assets/js/copy-engine-v5.js": {
+    "defines": [
+     "DGL_COPY_ENGINE_V5"
+    ],
+    "uses": [
+     "DGL_CREATIVE_LIBRARY_V5"
+    ]
+   },
+   "assets/js/copy-experience-v1.js": {
+    "defines": [
+     "DGL_COPY_EXPERIENCE_V1"
+    ],
+    "uses": [
+     "DGL_COPY_ENGINE_V5",
+     "DGL_CREATIVE_LIBRARY_V5"
+    ]
+   },
+   "assets/js/campaign-sequences-v4.js": {
+    "defines": [
+     "DGL_CAMPAIGN_SEQUENCES_V4"
+    ],
+    "uses": []
+   },
+   "assets/js/marketing-playbooks-v55.js": {
+    "defines": [
+     "DGL_MARKETING_PLAYBOOKS",
+     "DGL_MARKETING_STOP_CONDITIONS"
+    ],
+    "uses": []
+   },
+   "assets/js/marketing-backend-adapter-v55.js": {
+    "defines": [
+     "DGL_BACKEND_DIAGNOSTIC",
+     "DGL_MARKETING_BACKEND_ADAPTER_V55"
+    ],
+    "uses": [
+     "DGL_MODULE_RENDERERS"
+    ]
+   },
+   "assets/js/aura-dashboard-v1.js": {
+    "defines": [
+     "DGL_AURA_PERFORMANCE",
+     "DGL_AURA_COMMAND_CENTER",
+     "DGL_MODULE_RENDERERS"
+    ],
+    "uses": [
+     "DGL_MARKETING_BACKEND_ADAPTER_V55",
+     "DGL_UI"
+    ]
+   },
+   "assets/js/acquisition-backend-adapter-v1.js": {
+    "defines": [],
+    "uses": []
+   },
+   "assets/js/marketing-opportunity-engine-v6.js": {
+    "defines": [
+     "DGL_MARKETING_OPPORTUNITY_ENGINE_V6"
+    ],
+    "uses": [
+     "DGL_MARKETING_BACKEND_ADAPTER_V55"
+    ]
+   },
+   "assets/js/marketing-frequency-control-v6.js": {
+    "defines": [
+     "DGL_MARKETING_FREQUENCY_CONTROL_V6"
+    ],
+    "uses": [
+     "DGL_MARKETING_BACKEND_ADAPTER_V55"
+    ]
+   },
+   "assets/js/creative-orchestration-v6.js": {
+    "defines": [
+     "DGL_CREATIVE_ORCHESTRATION_V6"
+    ],
+    "uses": []
+   },
+   "assets/js/copy-engine-v6.js": {
+    "defines": [
+     "DGL_COPY_ENGINE_V6"
+    ],
+    "uses": []
+   },
+   "assets/js/campaign-execution-v6.js": {
+    "defines": [
+     "DGL_CAMPAIGN_EXECUTION_V6"
+    ],
+    "uses": [
+     "DGL_MARKETING_BACKEND_ADAPTER_V55"
+    ]
+   },
+   "assets/js/marketing-automation-v55.js": {
+    "defines": [
+     "DGL_MARKETING_AUTOMATION_V55"
+    ],
+    "uses": [
+     "DGL_AM_REQUESTS",
+     "DGL_MARKETING_PLAYBOOKS",
+     "DGL_MARKETING_BACKEND_ADAPTER_V55"
+    ]
+   },
+   "assets/js/campaign-studio-v5.js": {
+    "defines": [
+     "DGL_MODULE_RENDERERS",
+     "DGL_CAMPAIGN_STUDIO_V5"
+    ],
+    "uses": [
+     "DGL_CREATIVE_LIBRARY_V5",
+     "DGL_COPY_ENGINE_V5",
+     "DGL_CAMPAIGN_SEQUENCES_V4",
+     "DGL_MARKETING_BACKEND_ADAPTER_V55",
+     "DGL_INTERACTIONS",
+     "DGL_MARKETING_CAMPAIGN_OS",
+     "DGL_CREATIVE_RENDER_V5",
+     "DGL_MARKETING_PLAYBOOKS",
+     "DGL_MARKETING_AUTOMATION_V55"
+    ]
+   },
+   "assets/js/campaign-scope-bridge-v6.js": {
+    "defines": [
+     "DGL_CAMPAIGN_SCOPE_BRIDGE_V6"
+    ],
+    "uses": [
+     "DGL_MARKETING_BACKEND_ADAPTER_V55",
+     "DGL_MARKETING_PLAYBOOKS",
+     "DGL_ENABLE_LEGACY_SCOPE_BOOTSTRAP",
+     "DGL_MODULE_RENDERERS",
+     "DGL_INTERACTIONS"
+    ]
+   },
+   "assets/js/campaign-studio-v6.js": {
+    "defines": [],
+    "uses": []
+   },
+   "assets/js/account-campaign-pipeline-v6.js": {
+    "defines": [
+     "DGL_ACCOUNT_CAMPAIGN_PIPELINE_V6",
+     "DGL_MODULE_RENDERERS"
+    ],
+    "uses": [
+     "DGL_MARKETING_BACKEND_ADAPTER_V55"
+    ]
+   },
+   "assets/js/lifecycle-modules-v6.js": {
+    "defines": [],
+    "uses": []
+   },
+   "assets/js/agent-control-v1.js": {
+    "defines": [
+     "DGL_MODULE_RENDERERS"
+    ],
+    "uses": [
+     "DGL_MARKETING_AGENT_CONTRACT"
+    ]
+   },
+   "assets/js/system-integrity-v6.js": {
+    "defines": [
+     "DGL_V66_REMEDIATION",
+     "DGL_SYSTEM_INTEGRITY_V6"
+    ],
+    "uses": [
+     "DGL_CREATIVE_LIBRARY_V5",
+     "DGL_CAMPAIGN_STUDIO_V5",
+     "DGL_MARKETING_BACKEND_ADAPTER_V55"
+    ]
+   },
+   "assets/js/acquisition-experience-v1.js": {
+    "defines": [],
+    "uses": []
+   },
+   "assets/js/acquisition-automation-v2.js": {
+    "defines": [],
+    "uses": []
+   },
+   "assets/js/acquisition-multilingual-v4.js": {
+    "defines": [],
+    "uses": []
+   },
+   "assets/js/acquisition-visual-v3.js": {
+    "defines": [],
+    "uses": []
+   },
+   "assets/js/interactions.js": {
+    "defines": [
+     "DGL_INTERACTIONS"
+    ],
+    "uses": [
+     "DGL_DATA",
+     "DGL_UI",
+     "DGL_MODULE_HELPERS",
+     "DGL_MODULE_RENDERERS",
+     "DGL_API"
+    ]
+   },
+   "assets/js/app.js": {
+    "defines": [
+     "DGL_APP"
+    ],
+    "uses": [
+     "DGL_UI",
+     "DGL_MODULE_RENDERERS",
+     "DGL_INTERACTIONS"
+    ]
+   }
+  }
+ },
+ "backend": [
+  {
+   "file": "backend/apps-script-live-core/AURA_CANON.gs",
+   "lines": 31,
+   "publicFunctions": [
+    "AURA_CANON_INFO"
+   ]
+  },
+  {
+   "file": "backend/apps-script-live-core/DGL_Core.gs",
+   "lines": 2714,
+   "publicFunctions": [
+    "installDglMarketingOS",
+    "validateDglInstallation",
+    "runDailyAutomation",
+    "processEmailQueue",
+    "registerDriveAsset",
+    "createCampaignFolder",
+    "refreshAnalytics",
+    "doGet",
+    "doPost",
+    "RUN_AURA_WORDPRESS_QA",
+    "RUN_AURA_CAMPANA_A_GO_LIVE",
+    "RUN_AURA_CAMPANA_A_GO_LIVE_TEST",
+    "RUN_AURA_CAMPANA_A_GOLIVE_SCOPED_DISPATCH_TESTS",
+    "HOLD_SCRIPT_LOCK_FOR_TEST",
+    "RUN_AURA_CAMPANA_A_GOLIVE_VERIFY_RESULT"
+   ]
+  },
+  {
+   "file": "backend/apps-script-live-core/LiveCoreConfig.gs",
+   "lines": 44,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-live-core/MarketingApiAdapter.gs",
+   "lines": 58,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-live-core/MarketingAudienceEngine.gs",
+   "lines": 80,
+   "publicFunctions": [
+    "rebuildMarketingAudiences",
+    "getMarketingAudiences"
+   ]
+  },
+  {
+   "file": "backend/apps-script-live-core/MarketingDataHub.gs",
+   "lines": 200,
+   "publicFunctions": [
+    "setupMarketingDataHub",
+    "pushMarketingSnapshot"
+   ]
+  },
+  {
+   "file": "backend/apps-script-live-core/MarketingEmailEngine.gs",
+   "lines": 159,
+   "publicFunctions": [
+    "createMarketingCampaign",
+    "queueMarketingAudienceDrafts",
+    "processMarketingEmailQueue"
+   ]
+  },
+  {
+   "file": "backend/apps-script-live-core/MarketingImport.gs",
+   "lines": 412,
+   "publicFunctions": [
+    "setMarketingImportSourceId",
+    "clearMarketingImportSourceId",
+    "previewMarketingImport",
+    "importMarketingFromNovaExport",
+    "installDailyMarketingImportTrigger",
+    "removeDailyMarketingImportTrigger"
+   ]
+  },
+  {
+   "file": "backend/apps-script-live-core/MarketingV6AuraCampanaACatchup.gs",
+   "lines": 413,
+   "publicFunctions": [
+    "RUN_AURA_CAMPANA_A_CATCHUP_PREFLIGHT",
+    "RUN_AURA_CAMPANA_A_CATCHUP_LIVE"
+   ]
+  },
+  {
+   "file": "backend/apps-script-live-core/MarketingV6ManualRunner.gs",
+   "lines": 151,
+   "publicFunctions": [
+    "runV6RefreshOpportunities",
+    "installV6OpportunityRefreshTrigger",
+    "runV6FullOpportunityEngine",
+    "runV6AuditContactRecipientSchema",
+    "runV6EnsureContactRecipientSchema",
+    "runV6AcqInstallAutomationTrigger",
+    "runV6AcqAutomationTick",
+    "runV6AuraExecutionReport",
+    "runV6AuraGmailRecon",
+    "runV6AuraLuisRecon",
+    "runV6AuraXlsxRecon",
+    "runV6AuraGmailCommissioning",
+    "runV6AuraGmailFreshnessCheck",
+    "runV6AuthSelfTest"
+   ]
+  },
+  {
+   "file": "backend/apps-script-legacy-v55/MarketingV55Backend.gs",
+   "lines": 548,
+   "publicFunctions": [
+    "setupMarketingV55Backend",
+    "createMarketingV55Token",
+    "testMarketingV55Setup",
+    "testMarketingV55RequestFlow",
+    "testMarketingV55ResponseStopHandoff"
+   ]
+  },
+  {
+   "file": "backend/apps-script-legacy-v55/MarketingV55RecipientResolver.gs",
+   "lines": 233,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-legacy-v55/MarketingV55TestDraft.gs",
+   "lines": 125,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AcquisitionEngine.gs",
+   "lines": 362,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AcquisitionWordPress.gs",
+   "lines": 323,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraAgentIntelligence.gs",
+   "lines": 245,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraAgentRuntime.gs",
+   "lines": 505,
+   "publicFunctions": [
+    "auraAgentTick"
+   ]
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraAgentShadow.gs",
+   "lines": 100,
+   "publicFunctions": [
+    "AURA_AGENT_SHADOW_ACTIVATE",
+    "AURA_AGENT_SHADOW_RECOVER"
+   ]
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraAutomation.gs",
+   "lines": 485,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraBootstrap.gs",
+   "lines": 155,
+   "publicFunctions": [
+    "v6AuraBootstrapAndRun"
+   ]
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraBridge.gs",
+   "lines": 207,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraCampanaA.gs",
+   "lines": 1827,
+   "publicFunctions": [
+    "RUN_AURA_CAMPANA_A_SOURCE_STATS",
+    "RUN_AURA_CAMPANA_A_REGENERATE_DRY_RUN"
+   ]
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraCopyEngine.gs",
+   "lines": 147,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraCreativeApproval.gs",
+   "lines": 574,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraDataHubReader.gs",
+   "lines": 157,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraEmailDispatcher.gs",
+   "lines": 609,
+   "publicFunctions": [
+    "auraEnableLiveSending",
+    "auraDisableLiveSending",
+    "RUN_AURA_REGENERATE_RETENTION_DRY_RUN",
+    "auraProcessEmailQueue",
+    "auraInstallTriggers",
+    "RUN_AURA_EMAIL_QUEUE_AUDIT"
+   ]
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraEmailPerformance.gs",
+   "lines": 199,
+   "publicFunctions": [
+    "auraIngestGmailDsn"
+   ]
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraGmailIngest.gs",
+   "lines": 374,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraMetadataReconciliation.gs",
+   "lines": 25,
+   "publicFunctions": [
+    "RUN_AURA_CAMPANA_A_RECONCILE_METADATA_ONLY"
+   ]
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraRunLog.gs",
+   "lines": 105,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraTracking.gs",
+   "lines": 149,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6AuraTrackingQa.gs",
+   "lines": 124,
+   "publicFunctions": [
+    "AURA_TRACKING_QA_STEP1_ACTIVATE",
+    "AURA_TRACKING_QA_STEP2_VERIFY"
+   ]
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6CampaignStudio.gs",
+   "lines": 212,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6CanonicalIdentity.gs",
+   "lines": 32,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6CommercialOutcomes.gs",
+   "lines": 29,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6ContactIngestion.gs",
+   "lines": 52,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6CopyUsage.gs",
+   "lines": 4,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6CreativeUsage.gs",
+   "lines": 3,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6DataFreshness.gs",
+   "lines": 74,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6DriveArchive.gs",
+   "lines": 11,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6ExecutionEngine.gs",
+   "lines": 9,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6FrequencyControl.gs",
+   "lines": 47,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6OpportunityEngine.gs",
+   "lines": 129,
+   "publicFunctions": [
+    "runV6BackendSmokeTest"
+   ]
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6Pipeline.gs",
+   "lines": 16,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6RecipientResolution.gs",
+   "lines": 63,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6ReportIngestion.gs",
+   "lines": 251,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6ResponseEvents.gs",
+   "lines": 84,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6RetentionReport.gs",
+   "lines": 337,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6RouterExtension.gs",
+   "lines": 204,
+   "publicFunctions": []
+  },
+  {
+   "file": "backend/apps-script-v6/MarketingV6SchemaMigration.gs",
+   "lines": 132,
+   "publicFunctions": []
+  }
+ ]
+}
