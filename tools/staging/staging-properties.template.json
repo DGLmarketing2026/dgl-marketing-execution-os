@@ -1,0 +1,10 @@
+{
+  "AURA_ENVIRONMENT": "STAGING",
+  "AURA_SEND_MODE": "DRY_RUN",
+  "AURA_STAGING_INBOX": "<cuenta Google de STAGING, distinta de la productiva>",
+  "AURA_STAGING_DATA_HUB_ID": "<ID de la hoja AURA_STAGING_DATA_HUB>",
+  "AURA_STAGING_REPORT_SOURCE_ID": "<ID de la hoja AURA_STAGING_NOVA_SOURCE>",
+  "AURA_STAGING_DRIVE_FOLDER_ID": "<ID de la carpeta AURA_STAGING>",
+  "AURA_STAGING_TRIGGERS": "auraReportIntakeTick,auraAgentTick",
+  "AURA_GMAIL_ALLOWED_SENDERS": "<remitente sintético autorizado>"
+}
