@@ -85,3 +85,9 @@ python -m http.server 8770 --bind 127.0.0.1 --directory ../dgl-growth-os-preview
 - **Vista previa:** `python -m http.server 8770 --bind 127.0.0.1 --directory ../dgl-growth-os-preview` y luego `http://localhost:8770/growth/`.
 - **Pendiente de tu aprobación:** las mismas 5 decisiones de antes.
 - **Prueba pendiente:** validar Studio y las aprobaciones con datos reales (requiere tu token).
+
+### Actualización 2026-10-09 — Campaign Studio en QA
+- **Corregido en el código:** la vista previa ya muestra valores de ejemplo para `{{firstName}}` y `{{company}}` (Laura, ABC Logistics). El HTML que se aprueba conserva los tokens. El panel Governance explica en lenguaje simple qué significan PENDING y UNAPPROVED.
+- **Corregido en QA:** en la página de QA, aprobar una variante, aprobar el set, crear un borrador de prueba y revocar muestran un aviso claro. Ya no llaman al backend real ni se simulan.
+- **Limitación del entorno:** aprobar o crear borradores de prueba requiere `/growth/` conectado al backend privado con un token válido.
+- **Suite:** 77/77 PASS. Prueba nueva: `tests/campaign-studio-preview-tokens.test.js`.

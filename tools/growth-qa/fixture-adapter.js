@@ -20,6 +20,9 @@
     getLatestApprovedCreative: async () => null,
     // Synthetic approvals: recorded in memory only; the next Command Center read reflects them.
     agentDecide: async (approvalId, decision) => { bundle.agent.waitingApproval = bundle.agent.waitingApproval.filter(t => t.approvalId !== approvalId); bundle.agent.priorities = bundle.agent.priorities.filter(t => t.approvalId !== approvalId); bundle.agent.opportunities = bundle.agent.opportunities.map(t => t.approvalId === approvalId ? Object.assign({}, t, { approvalStatus: decision, state: decision === "APPROVED" ? "BLOCKED" : "CANCELLED", blockReason: decision === "APPROVED" ? "EXTERNAL_EXECUTION_DISABLED_PHASE_V1" : "" }) : t); g.__qaDecisions = (g.__qaDecisions || []).concat([{ approvalId, decision }]); return { status: "RECORDED" }; },
+    // Studio write actions need the real private backend. QA does not simulate them: they fail with
+    // an explicit message, no request leaves the page and the connection state is not touched.
+    ...Object.fromEntries(["approveCreative", "approveCreativeSet", "campaignStudioTestDraft", "revokeApprovedCreative"].map(k => [k, async () => { throw new Error("QA (datos de prueba): esta acción escribe en el backend privado y aquí no se simula. Para aprobar variantes o crear borradores de prueba, abra /growth/ y conecte el backend privado."); }])),
     agentRunNow: async () => ({ status: "COMPLETED" }), campaignStudioList: async () => ({ campaigns: [{ campaignId: "CMP-CAMPANA-A-HA-PRIORITARIA", campaignName: "Campaña A · HA prioritaria", campaignType: "Reactivation", service: "Multiservicio", status: "ACTIVE" }] }) });
 })(window);
 

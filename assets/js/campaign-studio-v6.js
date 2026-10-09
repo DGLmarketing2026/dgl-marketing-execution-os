@@ -108,6 +108,17 @@ function previewHtml(m,language=m.language){
   if(!m.inspect||m.inspect===m.layout)return emailHtml(m,language);
   return emailHtml({...m,layout:m.inspect,variants:{...m.variants,[language]:{...m.variants[language],storedHtml:null,dirty:true}}},language);
 }
+// Display only: the iframe shows sample values for the two tokens AURA merges per recipient at
+// send time. previewHtml()/emailHtml()/payload() keep the tokens unmerged (that is what is approved).
+const SAMPLE_TOKENS={"{{firstName}}":"Laura","{{company}}":"ABC Logistics"};
+function sampleMerge(html){return Object.keys(SAMPLE_TOKENS).reduce((h,t)=>h.split(t).join(SAMPLE_TOKENS[t]),String(html||""));}
+// Plain-language meaning of the governance states shown in the panel.
+function statusHelp(m){
+  const c=m.context,v=m.variants[m.language],langs=c.requiredLanguages||[],missing=langs.filter(l=>!m.variants[l]?.approved),s=variantStatus(v);
+  const variant=s==="UNAPPROVED"?m.language+" variant UNAPPROVED: nobody has approved this language yet. Review the preview and click Approve variant.":s==="STALE AFTER EDIT"?m.language+" variant edited after approval: the previous approval was revoked; approve it again.":s==="APPROVED / TEST DRAFT REQUIRED"?m.language+" variant approved"+(c.testDraftReviewRequired?"; a verified test draft is still required.":"."):s==="TEST DRAFT VERIFIED"?m.language+" variant approved and test draft verified.":m.language+" variant uses a retired design; approving the new preview creates a new version.";
+  const set=String(c.creativeSetStatus||"PENDING").toUpperCase()==="APPROVED"?"Creative set APPROVED: AURA can use it.":"Creative set "+(c.creativeSetStatus||"PENDING")+": it is approved only after every required language ("+(langs.join(" / ")||"—")+") has an approved variant"+(c.testDraftReviewRequired?" with a verified test draft":"")+(missing.length?". Still missing: "+missing.join(" / ")+".":".");
+  return set+" "+variant+" Approvals are written to the private backend; nothing is approved automatically.";
+}
 
 // ---------- Layout / styles (scoped, injected once) ----------
 const CSS=`.cs6{--cs6-gap:20px;color:var(--text,#fff)}.cs6 *{box-sizing:border-box}
@@ -230,10 +241,11 @@ function draw(){
       '<section class="cs6-panel"><div class="cs6-tabs" role="tablist" aria-label="Creative language">'+LANGUAGES.map(l=>'<button type="button" class="cs6-tab" role="tab" aria-selected="'+(m.language===l)+'" data-language="'+l+'" '+(m.busy?'disabled':'')+'><b>'+l+'</b><small>'+E(variantStatus(m.variants[l]))+'</small></button>').join("")+'</div></section>'+
       '<section class="cs6-panel"><div class="cs6-eyebrow" style="margin-bottom:10px">CREATIVE FIELDS · '+E(m.language)+'</div><fieldset style="border:0;padding:0;margin:0" '+(m.busy?'disabled':'')+'>'+FIELDS.map(k=>'<label class="cs6-field">'+E(k)+'<textarea data-copy="'+k+'" rows="2">'+E(v.copy[k])+'</textarea></label>').join("")+'</fieldset></section>'+
       '<section class="cs6-panel"><div class="cs6-eyebrow" style="margin-bottom:10px">GOVERNANCE</div><div class="cs6-gov" data-governance>'+governanceHtml(m)+'</div>'+
+        '<p class="cs6-why" data-status-help>'+E(statusHelp(m))+'</p>'+
         '<p class="cs6-alert" role="alert">'+E(m.error)+'</p><div class="cs6-actions" style="margin-top:10px">'+[["draft","Create test draft"],["variant","Approve variant"],["set","Approve creative set"]].map(([a,label])=>'<button type="button" class="btn btn-primary" data-action="'+a+'" '+(actionDisabled(m,a)?'disabled':'')+'>'+label+'</button>').join("")+'</div>'+
-        '<p class="cs6-muted" style="margin:10px 0 0">Test Draft creates an unsent Gmail draft. Approval stores exactly the HTML shown in the preview; AURA only merges name/company tokens.</p></section>'+
+        '<p class="cs6-muted" style="margin:10px 0 0">Test Draft creates an unsent Gmail draft. Approval stores exactly the HTML shown in the preview, with {{firstName}} and {{company}} kept as tokens; AURA merges them per contact at send time.</p></section>'+
     '</div>'+
-    '<div class="cs6-col cs6-previewcol"><section class="cs6-panel"><div class="cs6-previewbar"><div><div class="cs6-eyebrow">ACTUAL EMAIL HTML · '+E(m.language)+'</div><div class="cs6-muted" data-preview-label>'+E(sysName(m.inspect||m.layout))+'</div></div><div class="cs6-device" role="group" aria-label="Preview width">'+["desktop","mobile"].map(d=>'<button type="button" data-device="'+d+'" aria-pressed="'+(view.device===d)+'">'+(d==="desktop"?"Desktop":"Mobile")+'</button>').join("")+'</div></div>'+
+    '<div class="cs6-col cs6-previewcol"><section class="cs6-panel"><div class="cs6-previewbar"><div><div class="cs6-eyebrow">ACTUAL EMAIL HTML · '+E(m.language)+'</div><div class="cs6-muted" data-preview-label>'+E(sysName(m.inspect||m.layout))+'</div><div class="cs6-muted" data-sample-note>Sample values: {{firstName}} = Laura · {{company}} = ABC Logistics</div></div><div class="cs6-device" role="group" aria-label="Preview width">'+["desktop","mobile"].map(d=>'<button type="button" data-device="'+d+'" aria-pressed="'+(view.device===d)+'">'+(d==="desktop"?"Desktop":"Mobile")+'</button>').join("")+'</div></div>'+
       '<iframe data-preview class="cs6-frame'+(view.device==="mobile"?" is-mobile":"")+'" title="'+m.language+' email preview" sandbox=""></iframe></section></div>'+
     '</div></div>';
   bindWorkspace(m);preview();
@@ -253,10 +265,11 @@ function bindWorkspace(m){
 // Light update (no full redraw): preview HTML, statuses and action states only.
 function preview(){
   if(!mount||!model)return;
-  const frame=mount.querySelector("[data-preview]");if(frame)frame.srcdoc=previewHtml(model);
+  const frame=mount.querySelector("[data-preview]");if(frame)frame.srcdoc=sampleMerge(previewHtml(model));
   (mount.querySelectorAll("[data-language]")||[]).forEach(b=>{const s=b.querySelector&&b.querySelector("small");if(s)s.textContent=variantStatus(model.variants[b.dataset.language]);});
   (mount.querySelectorAll("[data-action]")||[]).forEach(b=>b.disabled=actionDisabled(model,b.dataset.action));
   const status=mount.querySelector("[data-variant-status]");if(status)status.textContent=variantStatus(model.variants[model.language]);
+  const help=mount.querySelector("[data-status-help]");if(help)help.textContent=statusHelp(model);
 }
 async function render(container,explicitId){
   mount=container;ensureStyles();const ticket=++epoch,id=explicitId===undefined?navigationId():explicitId;model=null;inFlight++;
@@ -297,7 +310,7 @@ async function render(container,explicitId){
   }catch(e){if(ticket===epoch)container.innerHTML='<div class="cs6"><div class="cs6-head"><div><div class="cs6-eyebrow">GOVERNED CAMPAIGN STUDIO</div><h2>Select a campaign</h2></div></div><p class="cs6-alert" role="alert">'+E(e.message)+'</p></div>';}
   finally{inFlight--;}
 }
-g.DGL_CAMPAIGN_STUDIO_V6={version:"governed-premium-v4",previewHtml,filterCampaigns,normalizeCampaign,loadCampaignList,openCampaign,INTAKE_QUESTION,INTAKE_OPTIONS,autoSystem,render,createModel,canApproveSet,variantStatus,selectLanguage,editCopy,changeLayout,emailHtml,validateBrand,navigationId,getState:()=>model};
+g.DGL_CAMPAIGN_STUDIO_V6={version:"governed-premium-v4",previewHtml,sampleMerge,statusHelp,filterCampaigns,normalizeCampaign,loadCampaignList,openCampaign,INTAKE_QUESTION,INTAKE_OPTIONS,autoSystem,render,createModel,canApproveSet,variantStatus,selectLanguage,editCopy,changeLayout,emailHtml,validateBrand,navigationId,getState:()=>model};
 g.DGL_MODULE_RENDERERS=g.DGL_MODULE_RENDERERS||{};g.DGL_MODULE_RENDERERS["campaign-studio"]=render;
 // Re-render only when the backend actually becomes connected, never while a render is in flight.
 // A failing context call emits a backend-change event from inside the render; re-rendering on that
