@@ -14,5 +14,9 @@ fs.rmSync(OUT, { recursive: true, force: true }); fs.mkdirSync(OUT, { recursive:
 let n = 0;
 ['backend/apps-script-v6', 'backend/apps-script-live-core', 'backend/apps-script-legacy-v55'].forEach(d => fs.readdirSync(path.join(ROOT, d)).filter(f => f.endsWith('.gs')).forEach(f => { fs.copyFileSync(path.join(ROOT, d, f), path.join(OUT, f)); n++; }));
 fs.copyFileSync(path.join(ROOT, 'backend/apps-script-manifest/appsscript.staging.json'), path.join(OUT, 'appsscript.json'));
-fs.writeFileSync(path.join(OUT, '.clasp.json'), JSON.stringify({ scriptId, rootDir: '.' }, null, 2));
+// Apps Script runs each file's top-level code in push order: DGL_Core.gs reads LiveCoreConfig.gs
+// while loading, so the configuration and environment modules are pushed first.
+const first = ['LiveCoreConfig.gs', 'MarketingV6AuraEnvironment.gs'];
+const order = ['appsscript.json'].concat(first, fs.readdirSync(OUT).filter(f => f.endsWith('.gs') && first.indexOf(f) < 0).sort());
+fs.writeFileSync(path.join(OUT, '.clasp.json'), JSON.stringify({ scriptId, rootDir: '.', filePushOrder: order }, null, 2));
 console.log('STAGING bundle: ' + n + ' files + staging manifest -> ' + path.relative(ROOT, OUT));
