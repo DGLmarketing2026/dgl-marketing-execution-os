@@ -108,16 +108,53 @@ function previewHtml(m,language=m.language){
   if(!m.inspect||m.inspect===m.layout)return emailHtml(m,language);
   return emailHtml({...m,layout:m.inspect,variants:{...m.variants,[language]:{...m.variants[language],storedHtml:null,dirty:true}}},language);
 }
-// Display only: the iframe shows sample values for the two tokens AURA merges per recipient at
-// send time. previewHtml()/emailHtml()/payload() keep the tokens unmerged (that is what is approved).
-const SAMPLE_TOKENS={"{{firstName}}":"Laura","{{company}}":"ABC Logistics"};
-function sampleMerge(html){return Object.keys(SAMPLE_TOKENS).reduce((h,t)=>h.split(t).join(SAMPLE_TOKENS[t]),String(html||""));}
-// Plain-language meaning of the governance states shown in the panel.
-function statusHelp(m){
-  const c=m.context,v=m.variants[m.language],langs=c.requiredLanguages||[],missing=langs.filter(l=>!m.variants[l]?.approved),s=variantStatus(v);
-  const variant=s==="UNAPPROVED"?m.language+" variant UNAPPROVED: nobody has approved this language yet. Review the preview and click Approve variant.":s==="STALE AFTER EDIT"?m.language+" variant edited after approval: the previous approval was revoked; approve it again.":s==="APPROVED / TEST DRAFT REQUIRED"?m.language+" variant approved"+(c.testDraftReviewRequired?"; a verified test draft is still required.":"."):s==="TEST DRAFT VERIFIED"?m.language+" variant approved and test draft verified.":m.language+" variant uses a retired design; approving the new preview creates a new version.";
-  const set=String(c.creativeSetStatus||"PENDING").toUpperCase()==="APPROVED"?"Creative set APPROVED: AURA can use it.":"Creative set "+(c.creativeSetStatus||"PENDING")+": it is approved only after every required language ("+(langs.join(" / ")||"—")+") has an approved variant"+(c.testDraftReviewRequired?" with a verified test draft":"")+(missing.length?". Still missing: "+missing.join(" / ")+".":".");
-  return set+" "+variant+" Approvals are written to the private backend; nothing is approved automatically.";
+// Personalized preview (display only). {{firstName}}/{{company}} are filled ONLY from a contact
+// record supplied with the campaign context (context.previewRecipient); a token without verified
+// data is shown as a marked placeholder, never an invented value. previewHtml()/emailHtml()/
+// payload() keep the tokens unmerged: that is what is approved and what AURA merges at send time.
+const TOKEN_LABEL={firstName:"Nombre",company:"Empresa"};
+function previewRecipient(m){const r=m.context.previewRecipient;return r&&(r.firstName||r.company)?r:null;}
+function personalizePreview(html,recipient){
+  const r=recipient||{};let raw=false;
+  return String(html||"").split(/(<[^>]*>)/).map(part=>{
+    if(part.charAt(0)==="<"){const t=/^<\s*(\/)?\s*(title|style|script)\b/i.exec(part);if(t)raw=!t[1];return part.replace(/\{\{(firstName|company)\}\}/g,(x,k)=>r[k]?E(r[k]):"["+TOKEN_LABEL[k]+"]");}
+    return part.replace(/\{\{(firstName|company)\}\}/g,(x,k)=>r[k]?E(r[k]):raw?"["+TOKEN_LABEL[k]+"]":'<mark style="background:#FFF1BF;color:#5A4300;border-radius:3px;padding:0 3px">['+TOKEN_LABEL[k]+']</mark>');
+  }).join("");
+}
+// Plain-language meaning of the governance states; the state codes and their gates are unchanged.
+const VARIANT_LABEL={"UNAPPROVED":"Sin aprobar","STALE AFTER EDIT":"Editada después de aprobar","APPROVED / TEST DRAFT REQUIRED":"Aprobada","TEST DRAFT VERIFIED":"Aprobada y verificada","LEGACY DESIGN · NEW PREMIUM PREVIEW":"Diseño anterior"};
+const SET_LABEL={PENDING:"Pendiente",CREATIVE_SET_INCOMPLETE:"Incompleto",TEST_DRAFT_SET_INCOMPLETE:"Falta borrador de prueba",READY_FOR_APPROVAL:"Listo para aprobar",APPROVED:"Aprobado",AUDIENCE_UNRESOLVED:"Audiencia sin resolver"};
+function variantHelp(m,language=m.language){
+  const c=m.context,s=variantStatus(m.variants[language]);
+  return s==="UNAPPROVED"?"Nadie ha aprobado todavía la variante "+language+". Revisa la vista previa y pulsa «Aprobar variante».":
+    s==="STALE AFTER EDIT"?"La variante "+language+" se editó después de aprobarla: la aprobación anterior se revocó. Apruébala de nuevo.":
+    s==="APPROVED / TEST DRAFT REQUIRED"?"Variante "+language+" aprobada. Crea un borrador de prueba (no se envía) para revisarla en Gmail"+(c.testDraftReviewRequired?"; es obligatorio para aprobar el set.":"."):
+    s==="TEST DRAFT VERIFIED"?"Variante "+language+" aprobada y con borrador de prueba verificado.":
+    "La variante "+language+" usa un diseño retirado. Aprobar la nueva vista previa crea una versión nueva; nada se revoca.";
+}
+function setHelp(m){
+  const c=m.context,code=String(c.creativeSetStatus||"PENDING").toUpperCase(),langs=c.requiredLanguages||[],missing=langs.filter(l=>!m.variants[l]?.approved);
+  if(code==="APPROVED")return "El set creativo está aprobado: AURA puede usarlo. Sigue requiriendo tu aprobación en AURA antes de cualquier envío.";
+  if(code==="AUDIENCE_UNRESOLVED")return "La audiencia no está resuelta: las aprobaciones y los borradores de prueba están bloqueados.";
+  return "El set creativo aún no está aprobado. Se aprueba cuando cada idioma requerido ("+(langs.join(" / ")||"—")+") tiene su variante aprobada"+(c.testDraftReviewRequired?" y un borrador de prueba verificado":"")+(missing.length?". Falta: "+missing.join(" / ")+".":". Pulsa «Aprobar set creativo».");
+}
+function statusHelp(m){return setHelp(m)+" "+variantHelp(m)+" Las aprobaciones se guardan en el backend privado; nada se aprueba automáticamente.";}
+// Connection/back-end errors explained without changing them: the original message stays visible.
+function friendlyError(msg){
+  const s=String(msg||"");if(!s)return "";
+  const why=/AUTHENTICATION FAILED|unauthoriz|forbidden|invalid token|token required/i.test(s)?"No hay conexión válida con el backend privado: el token falta o fue rechazado. Vuelve a conectar con «Conectar datos».":
+    /Connect the private backend/i.test(s)?"Campaign Studio necesita el backend privado. Pulsa «Conectar datos».":
+    /timed out|timeout|tiempo/i.test(s)?"El backend privado no respondió a tiempo. Inténtalo de nuevo en unos minutos.":
+    /^QA \(datos de prueba\)/.test(s)?"":"La acción no se completó.";
+  return why?why+" Detalle: "+s:s;
+}
+function actionHint(m){
+  const c=m.context,v=m.variants[m.language];
+  if(!c.audienceResolved)return "Bloqueado: la audiencia no está resuelta.";
+  if(m.inspect&&m.inspect!==m.layout)return "Estás comparando otro diseño: vuelve al diseño elegido o pulsa «Usar este diseño» para aprobar.";
+  if(!v.approved||v.dirty)return "Primero aprueba la variante "+m.language+"; después podrás crear su borrador de prueba.";
+  if(!canApproveSet(m)){const missing=(c.requiredLanguages||[]).filter(l=>!m.variants[l]?.approved);return missing.length?"Para aprobar el set falta aprobar: "+missing.join(" / ")+".":"Para aprobar el set falta el borrador de prueba verificado.";}
+  return "Todo listo para aprobar el set creativo.";
 }
 
 // ---------- Layout / styles (scoped, injected once) ----------
@@ -157,8 +194,21 @@ const CSS=`.cs6{--cs6-gap:20px;color:var(--text,#fff)}.cs6 *{box-sizing:border-b
 .cs6-frame{display:block;margin:0 auto;width:100%;max-width:704px;height:1180px;border:0;border-radius:10px;background:#F3F5F7}.cs6-frame.is-mobile{max-width:390px;height:1460px}
 .cs6-alert{color:var(--danger,#EF4444);font-size:13px;min-height:1px;margin:0}
 .cs6-back{white-space:nowrap}
-@media (max-width:1359px){.cs6-ws{grid-template-columns:minmax(0,1fr)}.cs6-previewcol{position:static;order:-1}}
-@media (max-width:760px){.cs6-filters{grid-template-columns:1fr 1fr}.cs6-filters input{grid-column:1/-1}.cs6-row{grid-template-columns:minmax(0,1fr) auto;gap:4px 10px}.cs6-row span{font-size:12px}.cs6-row .cs6-hide-m,.cs6-rowhead{display:none}.cs6-kv{grid-template-columns:1fr 1fr}.cs6-systems{grid-template-columns:1fr 1fr}.cs6-frame{height:1500px}.cs6-head h2{font-size:19px}}`;
+.cs6-steps{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0 0 18px;padding:0}
+.cs6-step{display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:99px;border:1px solid var(--border-strong,rgba(255,255,255,.14));font-size:13px;font-weight:700;color:var(--text-secondary,#AAB3C5)}
+.cs6-step.is-done{border-color:var(--secondary,#77B82A);color:var(--text,#fff)}.cs6-step.is-current{background:rgba(119,184,42,.14);border-color:var(--secondary,#77B82A);color:var(--text,#fff)}.cs6-step.is-blocked{border-color:var(--danger,#EF4444);color:var(--text,#fff)}
+.cs6-num{display:inline-grid;place-items:center;flex:none;width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,.08);font-size:12px;font-weight:900}.cs6-step.is-done .cs6-num,.cs6-step.is-current .cs6-num,.cs6-stephead .cs6-num{background:var(--secondary,#77B82A);color:#06210a}
+.cs6-stephead{display:flex;gap:12px;align-items:flex-start;margin-bottom:14px}.cs6-stephead h3{margin:0;font-size:17px;line-height:1.3}.cs6-stephead p{margin:3px 0 0;line-height:1.45}.cs6-stephead .cs6-num{width:28px;height:28px;font-size:13px}
+.cs6-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.cs6-facts div{background:rgba(255,255,255,.03);border-radius:8px;padding:10px 12px;min-width:0}.cs6-facts b{display:block;font-size:18px;overflow-wrap:anywhere}.cs6-facts span{font-size:12px;color:var(--text-secondary,#AAB3C5)}
+.cs6-sub{margin:16px 0 8px;font-size:11px;letter-spacing:1px;font-weight:800;color:var(--muted,#6B7280);text-transform:uppercase}
+.cs6-edit{margin-top:14px;border-top:1px solid var(--border,rgba(255,255,255,.08));padding-top:12px}.cs6-edit summary,.cs6-tech summary{cursor:pointer;font-weight:800;font-size:13.5px}
+.cs6-tech summary{color:var(--text-secondary,#AAB3C5)}.cs6-tech[open] summary{margin-bottom:12px}
+.cs6-gov .cs6-state{display:block;border-bottom:1px solid var(--border,rgba(255,255,255,.08));padding:0 0 10px}.cs6-state>div{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}.cs6-state b{font-size:14px}.cs6-state code{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.08);color:var(--text-secondary,#AAB3C5)}.cs6-state p{margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--text-secondary,#AAB3C5)}
+.cs6-gov{gap:12px;margin-bottom:12px}.cs6-hint{margin:10px 0 0;font-size:12.5px}.cs6-alert:empty{display:none}.cs6-alert{margin:0 0 10px;line-height:1.45}
+.cs6-person{margin:0 0 10px;font-size:13px;line-height:1.5}.cs6-person mark{background:#FFF1BF;color:#5A4300;border-radius:3px;padding:0 3px}
+.cs6-previewbar .cs6-stephead{margin-bottom:0}
+@media (max-width:1359px){.cs6-ws{grid-template-columns:minmax(0,1fr)}.cs6-col{display:contents}[data-step="audience"]{order:1}[data-step="design"]{order:2}[data-step="preview"]{order:3}[data-step="approval"]{order:4}.cs6-tech{order:5}}
+@media (max-width:760px){.cs6-filters{grid-template-columns:1fr 1fr}.cs6-filters input{grid-column:1/-1}.cs6-row{grid-template-columns:minmax(0,1fr) auto;gap:4px 10px}.cs6-row span{font-size:12px}.cs6-row .cs6-hide-m,.cs6-rowhead{display:none}.cs6-kv{grid-template-columns:1fr 1fr}.cs6-facts{grid-template-columns:1fr 1fr}.cs6-steps{gap:6px}.cs6-step{padding:6px 10px;font-size:12px}.cs6-systems{grid-template-columns:1fr 1fr}.cs6-frame{height:1500px}.cs6-head h2{font-size:19px}}`;
 function ensureStyles(){
   const d=g.document;if(!d||!d.head||d.getElementById("cs6-styles"))return;
   const s=d.createElement("style");s.id="cs6-styles";s.textContent=CSS;d.head.appendChild(s);
@@ -181,25 +231,25 @@ async function loadCampaignList(force){
   if(!cache.listPromise)cache.listPromise=api().campaignStudioList().then(r=>{const list=(r.campaigns||[]).map(normalizeCampaign).filter(c=>c.campaignId);cache.list=list;writeListCache(list);return list;}).finally(()=>{cache.listPromise=null;});
   return cache.listPromise;
 }
-const view={q:"",objective:"",service:"",owner:"",status:"",device:"desktop"};
+const view={q:"",objective:"",service:"",owner:"",status:"",device:"desktop",techOpen:false,editOpen:false};
 function uniq(list,k){return [...new Set(list.map(c=>c[k]).filter(Boolean))].sort((a,b)=>a.localeCompare(b));}
 function filterCampaigns(list,f=view){
   const q=String(f.q||"").trim().toLowerCase();
   return list.filter(c=>(!q||[c.campaignName,c.campaignId,c.objective,c.service,c.owner].join(" ").toLowerCase().includes(q))&&(!f.objective||c.objective===f.objective)&&(!f.service||c.service===f.service)&&(!f.owner||c.owner===f.owner)&&(!f.status||c.status===f.status));
 }
 function selectorHtml(list,activeId){
-  const opt=(k,label)=>'<select data-filter="'+k+'" aria-label="'+label+'"><option value="">'+label+': all</option>'+uniq(list,k).map(v=>'<option'+(view[k]===v?' selected':'')+'>'+E(v)+'</option>').join("")+'</select>';
-  return '<section class="cs6-panel" data-selector><div class="cs6-filters"><input type="search" data-search placeholder="Search campaigns by name, ID, objective, service or owner" aria-label="Search campaigns" value="'+E(view.q)+'">'+opt("objective","Objective")+opt("service","Service")+opt("owner","Owner")+opt("status","Status")+'</div>'+
-    '<p class="cs6-count" data-count></p><ul class="cs6-list" role="listbox" aria-label="Campaigns" data-list>'+listRowsHtml(list,activeId)+'</ul></section>';
+  const opt=(k,label)=>'<select data-filter="'+k+'" aria-label="'+label+'"><option value="">'+label+': todos</option>'+uniq(list,k).map(v=>'<option'+(view[k]===v?' selected':'')+'>'+E(v)+'</option>').join("")+'</select>';
+  return '<section class="cs6-panel" data-selector><div class="cs6-filters"><input type="search" data-search placeholder="Buscar por nombre, ID, objetivo, servicio o responsable" aria-label="Buscar campañas" value="'+E(view.q)+'">'+opt("objective","Objetivo")+opt("service","Servicio")+opt("owner","Responsable")+opt("status","Estado")+'</div>'+
+    '<p class="cs6-count" data-count></p><ul class="cs6-list" role="listbox" aria-label="Campañas" data-list>'+listRowsHtml(list,activeId)+'</ul></section>';
 }
 function listRowsHtml(list,activeId){
   const rows=filterCampaigns(list);
-  return '<li><div class="cs6-row cs6-rowhead"><span>Campaign</span><span>Objective</span><span class="cs6-hide-m">Service</span><span class="cs6-hide-m">Owner</span><span class="cs6-hide-m">Status</span></div></li>'+
-    (rows.length?rows.map(c=>'<li><button type="button" role="option" class="cs6-row'+(c.campaignId===activeId?' is-active':'')+'" data-campaign="'+E(c.campaignId)+'" aria-selected="'+(c.campaignId===activeId)+'"><strong title="'+E(c.campaignName)+'">'+E(c.campaignName)+'</strong><span>'+E(c.objective||"—")+'</span><span class="cs6-hide-m">'+E(c.service||"—")+'</span><span class="cs6-hide-m">'+E(c.owner||"—")+'</span><span class="cs6-hide-m">'+E(c.status||"—")+'</span></button></li>').join(""):'<li class="cs6-muted" style="padding:14px 10px">No campaigns match these filters.</li>');
+  return '<li><div class="cs6-row cs6-rowhead"><span>Campaña</span><span>Objetivo</span><span class="cs6-hide-m">Servicio</span><span class="cs6-hide-m">Responsable</span><span class="cs6-hide-m">Estado</span></div></li>'+
+    (rows.length?rows.map(c=>'<li><button type="button" role="option" class="cs6-row'+(c.campaignId===activeId?' is-active':'')+'" data-campaign="'+E(c.campaignId)+'" aria-selected="'+(c.campaignId===activeId)+'"><strong title="'+E(c.campaignName)+'">'+E(c.campaignName)+'</strong><span>'+E(c.objective||"—")+'</span><span class="cs6-hide-m">'+E(c.service||"—")+'</span><span class="cs6-hide-m">'+E(c.owner||"—")+'</span><span class="cs6-hide-m">'+E(c.status||"—")+'</span></button></li>').join(""):'<li class="cs6-muted" style="padding:14px 10px">Ninguna campaña coincide con estos filtros.</li>');
 }
 function bindSelector(root,list,activeId){
   const listEl=root.querySelector("[data-list]"),count=root.querySelector("[data-count]");
-  const refresh=()=>{if(listEl)listEl.innerHTML=listRowsHtml(list,activeId);if(count)count.textContent=filterCampaigns(list).length+" of "+list.length+" campaigns";bindRows();};
+  const refresh=()=>{if(listEl)listEl.innerHTML=listRowsHtml(list,activeId);if(count)count.textContent=filterCampaigns(list).length+" de "+list.length+" campañas";bindRows();};
   const bindRows=()=>root.querySelectorAll("[data-campaign]").forEach(b=>b.onclick=()=>openCampaign(b.dataset.campaign));
   const search=root.querySelector("[data-search]");if(search)search.oninput=()=>{view.q=search.value;refresh();};
   root.querySelectorAll("[data-filter]").forEach(s=>s.onchange=()=>{view[s.dataset.filter]=s.value;refresh();});
@@ -217,36 +267,59 @@ function backToList(){
 }
 
 // ---------- Workspace ----------
+const FIELD_LABEL={subjectA:"Asunto A",subjectB:"Asunto B",preheader:"Preencabezado",headline:"Titular",body:"Texto principal",body2:"Texto secundario",cta:"Botón"};
+const STEPS=["Audiencia","Diseño","Vista previa","Aprobación"];
+function stepState(m,i){
+  const c=m.context,setOk=String(c.creativeSetStatus||"").toUpperCase()==="APPROVED";
+  if(i===0)return c.audienceResolved?"done":"blocked";
+  if(i===1||i===2)return c.audienceResolved?"done":"todo";
+  return setOk?"done":c.audienceResolved?"current":"todo";
+}
+function stepperHtml(m){
+  return '<ol class="cs6-steps" aria-label="Flujo de la campaña">'+STEPS.map((s,i)=>'<li class="cs6-step is-'+stepState(m,i)+'"><span class="cs6-num">'+(i+1)+'</span>'+E(s)+'</li>').join("")+'</ol>';
+}
+function stepHead(n,title,sub){return '<div class="cs6-stephead"><span class="cs6-num">'+n+'</span><div><h3>'+E(title)+'</h3>'+(sub?'<p class="cs6-muted">'+sub+'</p>':'')+'</div></div>';}
 function governanceHtml(m){
-  const c=m.context,rows=[["Audience",c.audienceResolved?"RESOLVED":"UNRESOLVED"],["Eligible contacts",c.eligibleContacts??"—"],["Excluded contacts",c.excludedContacts??"—"],["Creative set",c.creativeSetStatus||"PENDING"],["Required languages",(c.requiredLanguages||[]).join(" / ")||"—"],[m.language+" variant",variantStatus(m.variants[m.language])]];
-  return rows.map(([k,v])=>'<div><span class="cs6-muted">'+E(k)+'</span><span'+(k===m.language+" variant"?' data-variant-status':'')+'>'+E(v)+'</span></div>').join("");
+  const c=m.context,code=c.creativeSetStatus||"PENDING",vs=variantStatus(m.variants[m.language]);
+  return '<div class="cs6-state"><div><span class="cs6-muted">Set creativo</span><b>'+E(SET_LABEL[String(code).toUpperCase()]||code)+' <code>'+E(code)+'</code></b></div><p data-set-help>'+E(setHelp(m))+'</p></div>'+
+    '<div class="cs6-state"><div><span class="cs6-muted">Variante '+E(m.language)+'</span><b data-variant-status>'+E(VARIANT_LABEL[vs]||vs)+' <code>'+E(vs)+'</code></b></div><p data-variant-help>'+E(variantHelp(m))+'</p></div>';
 }
 function systemsHtml(m){
   const auto=m.selection.systemId,shown=m.inspect||m.layout;
-  return Object.values(Lib().CREATIVE_SYSTEMS).map(sys=>'<button type="button" class="cs6-sys" data-layout="'+E(sys.id)+'" aria-pressed="'+(shown===sys.id)+'" '+(m.busy?'disabled':'')+'><b>'+E(sys.name)+(sys.id===auto?'<span class="cs6-badge">AUTO</span>':'')+'</b><small>'+E(sys.use)+'</small></button>').join("");
+  return Object.values(Lib().CREATIVE_SYSTEMS).map(sys=>'<button type="button" class="cs6-sys" data-layout="'+E(sys.id)+'" aria-pressed="'+(shown===sys.id)+'" '+(m.busy?'disabled':'')+'><b>'+E(sys.name)+(sys.id===auto?'<span class="cs6-badge">RECOMENDADO</span>':'')+'</b><small>'+E(sys.use)+'</small></button>').join("");
+}
+function techHtml(m){
+  const c=m.context,sysName=id=>(Lib().CREATIVE_SYSTEMS[id]||{}).name||id;
+  const rows=[["Campaign ID",c.campaignId],["Objective",objectiveOf(c)],["Service",c.service],["Angle",c.messageAngle],["Audience",c.audienceId],["Playbook",c.playbookId],["Language",c.language||"AUTO PER CONTACT"],["Audience status",c.audienceResolved?"RESOLVED":"UNRESOLVED"],["Creative set",c.creativeSetStatus||"PENDING"],["Approval status",c.approvalStatus],["Test draft review required",c.testDraftReviewRequired?"YES":"NO"],["Committed system",m.layout]];
+  return '<details class="cs6-panel cs6-tech" data-tech'+(view.techOpen?' open':'')+'><summary>Detalles técnicos</summary>'+
+    '<dl class="cs6-kv" data-intake>'+rows.map(([k,val])=>'<div><dt>'+E(k)+'</dt><dd>'+E(val==null||val===""?"—":val)+'</dd></div>').join("")+'</dl>'+
+    '<p class="cs6-why"><strong>'+E(INTAKE_QUESTION)+'</strong> <span class="cs6-badge" data-intake-answer>'+E(INTAKE_BY_OBJECTIVE[objectiveOf(c)]||"UNANSWERED")+'</span></p>'+
+    '<p class="cs6-why" data-design-selection>Design selected automatically: <strong>'+E(sysName(m.selection.systemId))+'</strong> ('+E(m.selection.rule)+') — '+E(m.selection.reason)+'</p>'+
+    '<p class="cs6-why">Governance: the approved HTML is exactly the HTML in the preview, with {{firstName}} and {{company}} kept as tokens; AURA merges them per contact at send time (GOVERNED_TOKEN_MERGE_V1). A test draft is an unsent Gmail draft. Editing a field or changing the system revokes the affected approvals.</p></details>';
 }
 function draw(){
   const m=model;if(!mount||!m)return;ensureStyles();const c=m.context,v=m.variants[m.language],sysName=id=>(Lib().CREATIVE_SYSTEMS[id]||{}).name||id;
-  const inspecting=m.inspect&&m.inspect!==m.layout;
+  const inspecting=m.inspect&&m.inspect!==m.layout,langs=(c.requiredLanguages||[]).join(" / ")||"—",r=previewRecipient(m);
   mount.innerHTML='<div class="cs6">'+
-    '<div class="cs6-head"><div><div class="cs6-eyebrow">GOVERNED CAMPAIGN STUDIO</div><h2>'+E(c.campaignName)+'</h2><div class="cs6-muted">'+E(c.campaignId)+'</div></div><button type="button" class="btn cs6-back" data-picker>&larr; All campaigns</button></div>'+
+    '<div class="cs6-head"><div><div class="cs6-eyebrow">CAMPAIGN STUDIO</div><h2>'+E(c.campaignName)+'</h2><div class="cs6-muted">'+E([objectiveOf(c),c.service].filter(Boolean).join(" · "))+'</div></div><button type="button" class="btn cs6-back" data-picker>&larr; Todas las campañas</button></div>'+
+    stepperHtml(m)+
     '<div class="cs6-ws"><div class="cs6-col">'+
-      '<section class="cs6-panel" data-intake><dl class="cs6-kv">'+[["Objective",objectiveOf(c)],["Service",c.service],["Angle",c.messageAngle],["Audience",c.audienceId],["Playbook",c.playbookId],["Language",c.language||"AUTO PER CONTACT"]].map(([k,val])=>'<div><dt>'+E(k)+'</dt><dd>'+E(val||"—")+'</dd></div>').join("")+'</dl>'+
-        '<p class="cs6-why"><strong>'+E(INTAKE_QUESTION)+'</strong> <span class="cs6-badge" data-intake-answer>'+E(INTAKE_BY_OBJECTIVE[objectiveOf(c)]||"UNANSWERED")+'</span></p></section>'+
-      '<section class="cs6-panel"><div class="cs6-eyebrow" style="margin-bottom:10px">VISUAL SYSTEM</div><div class="cs6-systems">'+systemsHtml(m)+'</div>'+
-        '<p class="cs6-why" data-design-selection>Design selected automatically: <strong>'+E(sysName(m.selection.systemId))+'</strong> ('+E(m.selection.rule)+') — '+E(m.selection.reason)+'</p>'+
-        (m.layout!==m.selection.systemId?'<p class="cs6-why">Committed system: <strong>'+E(sysName(m.layout))+'</strong></p>':'')+
-        (inspecting?'<div class="cs6-inspect" data-inspect-note><span>Inspecting <strong>'+E(sysName(m.inspect))+'</strong> · preview only, nothing is approved or revoked.</span><span class="cs6-actions"><button type="button" class="btn" data-inspect-back>Back to '+E(sysName(m.layout))+'</button><button type="button" class="btn btn-primary" data-inspect-use>Use this system</button></span></div>':'')+
-      '</section>'+
-      '<section class="cs6-panel"><div class="cs6-tabs" role="tablist" aria-label="Creative language">'+LANGUAGES.map(l=>'<button type="button" class="cs6-tab" role="tab" aria-selected="'+(m.language===l)+'" data-language="'+l+'" '+(m.busy?'disabled':'')+'><b>'+l+'</b><small>'+E(variantStatus(m.variants[l]))+'</small></button>').join("")+'</div></section>'+
-      '<section class="cs6-panel"><div class="cs6-eyebrow" style="margin-bottom:10px">CREATIVE FIELDS · '+E(m.language)+'</div><fieldset style="border:0;padding:0;margin:0" '+(m.busy?'disabled':'')+'>'+FIELDS.map(k=>'<label class="cs6-field">'+E(k)+'<textarea data-copy="'+k+'" rows="2">'+E(v.copy[k])+'</textarea></label>').join("")+'</fieldset></section>'+
-      '<section class="cs6-panel"><div class="cs6-eyebrow" style="margin-bottom:10px">GOVERNANCE</div><div class="cs6-gov" data-governance>'+governanceHtml(m)+'</div>'+
-        '<p class="cs6-why" data-status-help>'+E(statusHelp(m))+'</p>'+
-        '<p class="cs6-alert" role="alert">'+E(m.error)+'</p><div class="cs6-actions" style="margin-top:10px">'+[["draft","Create test draft"],["variant","Approve variant"],["set","Approve creative set"]].map(([a,label])=>'<button type="button" class="btn btn-primary" data-action="'+a+'" '+(actionDisabled(m,a)?'disabled':'')+'>'+label+'</button>').join("")+'</div>'+
-        '<p class="cs6-muted" style="margin:10px 0 0">Test Draft creates an unsent Gmail draft. Approval stores exactly the HTML shown in the preview, with {{firstName}} and {{company}} kept as tokens; AURA merges them per contact at send time.</p></section>'+
+      '<section class="cs6-panel" data-step="audience">'+stepHead(1,"Audiencia",c.audienceResolved?"Audiencia resuelta. AURA elige el idioma de cada contacto automáticamente.":"<strong>Audiencia sin resolver:</strong> las aprobaciones y los borradores de prueba están bloqueados.")+
+        '<div class="cs6-facts"><div><b>'+E(c.eligibleContacts??"—")+'</b><span>contactos elegibles</span></div><div><b>'+E(c.excludedContacts??"—")+'</b><span>contactos excluidos</span></div><div><b>'+E(langs)+'</b><span>idiomas requeridos</span></div></div></section>'+
+      '<section class="cs6-panel" data-step="design">'+stepHead(2,"Diseño","Elegimos el diseño recomendado para este tipo de campaña. Puedes comparar otros sin aprobar ni revocar nada.")+
+        '<div class="cs6-systems">'+systemsHtml(m)+'</div>'+
+        (inspecting?'<div class="cs6-inspect" data-inspect-note><span>Comparando <strong>'+E(sysName(m.inspect))+'</strong>: solo vista previa, no se aprueba ni revoca nada.</span><span class="cs6-actions"><button type="button" class="btn" data-inspect-back>Volver a '+E(sysName(m.layout))+'</button><button type="button" class="btn btn-primary" data-inspect-use>Usar este diseño</button></span></div>':'')+
+        '<div class="cs6-sub">Idioma</div><div class="cs6-tabs" role="tablist" aria-label="Idioma de la variante">'+LANGUAGES.map(l=>{const s=variantStatus(m.variants[l]);return '<button type="button" class="cs6-tab" role="tab" aria-selected="'+(m.language===l)+'" data-language="'+l+'" '+(m.busy?'disabled':'')+'><b>'+l+'</b><small>'+E(VARIANT_LABEL[s]||s)+'</small></button>';}).join("")+'</div>'+
+        '<details class="cs6-edit" data-edit'+(view.editOpen?' open':'')+'><summary>Editar textos · '+E(m.language)+' <span class="cs6-muted">(opcional; editar revoca la aprobación de este idioma)</span></summary><fieldset style="border:0;padding:0;margin:10px 0 0" '+(m.busy?'disabled':'')+'>'+FIELDS.map(k=>'<label class="cs6-field">'+E(FIELD_LABEL[k]||k)+'<textarea data-copy="'+k+'" rows="2">'+E(v.copy[k])+'</textarea></label>').join("")+'</fieldset></details></section>'+
+      '<section class="cs6-panel" data-step="approval">'+stepHead(4,"Aprobación","Revisa la vista previa y aprueba cada idioma. Después aprueba el set completo.")+
+        '<div class="cs6-gov" data-governance>'+governanceHtml(m)+'</div>'+
+        '<p class="cs6-alert" role="alert">'+E(friendlyError(m.error))+'</p><div class="cs6-actions">'+[["variant","Aprobar variante "+m.language,"btn-primary"],["draft","Crear borrador de prueba",""],["set","Aprobar set creativo","btn-primary"]].map(([a,label,cls])=>'<button type="button" class="btn '+cls+'" data-action="'+a+'" '+(actionDisabled(m,a)?'disabled':'')+'>'+E(label)+'</button>').join("")+'</div>'+
+        '<p class="cs6-muted cs6-hint" data-action-hint>'+E(actionHint(m))+'</p></section>'+
+      techHtml(m)+
     '</div>'+
-    '<div class="cs6-col cs6-previewcol"><section class="cs6-panel"><div class="cs6-previewbar"><div><div class="cs6-eyebrow">ACTUAL EMAIL HTML · '+E(m.language)+'</div><div class="cs6-muted" data-preview-label>'+E(sysName(m.inspect||m.layout))+'</div><div class="cs6-muted" data-sample-note>Sample values: {{firstName}} = Laura · {{company}} = ABC Logistics</div></div><div class="cs6-device" role="group" aria-label="Preview width">'+["desktop","mobile"].map(d=>'<button type="button" data-device="'+d+'" aria-pressed="'+(view.device===d)+'">'+(d==="desktop"?"Desktop":"Mobile")+'</button>').join("")+'</div></div>'+
-      '<iframe data-preview class="cs6-frame'+(view.device==="mobile"?" is-mobile":"")+'" title="'+m.language+' email preview" sandbox=""></iframe></section></div>'+
+    '<div class="cs6-col cs6-previewcol"><section class="cs6-panel" data-step="preview"><div class="cs6-previewbar">'+stepHead(3,"Vista previa · "+m.language,'<span data-preview-label>'+E(sysName(m.inspect||m.layout))+'</span>')+'<div class="cs6-device" role="group" aria-label="Ancho de la vista previa">'+["desktop","mobile"].map(d=>'<button type="button" data-device="'+d+'" aria-pressed="'+(view.device===d)+'">'+(d==="desktop"?"Escritorio":"Móvil")+'</button>').join("")+'</div></div>'+
+      '<p class="cs6-person" data-sample-note>'+(r?'Personalizada para <strong>'+E([r.firstName,r.company].filter(Boolean).join(" · "))+'</strong>'+(r.source?' <span class="cs6-muted">('+E(r.source)+')</span>':'')+(r.firstName&&r.company?'':'. Lo que no tiene dato verificado aparece marcado.'):'Sin contacto verificado para personalizar: <mark>[Nombre]</mark> y <mark>[Empresa]</mark> se muestran marcados. AURA los completa con los datos de cada contacto al enviar.')+'</p>'+
+      '<iframe data-preview class="cs6-frame'+(view.device==="mobile"?" is-mobile":"")+'" title="Vista previa del email '+m.language+'" sandbox=""></iframe></section></div>'+
     '</div></div>';
   bindWorkspace(m);preview();
 }
@@ -259,26 +332,29 @@ function bindWorkspace(m){
   const back=q("[data-inspect-back]");if(back)back.onclick=()=>{m.inspect=null;draw();};
   const use=q("[data-inspect-use]");if(use)use.onclick=async()=>{const target=m.inspect;m.busy=true;draw();try{await changeLayout(m,target);m.inspect=null;}catch(e){m.error=e.message;}finally{m.busy=false;draw();}};
   qa("[data-device]").forEach(b=>b.onclick=()=>{view.device=b.dataset.device;const f=q("[data-preview]");if(f&&f.classList)f.classList.toggle("is-mobile",view.device==="mobile");qa("[data-device]").forEach(x=>x.setAttribute&&x.setAttribute("aria-pressed",String(x.dataset.device===view.device)));});
-  qa("[data-copy]").forEach(e=>e.oninput=()=>{editCopy(m,e.dataset.copy,e.value).catch(err=>{m.error=err.message;const a=q('[role="alert"]');if(a)a.textContent=m.error;});preview();});
+  qa("[data-copy]").forEach(e=>e.oninput=()=>{editCopy(m,e.dataset.copy,e.value).catch(err=>{m.error=err.message;const a=q('[role="alert"]');if(a)a.textContent=friendlyError(m.error);});preview();});
   qa("[data-action]").forEach(b=>b.onclick=()=>run(b.dataset.action));
+  // Remember which collapsible panels are open across redraws.
+  const tech=q("[data-tech]");if(tech)tech.ontoggle=()=>{view.techOpen=tech.open;};
+  const edit=q("[data-edit]");if(edit)edit.ontoggle=()=>{view.editOpen=edit.open;};
 }
 // Light update (no full redraw): preview HTML, statuses and action states only.
 function preview(){
   if(!mount||!model)return;
-  const frame=mount.querySelector("[data-preview]");if(frame)frame.srcdoc=sampleMerge(previewHtml(model));
-  (mount.querySelectorAll("[data-language]")||[]).forEach(b=>{const s=b.querySelector&&b.querySelector("small");if(s)s.textContent=variantStatus(model.variants[b.dataset.language]);});
+  const frame=mount.querySelector("[data-preview]");if(frame)frame.srcdoc=personalizePreview(previewHtml(model),previewRecipient(model));
+  (mount.querySelectorAll("[data-language]")||[]).forEach(b=>{const s=b.querySelector&&b.querySelector("small"),st=variantStatus(model.variants[b.dataset.language]);if(s)s.textContent=VARIANT_LABEL[st]||st;});
   (mount.querySelectorAll("[data-action]")||[]).forEach(b=>b.disabled=actionDisabled(model,b.dataset.action));
-  const status=mount.querySelector("[data-variant-status]");if(status)status.textContent=variantStatus(model.variants[model.language]);
-  const help=mount.querySelector("[data-status-help]");if(help)help.textContent=statusHelp(model);
+  const vs=variantStatus(model.variants[model.language]),status=mount.querySelector("[data-variant-status]");if(status)status.textContent=(VARIANT_LABEL[vs]||vs)+" · "+vs;
+  [["[data-variant-help]",variantHelp(model)],["[data-set-help]",setHelp(model)],["[data-action-hint]",actionHint(model)]].forEach(([sel,t])=>{const e=mount.querySelector(sel);if(e)e.textContent=t;});
 }
 async function render(container,explicitId){
   mount=container;ensureStyles();const ticket=++epoch,id=explicitId===undefined?navigationId():explicitId;model=null;inFlight++;
-  container.innerHTML='<div class="cs6"><div class="cs6-head"><div><div class="cs6-eyebrow">GOVERNED CAMPAIGN STUDIO</div><h2>'+(id?'Loading campaign…':'Select a campaign')+'</h2></div></div><p class="cs6-muted">Loading private backend…</p></div>';
+  container.innerHTML='<div class="cs6"><div class="cs6-head"><div><div class="cs6-eyebrow">CAMPAIGN STUDIO</div><h2>'+(id?'Cargando campaña…':'Elige una campaña')+'</h2></div></div><p class="cs6-muted">Conectando con el backend privado…</p></div>';
   try{
     if(!api()?.isConnected?.())throw Error("Connect the private backend to open Campaign Studio.");
     if(!id){
       const list=await loadCampaignList();if(ticket!==epoch)return;
-      container.innerHTML='<div class="cs6"><div class="cs6-head"><div><div class="cs6-eyebrow">GOVERNED CAMPAIGN STUDIO</div><h2>Select a campaign</h2><div class="cs6-muted">Search and filter, then open a campaign to review its governed email.</div></div><button type="button" class="btn" data-reload-list>Refresh list</button></div>'+selectorHtml(list,"")+'</div>';
+      container.innerHTML='<div class="cs6"><div class="cs6-head"><div><div class="cs6-eyebrow">CAMPAIGN STUDIO</div><h2>Elige una campaña</h2><div class="cs6-muted">Busca o filtra y abre una campaña para revisar su email.</div></div><button type="button" class="btn" data-reload-list>Actualizar lista</button></div>'+selectorHtml(list,"")+'</div>';
       const reload=container.querySelector("[data-reload-list]");if(reload)reload.onclick=async()=>{try{g.sessionStorage?.removeItem(LIST_KEY);}catch(_){}cache.list=null;await loadCampaignList(true);render(container,"");};
       bindSelector(container,list,"");
       return;
@@ -307,10 +383,10 @@ async function render(container,explicitId){
     });
     draw();
     listWarm.then(()=>{});
-  }catch(e){if(ticket===epoch)container.innerHTML='<div class="cs6"><div class="cs6-head"><div><div class="cs6-eyebrow">GOVERNED CAMPAIGN STUDIO</div><h2>Select a campaign</h2></div></div><p class="cs6-alert" role="alert">'+E(e.message)+'</p></div>';}
+  }catch(e){if(ticket===epoch)container.innerHTML='<div class="cs6"><div class="cs6-head"><div><div class="cs6-eyebrow">GOVERNED CAMPAIGN STUDIO</div><h2>No se pudo abrir la campaña</h2></div></div><p class="cs6-alert" role="alert">'+E(friendlyError(e.message))+'</p></div>';}
   finally{inFlight--;}
 }
-g.DGL_CAMPAIGN_STUDIO_V6={version:"governed-premium-v4",previewHtml,sampleMerge,statusHelp,filterCampaigns,normalizeCampaign,loadCampaignList,openCampaign,INTAKE_QUESTION,INTAKE_OPTIONS,autoSystem,render,createModel,canApproveSet,variantStatus,selectLanguage,editCopy,changeLayout,emailHtml,validateBrand,navigationId,getState:()=>model};
+g.DGL_CAMPAIGN_STUDIO_V6={version:"governed-premium-v4",previewHtml,personalizePreview,previewRecipient,statusHelp,friendlyError,filterCampaigns,normalizeCampaign,loadCampaignList,openCampaign,INTAKE_QUESTION,INTAKE_OPTIONS,autoSystem,render,createModel,canApproveSet,variantStatus,selectLanguage,editCopy,changeLayout,emailHtml,validateBrand,navigationId,getState:()=>model};
 g.DGL_MODULE_RENDERERS=g.DGL_MODULE_RENDERERS||{};g.DGL_MODULE_RENDERERS["campaign-studio"]=render;
 // Re-render only when the backend actually becomes connected, never while a render is in flight.
 // A failing context call emits a backend-change event from inside the render; re-rendering on that

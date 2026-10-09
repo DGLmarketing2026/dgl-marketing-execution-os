@@ -16,7 +16,9 @@
     v6AuraCommandCenter: async () => bundle,
     // Synthetic Campaign Studio context (no backend call from the QA page).
     campaignStudioContext: async campaignId => ({ campaignId, campaignName: "Campaña A · HA prioritaria (QA)", campaignType: "Reactivation", objective: "Reactivation", service: "Multiservicio", messageAngle: "", status: "ACTIVE",
-      requiredLanguages: ["ES", "EN"], approvedCreativeVariants: {}, missingCreativeVariants: ["ES", "EN"], creativeSetStatus: "PENDING", approvalStatus: "PENDING", audienceResolved: true, testDraftReviewRequired: false, missingTestDrafts: [], approvedCreatives: {} }),
+      requiredLanguages: ["ES", "EN"], approvedCreativeVariants: {}, missingCreativeVariants: ["ES", "EN"], creativeSetStatus: "PENDING", approvalStatus: "PENDING", audienceResolved: true, testDraftReviewRequired: false, missingTestDrafts: [], approvedCreatives: {}, eligibleContacts: 214, excludedContacts: 0,
+      // Synthetic contact record for the personalized preview (QA only; not a real customer).
+      previewRecipient: { firstName: "Laura", company: "Empresa Demo QA", source: "contacto sintético de QA" } }),
     getLatestApprovedCreative: async () => null,
     // Synthetic approvals: recorded in memory only; the next Command Center read reflects them.
     agentDecide: async (approvalId, decision) => { bundle.agent.waitingApproval = bundle.agent.waitingApproval.filter(t => t.approvalId !== approvalId); bundle.agent.priorities = bundle.agent.priorities.filter(t => t.approvalId !== approvalId); bundle.agent.opportunities = bundle.agent.opportunities.map(t => t.approvalId === approvalId ? Object.assign({}, t, { approvalStatus: decision, state: decision === "APPROVED" ? "BLOCKED" : "CANCELLED", blockReason: decision === "APPROVED" ? "EXTERNAL_EXECUTION_DISABLED_PHASE_V1" : "" }) : t); g.__qaDecisions = (g.__qaDecisions || []).concat([{ approvalId, decision }]); return { status: "RECORDED" }; },

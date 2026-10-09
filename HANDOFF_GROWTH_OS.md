@@ -87,7 +87,12 @@ python -m http.server 8770 --bind 127.0.0.1 --directory ../dgl-growth-os-preview
 - **Prueba pendiente:** validar Studio y las aprobaciones con datos reales (requiere tu token).
 
 ### Actualización 2026-10-09 — Campaign Studio en QA
-- **Corregido en el código:** la vista previa ya muestra valores de ejemplo para `{{firstName}}` y `{{company}}` (Laura, ABC Logistics). El HTML que se aprueba conserva los tokens. El panel Governance explica en lenguaje simple qué significan PENDING y UNAPPROVED.
+- **Corregido en el código:** la vista previa ya no muestra `{{company}}` sin resolver (ver la sección siguiente). El panel Governance explica en lenguaje simple qué significan PENDING y UNAPPROVED.
 - **Corregido en QA:** en la página de QA, aprobar una variante, aprobar el set, crear un borrador de prueba y revocar muestran un aviso claro. Ya no llaman al backend real ni se simulan.
 - **Limitación del entorno:** aprobar o crear borradores de prueba requiere `/growth/` conectado al backend privado con un token válido.
 - **Suite:** 77/77 PASS. Prueba nueva: `tests/campaign-studio-preview-tokens.test.js`.
+
+### Actualización 2026-10-09 — Campaign Studio simplificado
+- Flujo en 4 pasos: Audiencia → Diseño → Vista previa → Aprobación. La información técnica pasó al panel "Detalles técnicos". Las reglas de gobernanza no cambiaron.
+- **Vista previa personalizada:** `{{firstName}}` y `{{company}}` solo se completan con un contacto incluido en el contexto de la campaña (`previewRecipient`). Si no hay contacto, se muestran marcados como `[Nombre]` y `[Empresa]`, nunca con valores inventados. El backend real aún no envía `previewRecipient`; solo el fixture de QA trae un contacto sintético.
+- Suite: 77/77 PASS (`tests/campaign-studio-preview-tokens.test.js` actualizado; `campaign-studio-no-freeze` sigue pasando).
