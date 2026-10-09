@@ -54,6 +54,7 @@ var AURA_AGENT_ACTION_TYPES_ = {
   PREPARE_CAMPAIGN_PLAN: { channel: 'SHEETS', external: false, policy: 'AUTO' },
   FOLLOW_UP_REPLIES: { channel: 'SHEETS', external: false, policy: 'AUTO' },
   ANALYZE_OPPORTUNITIES: { channel: 'SHEETS', external: false, policy: 'AUTO' },
+  ANALYZE_MARKETING_REPORT: { channel: 'SHEETS', external: false, policy: 'AUTO' },
   PREPARE_REPORT: { channel: 'ANALYTICS', external: false, policy: 'AUTO' },
   PRIORITIZE_TODAY: { channel: 'SHEETS', external: false, policy: 'AUTO' },
   PREPARE_SOCIAL_PLAN: { channel: 'METRICOOL', external: false, policy: 'AUTO' },
@@ -135,6 +136,7 @@ var AURA_AGENT_HANDLERS_ = {
   },
   FOLLOW_UP_REPLIES: function (action) { return { status: 'DONE', detail: 'AM_FOLLOW_UP_LISTED: ' + action.preview }; },
   ANALYZE_OPPORTUNITIES: function (action) { return v6AuraAgentJson_(v6AuraAgentAnalyzeOpportunities_(v6AuraAgentText_(action.preview))); },
+  ANALYZE_MARKETING_REPORT: function (action) { return v6AuraAgentJson_(v6AuraAgentAnalyzeReport_(v6AuraAgentText_(action.preview))); },
   PREPARE_REPORT: function (action, st) { var r = v6AuraAgentMonthlyReport_(st.nowIso); v6AuraAgentPut_(st, 'AURA_AGENT_MEMORY', { memoryKey: 'report.monthly.' + st.nowIso.slice(0, 7), scope: 'ANALYTICS', value: JSON.stringify(r.report), updatedAt: st.nowIso }); return v6AuraAgentJson_(r); },
   PRIORITIZE_TODAY: function (action, st) { return v6AuraAgentJson_(v6AuraAgentPrioritize_(st)); },
   // Not connected yet: reported honestly, never simulated.
@@ -225,6 +227,8 @@ function v6AuraAgentDetect_(nowIso) {
     var n = Object.keys(groups[scope].accounts).length; if (!n) return;
     found.push({ taskId: 'AT:' + day + ':OPP:' + scope, kind: 'OPPORTUNITY', scope: scope, subjectKey: scope, title: groups[scope].type + ': ' + n + ' eligible accounts', summary: 'Prepare a governed ' + groups[scope].type + ' campaign plan. Sending requires one approval and then the governed send flow.', observed: n + ' eligible (non-suppressed) accounts', dataSource: 'MKT_OPPORTUNITIES', rationale: 'Eligible accounts without an open campaign task for this family', priority: AURA_AGENT_SCOPES_.indexOf(scope) + 1, actions: [{ actionType: 'PREPARE_CAMPAIGN_PLAN', preview: scope }, { actionType: 'SEND_CUSTOMER_EMAIL', preview: groups[scope].type + ' email to ' + n + ' accounts (governed flow)' }] });
   });
+  // Marketing reports from the Marketing inbox: one AUTO analysis task per new report.
+  if (typeof v6AuraAgentReportDetections_ === 'function') { try { found = found.concat(v6AuraAgentReportDetections_(nowIso)); } catch (e) {} }
   return found;
 }
 
@@ -361,7 +365,7 @@ function v6AuraAgentAdvance_(st, task, nowIso) {
       // Plans waiting for approval are refreshed when the planning logic changed (AUTO, internal),
       // so the human always approves the current governed plan.
       if (approval.status === 'PENDING' || !approval.status) {
-        var stale = (st.actionsByTask[task.taskId] || []).filter(function (a) { if (a.actionType !== 'PREPARE_CAMPAIGN_PLAN' || a.status !== 'DONE') return false; try { var p = JSON.parse(a.result || '{}').plan; return !!p && p.planVersion !== (typeof AURA_AGENT_PLAN_VERSION_ !== 'undefined' ? AURA_AGENT_PLAN_VERSION_ : p.planVersion); } catch (e) { return false; } })[0];
+        var stale = (st.actionsByTask[task.taskId] || []).filter(function (a) { if (a.actionType !== 'PREPARE_CAMPAIGN_PLAN' || a.status !== 'DONE') return false; try { var p = JSON.parse(a.result || '{}').plan; return !!p && (p.planVersion !== (typeof AURA_AGENT_PLAN_VERSION_ !== 'undefined' ? AURA_AGENT_PLAN_VERSION_ : p.planVersion) || (typeof v6AuraAgentLatestReportId_ === 'function' && v6AuraAgentText_(p.sourceReportId) !== v6AuraAgentLatestReportId_(st.nowIso))); } catch (e) { return false; } })[0];
         if (stale) {
           var rp = v6AuraAgentAdapter_(stale.channel).execute(stale, null, st);
           stale.result = rp.detail || ''; stale.error = rp.error || ''; stale.executedAt = nowIso; v6AuraAgentPut_(st, 'AURA_AGENT_ACTIONS', stale);
@@ -371,7 +375,7 @@ function v6AuraAgentAdvance_(st, task, nowIso) {
             v6AuraAgentLedger_(st, task, { executionResult: 'REPLANNED -> BLOCKED: ' + task.blockReason, nextAction: task.nextAction }, nowIso);
             v6AuraAgentMove_(st, task, 'BLOCKED', task.blockReason, nowIso); continue;
           }
-          v6AuraAgentLedger_(st, task, { executionResult: 'REPLANNED (plan v' + AURA_AGENT_PLAN_VERSION_ + '); waiting for approval' }, nowIso);
+          v6AuraAgentLedger_(st, task, { executionResult: 'REPLANNED (plan v' + AURA_AGENT_PLAN_VERSION_ + ', current Marketing report); waiting for approval' }, nowIso);
           st.advanced = (st.advanced || 0) + 1;
         }
       }
@@ -404,7 +408,7 @@ function v6AuraAgentAdvance_(st, task, nowIso) {
       v6AuraAgentLedger_(st, task, { metricResult: 'actionsDone=' + (st.actionsByTask[task.taskId] || []).length }, nowIso);
       v6AuraAgentMove_(st, task, 'NEXT_ACTION', '', nowIso);
     } else if (s === 'NEXT_ACTION') {
-      task.nextAction = task.kind === 'FOLLOW_UP' ? 'AM follows up the replied contacts' : task.kind === 'OPPORTUNITY' ? 'Build the campaign in Campaign Studio' :
+      task.nextAction = task.kind === 'FOLLOW_UP' ? 'AM follows up the replied contacts' : task.kind === 'OPPORTUNITY' ? 'Build the campaign in Campaign Studio' : task.kind === 'REPORT' ? 'Review the campaign plans waiting for approval in AURA' :
         task.intent === 'FIND_OPPORTUNITIES' ? 'Say "Run the next ' + String(task.scope || '').toLowerCase().replace('_', '-') + ' campaign" to prepare it' : task.intent === 'MONTHLY_REPORT' ? 'Review the report in Recent results' : '';
       v6AuraAgentLedger_(st, task, { nextAction: task.nextAction }, nowIso);
       v6AuraAgentMove_(st, task, 'COMPLETED', '', nowIso);

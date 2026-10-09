@@ -153,6 +153,8 @@ function v6AuraAgentPlanCampaign_(scope, nowIso) {
       planVersion: AURA_AGENT_PLAN_VERSION_, scope: scope, objective: play.objective, eligibleAccounts: elig.count, contacts: out, languages: langs, languageSources: sources, languageConfidence: confidence,
       service: service, creativeSystem: play.creativeSystem, angle: play.angle, cta: play.cta,
       topOwners: v6AuraAgentTop_(elig.owners, 5),
+      // The Marketing report this plan was built from: a newer report replans it before approval.
+      sourceReportId: typeof v6AuraAgentLatestReportId_ === 'function' ? v6AuraAgentLatestReportId_(nowIso) : '',
       governance: 'Exact-email dedupe, DNC, invalid email and ' + AURA_AGENT_RECENT_SEND_DAYS_ + '-day resend protection applied; contact frequency and exclusions are re-applied by the governed build.',
       dataSources: ['MKT_OPPORTUNITIES', 'MKT_CONTACTS_SECURE', 'MKT_ACCOUNTS', 'MKT_EMAIL_QUEUE'],
       approvalRequired: 'SEND_CUSTOMER_EMAIL (one approval for the whole campaign)'
@@ -241,4 +243,47 @@ function v6AuraAgentCommandResponse_(parsed, task, result, actions) {
   if (result && result.report) return 'Monthly report ready: ' + result.report.campaigns.length + ' campaigns with sends in the last 31 days.';
   if (result && result.priorities) return result.priorities.openTasks.length + ' open priorities. ' + (result.priorities.openTasks[0] ? 'First: ' + result.priorities.openTasks[0].title + '.' : '');
   return 'Done.';
+}
+
+// ---- Marketing report intake (Marketing inbox) ------------------------------------------------
+// Every Marketing report ingested from the inbox (MarketingV6AuraGmailIngest.gs) becomes one AUTO
+// analysis task. The campaign tasks it feeds are still detected from MKT_OPPORTUNITIES, prepared
+// automatically and gated by one human approval. Counts only: no account or contact names.
+var AURA_AGENT_REPORT_WINDOW_DAYS_ = 45;
+function v6AuraAgentReports_(nowIso) {
+  if (typeof MKT_V6_AURA_GMAIL_SCHEMA === 'undefined') return [];
+  var cache = typeof AURA_AGENT_CYCLE_CACHE_ !== 'undefined' ? AURA_AGENT_CYCLE_CACHE_ : null;
+  if (cache && cache.reports) return cache.reports;
+  var now = new Date(nowIso || new Date().toISOString()).getTime(), out = [];
+  try {
+    out = v6Rows_('MKT_AURA_INGEST_LOG').filter(function (r) {
+      var at = new Date(r.processedAt || r.receivedAt || 0).getTime();
+      return v6AuraAgentText_(r.status) === 'OK' && at && now - at <= AURA_AGENT_REPORT_WINDOW_DAYS_ * 86400000;
+    }).sort(function (a, b) { return String(b.receivedAt || '').localeCompare(String(a.receivedAt || '')); });
+  } catch (e) { out = []; } // the report log is optional: never fails an agent cycle
+  if (cache) cache.reports = out;
+  return out;
+}
+function v6AuraAgentLatestReportId_(nowIso) {
+  var r = v6AuraAgentReports_(nowIso)[0];
+  return r ? v6AuraAgentText_(r.ingestId || r.gmailMessageId) : '';
+}
+function v6AuraAgentReportDetections_(nowIso) {
+  return v6AuraAgentReports_(nowIso).slice(0, 3).map(function (r) {
+    var id = v6AuraAgentText_(r.ingestId || r.gmailMessageId), n = Number(r.rowsAccepted) || 0;
+    return { taskId: 'AT:REPORT:' + id, kind: 'REPORT', scope: 'ANALYTICS', subjectKey: id, title: 'Marketing report received: ' + n + ' accepted rows', summary: 'Analyze the Marketing report from the inbox before campaigns are prepared.', observed: 'Report of ' + String(r.receivedAt || '').slice(0, 10) + ': ' + n + ' accepted, ' + (Number(r.rowsRejected) || 0) + ' rejected rows', dataSource: 'Gmail Marketing inbox · MKT_AURA_INGEST_LOG / MKT_AURA_GMAIL_OPPORTUNITIES', rationale: 'A new Marketing report changes which accounts are eligible for each campaign family.', priority: 1, actions: [{ actionType: 'ANALYZE_MARKETING_REPORT', preview: v6AuraAgentText_(r.gmailMessageId) }] };
+  });
+}
+function v6AuraAgentAnalyzeReport_(messageId) {
+  var id = v6AuraAgentText_(messageId), families = {}, owners = {}, sheets = {}, accounts = {}, scopes = {}, rejected = 0;
+  var rows = v6Rows_('MKT_AURA_GMAIL_OPPORTUNITIES').filter(function (r) { return v6AuraAgentText_(r.sourceMessageId) === id; });
+  if (!rows.length) return { status: 'BLOCKED', error: 'REPORT_HAS_NO_INGESTED_ROWS' };
+  rows.forEach(function (r) {
+    var f = v6AuraAgentText_(r.opportunityType) || 'Unknown', o = v6AuraAgentText_(r.amOwner) || 'Unassigned', sh = v6AuraAgentText_(r.sourceSheet) || 'Unknown';
+    families[f] = (families[f] || 0) + 1; owners[o] = (owners[o] || 0) + 1; sheets[sh] = (sheets[sh] || 0) + 1; accounts[r.accountId] = true;
+    // Only families with an AURA playbook are planned here; Campaign A (Activation tab) keeps its own closed pipeline.
+    var sc = v6AuraAgentScopeForType_(f); if (sc && AURA_AGENT_PLAYBOOK_[sc]) scopes[sc] = (scopes[sc] || 0) + 1;
+  });
+  try { rejected = v6Rows_('MKT_AURA_INGEST_REJECTIONS').filter(function (r) { return v6AuraAgentText_(r.gmailMessageId) === id; }).length; } catch (e) {}
+  return { status: 'DONE', analysis: { rows: rows.length, accounts: Object.keys(accounts).length, rejectedRows: rejected, byFamily: families, bySheet: sheets, topOwners: v6AuraAgentTop_(owners, 5), campaignScopes: scopes, nextStep: 'Campaign plans for these families are prepared automatically and wait for one approval in AURA. Nothing is sent without that approval.', dataSources: ['MKT_AURA_GMAIL_OPPORTUNITIES', 'MKT_AURA_INGEST_REJECTIONS'] } };
 }
