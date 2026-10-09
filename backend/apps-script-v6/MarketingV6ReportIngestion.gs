@@ -245,7 +245,7 @@ function v6RefreshOpportunitiesFromReports_(){
   if(typeof v6BuildGmailOpportunities_==='function')rows=rows.concat(v6BuildGmailOpportunities_(nowIso));
   rows=v6ApplyPrioritySuppression_(rows);
   v6WriteOpportunities_(rows);
-  return {status:'REPORT_SOURCE_SYNCED',sourceSpreadsheetId:MKT_V6_REPORT_SOURCE_ID,metrics:v6OpportunityMetrics_(rows),retentionCuentasJoinCoverage:v6RetentionCuentasJoinCoverage_(retentionRows,cuentas),syncedAt:nowIso};
+  return {status:'REPORT_SOURCE_SYNCED',sourceSpreadsheetId:v6AuraResourceId_('REPORT_SOURCE'),metrics:v6OpportunityMetrics_(rows),retentionCuentasJoinCoverage:v6RetentionCuentasJoinCoverage_(retentionRows,cuentas),syncedAt:nowIso};
 }
 
 function v6InstallOpportunityRefreshTrigger_(){

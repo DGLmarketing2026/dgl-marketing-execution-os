@@ -152,7 +152,7 @@ case 'v6AuraRevokeCreativeApproval':
   mktV55Audit_('TEST_DRAFT_CREATED', req, 'COMPLETED', result);
   break;
       case 'v55Health':
-        result = {ok:true,service:'DGL Marketing OS V5.5 Private Backend',version:'5.5',mode:'PRIVATE_BACKEND',claudeConnected:false,hubId:MKT_V55.HUB_ID};
+        result = {ok:true,service:'DGL Marketing OS V5.5 Private Backend',version:'5.5',mode:'PRIVATE_BACKEND',claudeConnected:false,hubId:v6AuraResourceId_('DATA_HUB')};
         break;
       case 'v55Setup': result = setupMarketingV55Backend(); break;
       // App bootstrap in ONE request (was 1 auth probe + 4 parallel reads in 2 waves, each paying
