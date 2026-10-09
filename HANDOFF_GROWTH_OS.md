@@ -6,7 +6,7 @@
 - **Implementaciones:** detenidas por solicitud. Ninguno de los 5 cambios propuestos está autorizado: publicar, archivar archivos, cambios de backend, app privada y Clientify.
 - **Qué contiene:** una vista previa aislada que reutiliza los módulos actuales **sin cambiar su lógica**. Lo nuevo es la navegación en 5 espacios (Inicio, Oportunidades, Campañas, Resultados, AURA), la vista de Inicio, el diseño y Administración por separado.
 
-## Archivos (todos nuevos; ningún archivo existente modificado)
+## Archivos (nuevos; los únicos archivos existentes modificados están en "Actualización 2026-10-09")
 | Archivo | Propósito |
 |---|---|
 | `growth/index.html` | Entrada aislada. Carga los mismos scripts que `index.html`, salvo `app.js`. |
@@ -57,3 +57,31 @@ python -m http.server 8770 --bind 127.0.0.1 --directory ../dgl-growth-os-preview
 2. Hacer los ajustes solo en `feat/growth-os-v1` y correr la suite: `for f in tests/*.test.js; do node "$f"; done`.
 3. Antes de publicar, pedir aprobación explícita. Hacer merge a `main` publica en GitHub Pages; ojo: el repositorio es **público**.
 4. No archivar archivos ni tocar Apps Script, Salesforce, NOVA, DNS, Clientify o las integraciones sin aprobación.
+
+## Actualización 2026-10-09 — versión estable
+
+**Último commit estable:** `cdb393f` en `feat/growth-os-v1`, más este documento.
+
+### Corrección: Campaign Studio congelaba la página
+- **Síntoma:** al abrir `#/campaign-studio?campaignId=…` en la página de QA, Chrome mostraba "La página no responde".
+- **Causa:** Studio volvía a renderizar con cada evento `dgl:v55-backend-change` mientras no había campaña cargada. Cuando fallaba la petición del contexto de la campaña, el adapter emitía ese evento desde dentro del render. Eso repetía la misma petición fallida en una cadena síncrona e infinita: con el código anterior, la prueba de regresión registró 61 o más peticiones.
+- **Archivos existentes modificados en esta rama:**
+  - `assets/js/campaign-studio-v6.js`: solo vuelve a renderizar en una transición real a conectado y nunca con un render en curso.
+  - `index.html` y `growth/index.html`: versión de caché de Studio `20261009-9`.
+- **QA:** `tools/growth-qa/fixture-adapter.js` incluye un contexto sintético de Studio y aprobar/rechazar en memoria. La página de QA ya no llama al backend real.
+- **Prueba nueva:** `tests/campaign-studio-no-freeze.test.js`.
+
+### Pruebas realizadas (2026-10-09, solo datos sintéticos o de solo lectura)
+| Prueba | Resultado |
+|---|---|
+| Suite completa | **76/76 PASS** |
+| Studio con un contexto que falla | PASS: 1 petición, muestra el error, no se congela |
+| Abrir la campaña, ver el diseño del email, cambiar ES → EN y volver a la lista | PASS |
+| AURA: aprobar y luego rechazar en QA | PASS: las decisiones se registran, los botones bajan de 4 a 2 y no hay re-renders en bucle |
+| Paridad con la versión original | CSV **FUNCIONA**. OPEN/CLICK **FUNCIONA** (QA en producción del 7-oct). Idiomas **PARCIAL**: solo resuelve por el dominio del email, ningún EN y muchos UNRESOLVED. Respuestas y rebotes **PARCIAL**: sin evidencia real atribuida. Studio y aprobaciones **PARCIAL**: falta probarlos con datos reales y tu token. |
+
+### Para continuar
+- **Código:** rama remota `origin/feat/growth-os-v1`, copia de trabajo local `C:/Users/DGL/Desktop/CLAUDE_PLATAFORMA_MKTING/dgl-growth-os-preview`.
+- **Vista previa:** `python -m http.server 8770 --bind 127.0.0.1 --directory ../dgl-growth-os-preview` y luego `http://localhost:8770/growth/`.
+- **Pendiente de tu aprobación:** las mismas 5 decisiones de antes.
+- **Prueba pendiente:** validar Studio y las aprobaciones con datos reales (requiere tu token).
