@@ -20,7 +20,7 @@
 var MKT_V6_REPORT_FRESHNESS_STALE_THRESHOLD_HOURS=6;
 
 function v6AuraCheckReportFreshness_(){
-  var file=DriveApp.getFileById(MKT_V6_REPORT_SOURCE_ID),lastUpdated=file.getLastUpdated(),now=new Date();
+  var file=DriveApp.getFileById(v6AuraResourceId_('REPORT_SOURCE')),lastUpdated=file.getLastUpdated(),now=new Date();
   var hoursSinceLastUpdate=(now.getTime()-lastUpdated.getTime())/3600000;
   var stale=hoursSinceLastUpdate>MKT_V6_REPORT_FRESHNESS_STALE_THRESHOLD_HOURS;
   return {

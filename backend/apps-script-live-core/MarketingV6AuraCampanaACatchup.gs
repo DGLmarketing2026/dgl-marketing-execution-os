@@ -336,6 +336,7 @@ function RUN_AURA_CAMPANA_A_CATCHUP_LIVE() {
       try {
         var options = { htmlBody: job.htmlBody, name: senderName };
         if (job.replyTo) options.replyTo = job.replyTo;
+        v6AuraAssertExternalAllowed_('GMAIL_SEND');
         GmailApp.sendEmail(job.email, job.subject, v6AuraEmailStripHtml_(job.htmlBody), options);
 
         // Durable idempotence boundary: persist SENT immediately after Gmail accepts the call.

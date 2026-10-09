@@ -105,7 +105,7 @@ function v6AuraEnsureCampaignCreativesSheet_() {
   var existing = v6Sheet_(name);
   if (existing) return { status: 'ALREADY_EXISTS', sheetName: name };
   var headers = MKT_V6_CONTACT_RECIPIENT_SCHEMA[name];
-  var created = SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).insertSheet(name);
+  var created = SpreadsheetApp.openById(v6AuraResourceId_('DATA_HUB')).insertSheet(name);
   created.getRange(1, 1, 1, headers.length).setValues([headers]);
   return { status: 'CREATED', sheetName: name, headers: headers };
 }

@@ -1,3 +1,4 @@
+require('./helpers/aura-environment'); // Apps Script global scope: environment module always loaded
 // AURA report intake from the Marketing inbox (2026-10-09).
 // info@dglus.com -> report detection (not tied to one sender) -> XLSX -> governed opportunities
 // -> AURA agent analysis task -> campaign plans that wait for one human approval.
@@ -65,7 +66,11 @@ let passed = 0; const ok = m => { passed++; console.log('PASS ' + m); };
 
 // 2. Wrong Google account -> explicit missing connection, Gmail never searched.
 (function () {
-  const ctx = context({}, {}, [], { effectiveUser: 'someone@dglus.com' });
+  // Unmarked project running as another account: refused before anything (could be a staging copy).
+  const unmarked = context({}, {}, [], { effectiveUser: 'someone@dglus.com' });
+  assert.throws(() => unmarked.v6AuraGmailIngestTick_(), /AURA_ENVIRONMENT_REQUIRED/); assert.equal(unmarked.__calls.search.length, 0);
+  // Explicit PRODUCTION marker running as another account: missing inbox connection.
+  const ctx = context({ AURA_ENVIRONMENT: 'PRODUCTION' }, {}, [], { effectiveUser: 'someone@dglus.com' });
   const r = ctx.v6AuraGmailIngestTick_();
   assert.equal(r.status, 'INBOX_NOT_CONNECTED'); assert.equal(ctx.__calls.search.length, 0);
   assert.equal(context({}, {}, [], { effectiveUser: 'info@dglus.com' }).v6AuraGmailIngestTick_().status, 'OK');

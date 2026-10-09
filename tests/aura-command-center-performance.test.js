@@ -1,3 +1,4 @@
+require('./helpers/aura-environment'); // Apps Script global scope: environment module always loaded
 // Performance regression: the AURA Overview bundle reads each table once per execution and
 // replaces 7 requests (2 sequential waves) with 1. Counts real sheet reads (getDataRange).
 const assert=require('assert'),fs=require('fs'),vm=require('vm');

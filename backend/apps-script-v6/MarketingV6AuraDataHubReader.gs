@@ -42,7 +42,7 @@ function v6AuraHubCell_(header, v) {
 
 // Prefetch: {tables:{NAME:[rowObjects]}, headers:{NAME:[...]}, sheets:{NAME:{sheetId,rowCount,columnCount}}, stats}
 function v6AuraHubPrefetch_(tables, options) {
-  var opts = options || {}, id = opts.spreadsheetId || MKT_V6_DATA_HUB_ID, stats = opts.stats || { calls: [] }, exclude = opts.exclude || AURA_HUB_EXCLUDE_;
+  var opts = options || {}, id = opts.spreadsheetId ? v6AuraAssertNotProductionResource_(opts.spreadsheetId, 'spreadsheetId') : v6AuraResourceId_('DATA_HUB'), stats = opts.stats || { calls: [] }, exclude = opts.exclude || AURA_HUB_EXCLUDE_;
   var meta = v6AuraHubCall_('metadata', function () { return Sheets.Spreadsheets.get(id, { fields: 'sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))' }); }, stats);
   var sheets = {};
   ((meta && meta.sheets) || []).forEach(function (s) { var p = s.properties || {}, g = p.gridProperties || {}; sheets[p.title] = { sheetId: p.sheetId, rowCount: g.rowCount || 0, columnCount: g.columnCount || 0 }; });
@@ -124,7 +124,7 @@ function v6AuraHubBackfillContactLanguage_(hub, updates) {
 }
 // Production-safe diagnostic: timings per stage, no customer values logged (names/counts only).
 function v6AuraHubDiagnose_() {
-  var out = { spreadsheetId: MKT_V6_DATA_HUB_ID, stages: [] }, ss = null;
+  var out = { spreadsheetId: v6AuraResourceId_('DATA_HUB'), stages: [] }, ss = null;
   function stage(name, sheet, fn) {
     // After the first SpreadsheetApp failure the remaining SpreadsheetApp stages are skipped so the
     // diagnostic stays bounded (each failure can take tens of seconds).
@@ -134,8 +134,8 @@ function v6AuraHubDiagnose_() {
     catch (err) { if (/^[B-G]./.test(name)) out.spreadsheetAppFailed = name + (sheet ? ' ' + sheet : ''); out.stages.push({ stage: name, sheet: sheet || '', ms: Date.now() - t0, ok: false, error: String(err && err.message || err).slice(0, 300) }); return null; }
   }
   var need = AURA_HUB_AGENT_TABLES_.concat(AURA_HUB_DATA_TABLES_);
-  stage('A.resolveId', '', function () { return MKT_V6_DATA_HUB_ID; });
-  ss = stage('B.openById', '', function () { return SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID); });
+  stage('A.resolveId', '', function () { return out.spreadsheetId; });
+  ss = stage('B.openById', '', function () { return SpreadsheetApp.openById(out.spreadsheetId); });
   if (ss) {
     var all = stage('C.getSheets', '', function () { return ss.getSheets().map(function (s) { return s.getName(); }); });
     if (all) out.sheetCount = all.length;

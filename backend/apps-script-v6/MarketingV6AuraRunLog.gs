@@ -82,7 +82,7 @@ function v6AuraScheduleOneShotBootstrapRecovery_(delaySeconds){
   try{
     if(v6AuraOneShotTriggerStillPending_())return {status:'ALREADY_PENDING'};
     var seconds=delaySeconds||300;
-    var trigger=ScriptApp.newTrigger('v6AuraBootstrapAndRun_').timeBased().after(seconds*1000).create();
+    var trigger=v6AuraNewTrigger_('v6AuraBootstrapAndRun_').timeBased().after(seconds*1000).create();
     PropertiesService.getScriptProperties().setProperty(MKT_V6_AURA_ONESHOT_TRIGGER_PROPERTY_KEY,trigger.getUniqueId());
     return {status:'SCHEDULED',triggerId:trigger.getUniqueId(),delaySeconds:seconds};
   }catch(err){

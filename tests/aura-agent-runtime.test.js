@@ -1,3 +1,4 @@
+require('./helpers/aura-environment'); // Apps Script global scope: environment module always loaded
 const assert=require('assert'),fs=require('fs'),vm=require('vm');
 const SRC=f=>fs.readFileSync('backend/apps-script-v6/'+f,'utf8');
 function makeCtx(o){

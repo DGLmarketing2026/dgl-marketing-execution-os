@@ -170,7 +170,7 @@ function v6CampaignStudioAppendEvidence_(table,record){
  var required=V6_STUDIO_EVIDENCE_SCHEMA_[table];
  if(!required)throw new Error('STUDIO_EVIDENCE_TABLE_INVALID');
  var sheet=v6Sheet_(table);
- if(!sheet)sheet=SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).insertSheet(table);
+ if(!sheet)sheet=SpreadsheetApp.openById(v6AuraResourceId_('DATA_HUB')).insertSheet(table);
  var count=sheet.getLastColumn(),headers=count?sheet.getRange(1,1,1,count).getValues()[0]:[];
  var missing=required.filter(function(k){return headers.indexOf(k)<0;});
  if(missing.length){sheet.getRange(1,headers.length+1,1,missing.length).setValues([missing]);headers=headers.concat(missing);}

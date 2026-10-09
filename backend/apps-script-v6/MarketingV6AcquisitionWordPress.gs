@@ -122,7 +122,7 @@ function v6AcqUpsertInto_(name, headers, keys, record) {
 function v6WpCsv_(headers, rows) { return (typeof v6Csv_ === 'function') ? v6Csv_(headers, rows) : [headers.join(',')].concat((rows || []).map(function (r) { return headers.map(function (h) { return String(r[h] == null ? '' : r[h]); }).join(','); })).join('\r\n'); }
 function v6WpArchiveCsv_(cycleId, csv) {
   try {
-    var folderId = v6WpText_(PropertiesService.getScriptProperties().getProperty('ACQ_CYCLE_ARCHIVE_FOLDER_ID')) || (typeof MKT_V6_ARCHIVE !== 'undefined' && MKT_V6_ARCHIVE.results);
+    var folderId = v6WpText_(PropertiesService.getScriptProperties().getProperty('ACQ_CYCLE_ARCHIVE_FOLDER_ID')) || (typeof v6ArchiveFolderId_ === 'function' && v6ArchiveFolderId_('results'));
     if (!folderId) return { status: 'ARCHIVE FOLDER NOT CONFIGURED', fileId: '' };
     var file = DriveApp.getFolderById(folderId).createFile('acquisition-cycle-' + cycleId + '.csv', csv, MimeType.CSV);
     return { status: 'CSV ARCHIVED', fileId: file.getId() };
@@ -131,6 +131,7 @@ function v6WpArchiveCsv_(cycleId, csv) {
 
 // --- WordPress REST publisher --------------------------------------------
 function v6AcqWpConfig_() {
+  v6AuraAssertExternalAllowed_('WORDPRESS'); // every WordPress call needs this config
   var props = PropertiesService.getScriptProperties();
   var baseUrl = v6WpText_(props.getProperty('ACQ_WP_BASE_URL')).replace(/\/$/, ''), username = v6WpText_(props.getProperty('ACQ_WP_USERNAME')), appPassword = v6WpText_(props.getProperty('ACQ_WP_APP_PASSWORD'));
   return { baseUrl: baseUrl, username: username, appPassword: appPassword, configured: !!(baseUrl && username && appPassword) };

@@ -1,3 +1,4 @@
+require('./helpers/aura-environment'); // Apps Script global scope: environment module always loaded
 const assert=require('assert'),fs=require('fs'),vm=require('vm');
 const src=n=>fs.readFileSync('backend/apps-script-v6/'+n+'.gs','utf8');
 class Sheet{constructor(rows=[]){this.rows=rows;}getLastRow(){return this.rows.length;}getLastColumn(){return Math.max(0,...this.rows.map(r=>r.length));}getRange(r,c,n,w){return{getValues:()=>Array.from({length:n},(_,i)=>Array.from({length:w},(_,j)=>(this.rows[r-1+i]||[])[c-1+j]||'')),setValues:v=>v.forEach((row,i)=>{this.rows[r-1+i]||=[];row.forEach((x,j)=>this.rows[r-1+i][c-1+j]=x);})};}}

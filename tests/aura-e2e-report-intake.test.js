@@ -1,3 +1,4 @@
+require('./helpers/aura-environment'); // Apps Script global scope: environment module always loaded
 // End-to-end: synthetic Marketing report -> scheduled AURA triggers -> pending approvals, no sends.
 // Drives the real AURA source with a simulated Gmail test mailbox, Drive conversion (openpyxl),
 // Data Hub and Apps Script trigger scheduler. See tools/aura-e2e/run-e2e.js. Requires python + openpyxl.

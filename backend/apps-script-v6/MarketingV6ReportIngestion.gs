@@ -1,7 +1,7 @@
 var MKT_V6_REPORT_SOURCE_ID='1XPZC_VUPLsmta--MPXi4MHswz9oiYxKbiq58a_khPp4';
 
-function v6ReportRows_(sheetName){if(String(PropertiesService.getScriptProperties().getProperty('AURA_ENVIRONMENT')||'PRODUCTION').toUpperCase()!=='PRODUCTION')throw new Error('QA_GOOGLE_ACCESS_BLOCKED');
-  var s=SpreadsheetApp.openById(MKT_V6_REPORT_SOURCE_ID).getSheetByName(sheetName);
+function v6ReportRows_(sheetName){
+  var s=SpreadsheetApp.openById(v6AuraResourceId_('REPORT_SOURCE')).getSheetByName(sheetName);
   if(!s)return [];
   var values=s.getDataRange().getValues();
   if(values.length<2)return [];
@@ -172,7 +172,7 @@ function v6ApplyPrioritySuppression_(rows){
 
 // Atomic Sheets transaction: retain a snapshot and replace values together.
 function v6WriteOpportunities_(rows){
-  if(String(PropertiesService.getScriptProperties().getProperty('AURA_ENVIRONMENT')||'PRODUCTION').toUpperCase()!=='PRODUCTION')throw new Error('QA_GOOGLE_ACCESS_BLOCKED');
+  v6AuraAssertGoogleAccess_();
   var lock=LockService.getDocumentLock()||LockService.getScriptLock();
   var ownsLock=!lock.hasLock();
   if(ownsLock&&!lock.tryLock(30000))throw new Error('OPPORTUNITY_UPDATE_BUSY');
@@ -190,7 +190,7 @@ function v6WriteOpportunities_(rows){
   } finally {if(ownsLock)lock.releaseLock();}
 }
 function v6RestoreOpportunitiesBackup_(backupSheetId){
-  if(String(PropertiesService.getScriptProperties().getProperty('AURA_ENVIRONMENT')||'PRODUCTION').toUpperCase()!=='PRODUCTION')throw new Error('QA_GOOGLE_ACCESS_BLOCKED');
+  v6AuraAssertGoogleAccess_();
   var lock=LockService.getDocumentLock()||LockService.getScriptLock();
   var ownsLock=!lock.hasLock();
   if(ownsLock&&!lock.tryLock(30000))throw new Error('OPPORTUNITY_UPDATE_BUSY');
@@ -250,7 +250,7 @@ function v6RefreshOpportunitiesFromReports_(){
 
 function v6InstallOpportunityRefreshTrigger_(){
   ScriptApp.getProjectTriggers().forEach(function(t){if(t.getHandlerFunction()==='v6ScheduledOpportunityRefresh_')ScriptApp.deleteTrigger(t);});
-  ScriptApp.newTrigger('v6ScheduledOpportunityRefresh_').timeBased().everyHours(6).create();
+  v6AuraNewTrigger_('v6ScheduledOpportunityRefresh_').timeBased().everyHours(6).create();
   return {ok:true,handler:'v6ScheduledOpportunityRefresh_',frequency:'EVERY_6_HOURS'};
 }
 // Delegates to v6AuraRunRetentionCycle_ (MarketingV6RetentionReport.gs) instead of calling

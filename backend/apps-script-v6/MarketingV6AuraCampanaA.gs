@@ -74,6 +74,7 @@ function v6AuraCampanaALog_(stage) {
 var CAMPANA_A_SOURCE_SPREADSHEET_ID_PROPERTY_ = 'CAMPANA_A_SOURCE_SPREADSHEET_ID';
 var CAMPANA_A_SOURCE_SPREADSHEET_ID_DEFAULT_ = '1GlYvjGKfhCWxPHoNzjEGDz--dT6t7WV4w2YAXvEXJ_c';
 function v6AuraCampanaAResolveSourceSpreadsheetId_() {
+  v6AuraAssertExternalAllowed_('CAMPANA_A_SOURCE');
   return v6AuraEmailText_(PropertiesService.getScriptProperties().getProperty(CAMPANA_A_SOURCE_SPREADSHEET_ID_PROPERTY_)) || CAMPANA_A_SOURCE_SPREADSHEET_ID_DEFAULT_;
 }
 // Reads the LIVE 'Campana A - HA prioritaria' tab directly from its own source spreadsheet every
@@ -1351,6 +1352,7 @@ function v6AuraCampanaADispatchBatchLocked_() {
       }
       var options = { htmlBody: job.htmlBody, name: senderName };
       if (job.replyTo) options.replyTo = job.replyTo;
+      v6AuraAssertExternalAllowed_('GMAIL_SEND');
       GmailApp.sendEmail(job.email, job.subject, v6AuraEmailStripHtml_(job.htmlBody), options);
       job.status = 'SENT'; job.processedAt = now; job.error = '';
       counts.sent++; updated.push(job); sentKeys[dupKey] = true;

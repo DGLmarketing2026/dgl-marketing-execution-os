@@ -14,7 +14,6 @@ const { execFileSync } = require('child_process');
 const ROOT = path.resolve(__dirname, '../..');
 const GS = n => fs.readFileSync(path.join(ROOT, 'backend/apps-script-v6', n), 'utf8');
 const FIX = n => path.join(__dirname, 'fixtures', n);
-const INBOX = 'info@dglus.com';
 const AUTH_PASS = d => 'mx.google.com; dkim=pass header.i=@' + d + '; spf=pass smtp.mailfrom=qa@' + d + '; dmarc=pass (p=NONE) header.from=' + d;
 
 function xlsxValues(file) {
@@ -22,13 +21,17 @@ function xlsxValues(file) {
 }
 
 function run(options = {}) {
+  // PRODUCTION (default) mirrors the production inbox; STAGING runs the same flow against a synthetic, fully isolated staging configuration.
+  const STAGING = String(options.environment || '').toUpperCase() === 'STAGING';
+  const DOMAIN = STAGING ? 'staging.example.test' : 'dglus.com', INBOX = (STAGING ? 'aura-staging@' : 'info@') + DOMAIN;
   if (String(options.sendMode || process.env.AURA_SEND_MODE || 'DRY_RUN').toUpperCase() !== 'DRY_RUN') throw new Error('QA_LIVE_BLOCKED');
   const RealDate = Date, clock = { now: RealDate.parse('2026-10-12T08:00:00.000Z') };
   function FakeDate(...a) { return a.length ? new RealDate(...a) : new RealDate(clock.now); }
   FakeDate.prototype = RealDate.prototype; FakeDate.now = () => clock.now; FakeDate.parse = RealDate.parse; FakeDate.UTC = RealDate.UTC;
 
   const tables = { MKT_EMAIL_QUEUE: [], MKT_OPPORTUNITIES: [], MKT_CONTACTS_SECURE: [], MKT_ACCOUNTS: [] };
-  const props = { AURA_SEND_MODE: 'DRY_RUN', AURA_GMAIL_ALLOWED_SENDERS: 'am-lead-qa@dglus.com' };
+  const props = { AURA_SEND_MODE: 'DRY_RUN', AURA_GMAIL_ALLOWED_SENDERS: 'am-lead-qa@' + DOMAIN + '' };
+  if (STAGING) Object.assign(props, { AURA_ENVIRONMENT: 'STAGING', AURA_STAGING_INBOX: INBOX, AURA_STAGING_DATA_HUB_ID: 'STAGING_SYNTHETIC_DATA_HUB_0001', AURA_STAGING_REPORT_SOURCE_ID: 'STAGING_SYNTHETIC_NOVA_SOURCE_01', AURA_STAGING_DRIVE_FOLDER_ID: 'STAGING_SYNTHETIC_DRIVE_FOLDER_1', AURA_STAGING_TRIGGERS: 'auraReportIntakeTick,auraAgentTick', AURA_GMAIL_TRUSTED_DOMAINS: DOMAIN });
   const triggers = [], mailbox = [], files = {}, labels = {};
   const audit = { written: {}, external: { gmailSend: 0, gmailDraft: 0, mailApp: 0, urlFetch: 0 }, driveConversions: 0, ingestLogReads: 0, tickLog: [] };
   const note = n => { audit.written[n] = (audit.written[n] || 0) + 1; };
@@ -61,7 +64,7 @@ function run(options = {}) {
     console: { log() {} }, Date: FakeDate, Math, Number, String, Object, Array, JSON, Error, RegExp, isNaN, parseInt, parseFloat,
     Utilities: { DigestAlgorithm: { MD5: 'MD5', SHA_256: 'SHA_256' }, Charset: { UTF_8: 'UTF_8' }, computeDigest: digest, formatDate: d => new RealDate(d).toISOString().slice(0, 10), parseCsv: t => t.split('\n').map(l => l.split(',')), sleep() {} },
     Session: { getEffectiveUser: () => ({ getEmail: () => INBOX }), getActiveUser: () => ({ getEmail: () => '' }), getScriptTimeZone: () => 'America/Bogota' },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), setProperty: (k, v) => { props[k] = String(v); }, deleteProperty: k => { delete props[k]; } }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), getProperties: () => Object.assign({}, props), setProperty: (k, v) => { props[k] = String(v); }, deleteProperty: k => { delete props[k]; } }) },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
     ScriptApp: {
       getProjectTriggers: () => triggers.slice(),
@@ -78,7 +81,7 @@ function run(options = {}) {
     SpreadsheetApp: { openById: id => { if (!files[id]) throw new Error('E2E: only converted test files can be opened (' + id + ')'); const v = xlsxValues(files[id]); return { getSheets: () => v.map(s => ({ getName: () => s.name, getDataRange: () => ({ getValues: () => s.values }) })) }; } }
   };
   vm.createContext(ctx);
-  ['MarketingV6ReportIngestion.gs', 'MarketingV6AuraGmailIngest.gs', 'MarketingV6AuraCampanaA.gs', 'MarketingV6AuraCreativeApproval.gs', 'MarketingV6AuraEmailDispatcher.gs', 'MarketingV6AuraAgentRuntime.gs', 'MarketingV6AuraAgentIntelligence.gs']
+  ['MarketingV6AuraEnvironment.gs', 'MarketingV6ReportIngestion.gs', 'MarketingV6AuraGmailIngest.gs', 'MarketingV6AuraCampanaA.gs', 'MarketingV6AuraCreativeApproval.gs', 'MarketingV6AuraEmailDispatcher.gs', 'MarketingV6AuraAgentRuntime.gs', 'MarketingV6AuraAgentIntelligence.gs']
     .forEach(n => vm.runInContext(GS(n), ctx, { filename: n }));
   // In-memory Data Hub (same read/upsert semantics as v6Rows_/v6UpsertByKey_/v6BatchUpsertByKey_).
   ctx.v6Rows_ = n => { if (n === 'MKT_AURA_INGEST_LOG' && audit.handler === 'auraReportIntakeTick') audit.ingestLogReads++; return (tables[n] || []).map(copy); };
@@ -136,16 +139,16 @@ function run(options = {}) {
   const activation = ctx.AURA_REPORT_INTAKE_ACTIVATE(); ctx.v6AuraAgentActivate_();
   // 08:20 mail arrives in the test mailbox.
   clock.now = RealDate.parse('2026-10-12T08:20:00.000Z');
-  deliver('QA-M1', 'Marketing QA <marketing-qa@dglus.com>', { subject: 'Sugerencias de Marketing - semana 42', auth: AUTH_PASS('dglus.com'), files: [FIX('Marketing_DGL_QA_SINTETICO_v1.xlsx')] });
-  deliver('QA-SPOOF', 'Falso <marketing-qa@dglus.com>', { subject: 'Sugerencias de Marketing', auth: 'mx.google.com; dkim=fail header.i=@dglus.com; spf=fail smtp.mailfrom=x@evil.example.test; dmarc=fail header.from=dglus.com', files: [FIX('Marketing_DGL_QA_SINTETICO_v1.xlsx')] });
+  deliver('QA-M1', 'Marketing QA <marketing-qa@' + DOMAIN + '>', { subject: 'Sugerencias de Marketing - semana 42', auth: AUTH_PASS('' + DOMAIN + ''), files: [FIX('Marketing_DGL_QA_SINTETICO_v1.xlsx')] });
+  deliver('QA-SPOOF', 'Falso <marketing-qa@' + DOMAIN + '>', { subject: 'Sugerencias de Marketing', auth: 'mx.google.com; dkim=fail header.i=@' + DOMAIN + '; spf=fail smtp.mailfrom=x@evil.example.test; dmarc=fail header.from=' + DOMAIN + '', files: [FIX('Marketing_DGL_QA_SINTETICO_v1.xlsx')] });
   deliver('QA-EXT', 'Externo <ventas@example.test>', { subject: 'Reporte', auth: AUTH_PASS('example.test'), files: [FIX('Marketing_DGL_QA_SINTETICO_v1.xlsx')] });
-  deliver('QA-NOTREPORT', 'Finanzas QA <finanzas-qa@dglus.com>', { subject: 'Presupuesto Q4', auth: AUTH_PASS('dglus.com'), files: [FIX('Presupuesto_Q4_QA.xlsx')] });
+  deliver('QA-NOTREPORT', 'Finanzas QA <finanzas-qa@' + DOMAIN + '>', { subject: 'Presupuesto Q4', auth: AUTH_PASS('' + DOMAIN + ''), files: [FIX('Presupuesto_Q4_QA.xlsx')] });
   advanceTo('2026-10-12T09:59:00.000Z');
   const s1 = snap('after first report');
   const plansV1 = (tables.AURA_AGENT_ACTIONS || []).filter(a => a.actionType === 'PREPARE_CAMPAIGN_PLAN').map(a => ({ taskId: a.taskId, status: a.status, plan: JSON.parse(a.result || '{}').plan }));
   // 10:05 the same file is re-sent by the allowlisted AM lead (duplicate).
   clock.now = RealDate.parse('2026-10-12T10:05:00.000Z');
-  deliver('QA-M2', 'AM Lead QA <am-lead-qa@dglus.com>', { subject: 'Reenvio: Sugerencias de Marketing', auth: AUTH_PASS('dglus.com'), files: [FIX('Marketing_DGL_QA_SINTETICO_v1.xlsx')] });
+  deliver('QA-M2', 'AM Lead QA <am-lead-qa@' + DOMAIN + '>', { subject: 'Reenvio: Sugerencias de Marketing', auth: AUTH_PASS('' + DOMAIN + ''), files: [FIX('Marketing_DGL_QA_SINTETICO_v1.xlsx')] });
   advanceTo('2026-10-12T10:59:00.000Z');
   const conversionsAfterDup = audit.driveConversions, s2 = snap('after duplicate');
   // 11:00-11:59 no new mail: the intake must not open the Data Hub.
@@ -154,7 +157,7 @@ function run(options = {}) {
   const idleLogReads = audit.ingestLogReads - logReadsBeforeIdle, s3 = snap('idle hour');
   // 12:15 an updated report (one new account) arrives.
   clock.now = RealDate.parse('2026-10-12T12:15:00.000Z');
-  deliver('QA-M3', 'Marketing QA <marketing-qa@dglus.com>', { subject: 'Sugerencias de Marketing - actualizado', auth: AUTH_PASS('dglus.com'), files: [FIX('Marketing_DGL_QA_SINTETICO_v2.xlsx')] });
+  deliver('QA-M3', 'Marketing QA <marketing-qa@' + DOMAIN + '>', { subject: 'Sugerencias de Marketing - actualizado', auth: AUTH_PASS('' + DOMAIN + ''), files: [FIX('Marketing_DGL_QA_SINTETICO_v2.xlsx')] });
   advanceTo('2026-10-12T13:59:00.000Z');
   const s4 = snap('after updated report');
   const plansV2 = (tables.AURA_AGENT_ACTIONS || []).filter(a => a.actionType === 'PREPARE_CAMPAIGN_PLAN').map(a => ({ taskId: a.taskId, status: a.status, plan: JSON.parse(a.result || '{}').plan }));
@@ -162,7 +165,7 @@ function run(options = {}) {
   const decisions = (tables.AURA_AGENT_DECISIONS || []).length;
 
   return {
-    activation: { status: activation.status, inboxIsMarketing: activation.inbox === INBOX }, triggers: triggers.map(t => ({ handler: t.getHandlerFunction(), everyHours: t.everyHours, minute: t.minute })),
+    environment: STAGING ? 'STAGING' : 'PRODUCTION', activation: { status: activation.status, inboxIsMarketing: activation.inbox === INBOX }, triggers: triggers.map(t => ({ handler: t.getHandlerFunction(), everyHours: t.everyHours, minute: t.minute })),
     snapshots: [s1, s2, s3, s4], plansV1, plansV2, reportActions, decisions, opportunities: tables.MKT_OPPORTUNITIES.map(o => ({ type: o.opportunityType, status: o.eligibilityStatus, reason: o.suppressionReason, source: o.sourceReport })),
     rejections: (tables.MKT_AURA_INGEST_REJECTIONS || []).map(r => ({ message: r.gmailMessageId, sheet: r.sheetName, reason: r.reason })),
     labels, conversionsAfterDup, idleLogReads, audit, queueUnchanged: JSON.stringify(tables.MKT_EMAIL_QUEUE) === queueBefore, sendMode: props.AURA_SEND_MODE,
@@ -243,10 +246,10 @@ function markdown(results, raw) {
 
 module.exports = { run, evaluate, markdown };
 if (require.main === module) {
-  const raw = run(), results = evaluate(raw), out = path.join(ROOT, 'docs/aura-e2e');
+  const env = String(process.argv[2] || '').toUpperCase() === 'STAGING' ? 'STAGING' : '', raw = run({ environment: env }), results = evaluate(raw), out = path.join(ROOT, 'docs/aura-e2e'), sfx = env ? '_STAGING' : '';
   fs.mkdirSync(out, { recursive: true });
-  fs.writeFileSync(path.join(out, 'E2E_RESULTS.json'), JSON.stringify({ generatedBy: 'tools/aura-e2e/run-e2e.js', results, raw }, null, 2));
-  fs.writeFileSync(path.join(out, 'E2E_RESULTS.md'), markdown(results, raw));
+  fs.writeFileSync(path.join(out, 'E2E_RESULTS' + sfx + '.json'), JSON.stringify({ generatedBy: 'tools/aura-e2e/run-e2e.js', results, raw }, null, 2));
+  fs.writeFileSync(path.join(out, 'E2E_RESULTS' + sfx + '.md'), markdown(results, raw));
   results.forEach(c => console.log(c.result + ' [' + c.stage + '] ' + c.name + ' -- ' + c.evidence));
   console.log(results.filter(c => c.result === 'PASS').length + '/' + results.length + ' PASS');
   if (results.some(c => c.result !== 'PASS')) process.exitCode = 1;

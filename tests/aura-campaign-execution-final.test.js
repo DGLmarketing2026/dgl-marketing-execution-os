@@ -1,3 +1,4 @@
+require('./helpers/aura-environment'); // Apps Script global scope: environment module always loaded
 // AURA campaign execution (final) regression suite -- 2026-09-29.
 // Campaign A: execution unit = CONTACT / EMAIL, source counts derived dynamically from the data rows
 // (structural validation, no hardcoded count), account-level states never suppress an explicit source contact, frequency is

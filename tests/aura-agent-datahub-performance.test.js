@@ -1,3 +1,4 @@
+require('./helpers/aura-environment'); // Apps Script global scope: environment module always loaded
 // AURA agent cycle against a counting fake of the Data Hub: one spreadsheet open, each table read at
 // most once, MKT_EMAIL_QUEUE read WITHOUT the heavy htmlBody column, no queue writes, no external
 // actions, Campaign A SENT rows untouched. (Root cause of the 3 shadow-mode timeouts.)

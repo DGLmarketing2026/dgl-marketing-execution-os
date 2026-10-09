@@ -8,7 +8,7 @@ function v6AuraInstallDsnTrigger_() {
   var lock=LockService.getScriptLock();lock.waitLock(30000);
   try {
     var matches=ScriptApp.getProjectTriggers().filter(function(t){return t.getHandlerFunction()==='auraIngestGmailDsn';});
-    if(!matches.length)matches=[ScriptApp.newTrigger('auraIngestGmailDsn').timeBased().everyHours(1).create()];
+    if(!matches.length)matches=[v6AuraNewTrigger_('auraIngestGmailDsn').timeBased().everyHours(1).create()];
     matches.slice(1).forEach(function(t){ScriptApp.deleteTrigger(t);});
     return {handler:'auraIngestGmailDsn',installed:true};
   } finally {lock.releaseLock();}

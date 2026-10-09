@@ -158,7 +158,7 @@ function v6AuraExecutionSummaryCsv_(campaign, audience) {
 }
 function v6AuraArchiveExecutionCsv_(campaignId, csv) {
   try {
-    var folderId = v6AuraText_(PropertiesService.getScriptProperties().getProperty('AURA_EXECUTION_ARCHIVE_FOLDER_ID')) || (typeof MKT_V6_ARCHIVE !== 'undefined' && MKT_V6_ARCHIVE.results);
+    var folderId = v6AuraText_(PropertiesService.getScriptProperties().getProperty('AURA_EXECUTION_ARCHIVE_FOLDER_ID')) || (typeof v6ArchiveFolderId_ === 'function' && v6ArchiveFolderId_('results'));
     if (!folderId) return { status: 'ARCHIVE FOLDER NOT CONFIGURED', fileId: '' };
     var file = DriveApp.getFolderById(folderId).createFile('aura-execution-' + campaignId + '.csv', csv, MimeType.CSV);
     return { status: 'CSV ARCHIVED', fileId: file.getId() };

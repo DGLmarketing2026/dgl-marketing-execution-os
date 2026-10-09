@@ -24,8 +24,8 @@ function v6AuraBootstrapAndRun_(){
   // Hub), so this is the only step that returns immediately with a minimal shape instead of
   // the full consolidated result.
   try{
-    SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID);
-    SpreadsheetApp.openById(MKT_V6_REPORT_SOURCE_ID);
+    SpreadsheetApp.openById(v6AuraResourceId_('DATA_HUB'));
+    SpreadsheetApp.openById(v6AuraResourceId_('REPORT_SOURCE'));
   }catch(e){
     return {status:'BLOCKED_DATA_HUB_ACCESS',error:String((e&&e.message)||e)};
   }

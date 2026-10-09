@@ -1,3 +1,4 @@
+require('./helpers/aura-environment'); // Apps Script global scope: environment module always loaded
 const assert = require('assert'), fs = require('fs'), path = require('path'), vm = require('vm');
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'backend/apps-script-v6/MarketingV6AuraGmailIngest.gs'), 'utf8');

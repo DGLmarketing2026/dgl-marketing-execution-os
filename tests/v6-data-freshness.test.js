@@ -1,3 +1,4 @@
+require('./helpers/aura-environment'); // Apps Script global scope: environment module always loaded
 const assert=require('assert'),fs=require('fs'),path=require('path'),vm=require('vm');
 const root=path.resolve(__dirname,'..');
 const src=name=>fs.readFileSync(path.join(root,'backend/apps-script-v6',name),'utf8');
@@ -10,7 +11,7 @@ function fakeUtilities(){
 function makeContext(hoursAgo){
   var lastUpdated=new Date(Date.now()-hoursAgo*3600000);
   var ctx={
-    Utilities:fakeUtilities(),Date:Date,String:String,Array:Array,Object:Object,Number:Number,RegExp:RegExp,
+    Utilities:fakeUtilities(),PropertiesService:{getScriptProperties:()=>({getProperty:()=>null,getProperties:()=>({})})},Date:Date,String:String,Array:Array,Object:Object,Number:Number,RegExp:RegExp,
     DriveApp:{getFileById:function(id){return {getLastUpdated:function(){return lastUpdated;},id:id};}}
   };
   vm.createContext(ctx);

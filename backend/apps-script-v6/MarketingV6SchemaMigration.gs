@@ -97,7 +97,7 @@ function v6AuraEnsureRunSummarySheet_(){
   var existing=v6Sheet_(name);
   if(existing)return {status:'ALREADY_EXISTS',sheetName:name};
   var headers=MKT_V6_CONTACT_RECIPIENT_SCHEMA[name];
-  var created=SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).insertSheet(name);
+  var created=SpreadsheetApp.openById(v6AuraResourceId_('DATA_HUB')).insertSheet(name);
   created.getRange(1,1,1,headers.length).setValues([headers]);
   return {status:'CREATED',sheetName:name,headers:headers};
 }
@@ -108,7 +108,7 @@ function v6AuraEnsureRunLogSheet_(){
   var existing=v6Sheet_(name);
   if(existing)return {status:'ALREADY_EXISTS',sheetName:name};
   var headers=MKT_V6_CONTACT_RECIPIENT_SCHEMA[name];
-  var created=SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).insertSheet(name);
+  var created=SpreadsheetApp.openById(v6AuraResourceId_('DATA_HUB')).insertSheet(name);
   created.getRange(1,1,1,headers.length).setValues([headers]);
   return {status:'CREATED',sheetName:name,headers:headers};
 }
@@ -124,7 +124,7 @@ function v6RequireContactRecipientHeaders_(name,required){var sheet=v6Sheet_(nam
 
 function v6AuraEnsureEmailEvents_() {
   var sheet=v6Sheet_('MKT_EMAIL_EVENTS');
-  if(!sheet) sheet=SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).insertSheet('MKT_EMAIL_EVENTS');
+  if(!sheet) sheet=SpreadsheetApp.openById(v6AuraResourceId_('DATA_HUB')).insertSheet('MKT_EMAIL_EVENTS');
   var headers=sheet.getLastRow()?sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0]:[];
   AURA_EMAIL_EVENT_HEADERS_.forEach(function(h){if(headers.indexOf(h)<0)headers.push(h);});
   sheet.getRange(1,1,1,headers.length).setValues([headers]);

@@ -33,7 +33,7 @@ function v6AuraAgentShadowQueueSnapshot_() {
 function v6AuraAgentShadowEnsureSingleTrigger_() {
   var ticks = ScriptApp.getProjectTriggers().filter(function (t) { return t.getHandlerFunction() === 'auraAgentTick'; });
   for (var i = 1; i < ticks.length; i++) ScriptApp.deleteTrigger(ticks[i]);
-  if (!ticks.length) ScriptApp.newTrigger('auraAgentTick').timeBased().everyHours(1).create();
+  if (!ticks.length) v6AuraNewTrigger_('auraAgentTick').timeBased().everyHours(1).create();
   return ScriptApp.getProjectTriggers().filter(function (t) { return t.getHandlerFunction() === 'auraAgentTick'; }).length;
 }
 function v6AuraAgentShadowReport_(data) {

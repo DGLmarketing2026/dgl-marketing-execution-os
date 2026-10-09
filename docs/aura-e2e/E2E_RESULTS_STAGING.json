@@ -117,7 +117,7 @@
     }
   ],
   "raw": {
-    "environment": "PRODUCTION",
+    "environment": "STAGING",
     "activation": {
       "status": "ACTIVE",
       "inboxIsMarketing": true

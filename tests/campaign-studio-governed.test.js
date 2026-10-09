@@ -1,3 +1,4 @@
+require('./helpers/aura-environment'); // Apps Script global scope: environment module always loaded
 const assert=require('assert'),fs=require('fs'),vm=require('vm'),path=require('path');
 const read=n=>fs.readFileSync('backend/apps-script-v6/'+n+'.gs','utf8');
 // Reuse only the legacy suite's fake external services, not its isolated set-gate stub.

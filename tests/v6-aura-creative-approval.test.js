@@ -1,3 +1,4 @@
+require('./helpers/aura-environment'); // Apps Script global scope: environment module always loaded
 // Iniciativa 2 -- Campaign Studio como unica fuente canonica del email.
 // Dedicated unit coverage for MarketingV6AuraCreativeApproval.gs itself: checksum, persistence/
 // versioning, the build-time resolver, the dispatch-time re-validator, the customer-visible

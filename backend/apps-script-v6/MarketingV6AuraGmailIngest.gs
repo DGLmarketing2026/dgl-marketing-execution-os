@@ -83,7 +83,7 @@ function v6AuraGmailSenderAllowed_(fromHeader, allowed) {
 
 // --- Report inbox + sender trust -------------------------------------------------
 var AURA_REPORT_INBOX_ = 'info@dglus.com';
-function v6AuraReportInbox_() { return AURA_REPORT_INBOX_; }
+function v6AuraReportInbox_() { return v6AuraEnv_() === 'STAGING' ? v6AuraStagingConfig_().inbox : AURA_REPORT_INBOX_; }
 // GmailApp can only read the mailbox of the account the script runs as. If that account is
 // known and is not the report inbox, ingestion stops and says which connection is missing.
 function v6AuraReportInboxConnection_() {
@@ -100,6 +100,7 @@ function v6AuraGmailDomain_(email) {
 function v6AuraGmailTrustedDomains_() {
   var raw = v6AuraGmailText_(PropertiesService.getScriptProperties().getProperty('AURA_GMAIL_TRUSTED_DOMAINS'));
   if (raw.toUpperCase() === 'NONE') return []; // explicit opt-out: allowlisted senders only
+  if (!raw && v6AuraEnv_() !== 'PRODUCTION') return []; // STAGING: no implicit domain trust
   var list = raw ? raw.split(',') : [v6AuraGmailDomain_(v6AuraReportInbox_())];
   return list.map(function (d) { return v6AuraGmailText_(d).replace(/^@/, '').toLowerCase(); }).filter(Boolean);
 }
@@ -270,7 +271,7 @@ function v6AuraGmailSheetLinkTables_(body) {
   v6AuraIntakeSafety_();
   var m = /docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/.exec(body || '');
   if (!m) return null;
-  var ss = SpreadsheetApp.openById(m[1]);
+  var ss = SpreadsheetApp.openById(v6AuraAssertNotProductionResource_(m[1], 'sheet link'));
   return ss.getSheets().map(function (s) { return { name: s.getName(), values: s.getDataRange().getValues() }; });
 }
 
@@ -463,8 +464,9 @@ function auraReportIntakeTick() {
 // auraReportIntakeTick trigger and runs one intake. Refuses when AURA is not running as the inbox.
 // QA is exclusively the offline harness. No Google operation is allowed in QA.
 function v6AuraIntakeSafety_() {
-  var p = PropertiesService.getScriptProperties(), env = String(p.getProperty('AURA_ENVIRONMENT') || 'PRODUCTION').toUpperCase();
-  if (env !== 'PRODUCTION') throw new Error(p.getProperty('AURA_SEND_MODE') === 'LIVE' ? 'QA_LIVE_BLOCKED' : 'QA_GOOGLE_ACCESS_BLOCKED');
+  var p = PropertiesService.getScriptProperties(), env = v6AuraEnv_();
+  if (env === 'QA') throw new Error(p.getProperty('AURA_SEND_MODE') === 'LIVE' ? 'QA_LIVE_BLOCKED' : 'QA_GOOGLE_ACCESS_BLOCKED');
+  v6AuraAssertGoogleAccess_(); // STAGING: complete, isolated configuration or nothing runs
   if (String(p.getProperty('AURA_SEND_MODE') || '').toUpperCase() === 'LIVE') throw new Error('INTAKE_LIVE_BLOCKED');
 }
 function AURA_REPORT_INTAKE_ACTIVATE() {
@@ -478,7 +480,7 @@ function AURA_REPORT_INTAKE_ACTIVATE() {
   var created = null;
   try {
     var ticks = ScriptApp.getProjectTriggers().filter(function (t) { return t.getHandlerFunction() === 'auraReportIntakeTick'; });
-    if (!ticks.length) created = ScriptApp.newTrigger('auraReportIntakeTick').timeBased().everyHours(1).create();
+    if (!ticks.length) created = v6AuraNewTrigger_('auraReportIntakeTick').timeBased().everyHours(1).create();
     for (var i = 1; i < ticks.length; i++) ScriptApp.deleteTrigger(ticks[i]);
     return { status: 'ACTIVE', inbox: conn.inbox, schedule: 'HOURLY', firstRun: first };
   } catch (err) {

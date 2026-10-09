@@ -456,7 +456,7 @@ function v6AuraAgentTriggerInstalled_() {
 // Idempotent; called from the command center "Activate" control (never auto-installed).
 function v6AuraAgentActivate_() {
   if (v6AuraAgentTriggerInstalled_()) return { status: 'ALREADY_ACTIVE' };
-  ScriptApp.newTrigger('auraAgentTick').timeBased().everyHours(1).create();
+  v6AuraNewTrigger_('auraAgentTick').timeBased().everyHours(1).create();
   return { status: 'ACTIVATED', schedule: 'HOURLY' };
 }
 

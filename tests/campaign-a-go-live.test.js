@@ -1,3 +1,4 @@
+require('./helpers/aura-environment'); // Apps Script global scope: environment module always loaded
 // Governed Campaign A GO LIVE (RUN_AURA_CAMPANA_A_GO_LIVE -> v6AuraCampanaAGoLive_): the only path
 // from a validated DRY_RUN to real sends. All Gmail/Sheets services are fakes.
 const assert = require('assert'), fs = require('fs'), vm = require('vm'), path = require('path');

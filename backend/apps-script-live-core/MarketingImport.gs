@@ -94,6 +94,7 @@ function clearMarketingImportSourceId() {
  * NO escribe en DGL_MARKETING_DATA_HUB.
  */
 function previewMarketingImport() {
+  v6AuraAssertExternalAllowed_('LEGACY_NOVA_IMPORT');
   const source = getMarketingImportSource_();
   const result = readAndValidateMarketingExport_(source);
 
@@ -130,6 +131,7 @@ function previewMarketingImport() {
  * Si existen errores de validación, NO escribe nada.
  */
 function importMarketingFromNovaExport() {
+  v6AuraAssertExternalAllowed_('LEGACY_NOVA_IMPORT');
   const source = getMarketingImportSource_();
   const result = readAndValidateMarketingExport_(source);
 
@@ -172,7 +174,7 @@ function importMarketingFromNovaExport() {
 function installDailyMarketingImportTrigger() {
   removeDailyMarketingImportTrigger();
 
-  ScriptApp.newTrigger('importMarketingFromNovaExport')
+  v6AuraNewTrigger_('importMarketingFromNovaExport')
     .timeBased()
     .everyDays(1)
     .atHour(6)
@@ -199,6 +201,7 @@ function removeDailyMarketingImportTrigger() {
  * ============================================================ */
 
 function getMarketingImportSource_() {
+  v6AuraAssertExternalAllowed_('LEGACY_NOVA_IMPORT');
   const props = PropertiesService.getScriptProperties();
   const configuredId = String(props.getProperty(MKT_IMPORT_PROP) || '').trim();
 

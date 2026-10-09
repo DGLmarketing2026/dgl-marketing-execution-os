@@ -208,18 +208,18 @@ function installTriggers_() {
     }
   });
 
-  ScriptApp.newTrigger("runDailyAutomation")
+  v6AuraNewTrigger_("runDailyAutomation")
     .timeBased()
     .everyDays(1)
     .atHour(DGL_CONFIG.DAILY_TRIGGER_HOUR)
     .create();
 
-  ScriptApp.newTrigger("processEmailQueue")
+  v6AuraNewTrigger_("processEmailQueue")
     .timeBased()
     .everyHours(1)
     .create();
 
-  ScriptApp.newTrigger("refreshAnalytics")
+  v6AuraNewTrigger_("refreshAnalytics")
     .timeBased()
     .everyDays(1)
     .atHour(6)
@@ -234,7 +234,8 @@ function getSpreadsheet_() {
   if (!DGL_CONFIG.SPREADSHEET_ID) {
     throw new Error("DGL_CONFIG.SPREADSHEET_ID is empty");
   }
-  return SpreadsheetApp.openById(DGL_CONFIG.SPREADSHEET_ID);
+  v6AuraAssertGoogleAccess_();
+  return SpreadsheetApp.openById(v6AuraAssertNotProductionResource_(DGL_CONFIG.SPREADSHEET_ID, "DGL_SPREADSHEET_ID"));
 }
 
 function getSheet_(name) {
@@ -969,6 +970,7 @@ function processEmailQueue() {
       };
 
       if (String(item.sendMode).toUpperCase() === "SEND") {
+        v6AuraAssertExternalAllowed_("GMAIL_SEND");
         GmailApp.sendEmail(
           item.toEmail,
           item.subject,
@@ -2524,6 +2526,7 @@ function RUN_AURA_WORDPRESS_QA() {
 
         var options = { htmlBody: job.htmlBody, name: senderName };
         if (job.replyTo) options.replyTo = job.replyTo;
+        v6AuraAssertExternalAllowed_('GMAIL_SEND');
         GmailApp.sendEmail(job.email, job.subject, v6AuraEmailStripHtml_(job.htmlBody), options);
         job.status = 'SENT'; job.processedAt = now; job.error = '';
         v6UpsertByKey_('MKT_EMAIL_QUEUE', ['jobId'], job);

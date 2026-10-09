@@ -439,7 +439,7 @@ function recordMarketingV55Outcome_(d) {
   return saved;
 }
 
-function mktV55Ss_(){return SpreadsheetApp.openById(MKT_V55.HUB_ID);}
+function mktV55Ss_(){return SpreadsheetApp.openById(v6AuraResourceId_('DATA_HUB'));} // same hub id in PRODUCTION
 function mktV55Sheet_(name){var sh=mktV55Ss_().getSheetByName(name);if(!sh)throw new Error('Missing Data Hub sheet: '+name);return sh;}
 function mktV55Headers_(name){var sh=mktV55Sheet_(name),lastCol=sh.getLastColumn();return lastCol?sh.getRange(1,1,1,lastCol).getValues()[0].map(String):[];}
 function mktV55Bootstrap_(req){

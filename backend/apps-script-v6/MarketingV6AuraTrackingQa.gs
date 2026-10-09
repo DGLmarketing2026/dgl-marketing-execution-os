@@ -28,7 +28,7 @@ function v6AuraTrackingQaReport_(section, data) {
 // STEP 2 runs once by itself 10 minutes after STEP 1 (time to exercise the endpoints).
 function v6AuraTrackingQaScheduleVerify_() {
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'AURA_TRACKING_QA_STEP2_VERIFY') ScriptApp.deleteTrigger(t); });
-  ScriptApp.newTrigger('AURA_TRACKING_QA_STEP2_VERIFY').timeBased().after(10 * 60 * 1000).create();
+  v6AuraNewTrigger_('AURA_TRACKING_QA_STEP2_VERIFY').timeBased().after(10 * 60 * 1000).create();
 }
 
 function v6AuraTrackingQaFingerprint_(value) {
@@ -77,6 +77,7 @@ function AURA_TRACKING_QA_STEP1_ACTIVATE() {
     };
     if (!out.render.pixel || out.render.trackedCtas !== approved.length || !out.render.tokenVerifies) throw new Error('TRACKED_RENDER_INVALID');
 
+    v6AuraAssertExternalAllowed_('GMAIL_SEND');
     GmailApp.sendEmail(to, '[AURA QA · INTERNAL] ' + rendered.subject, 'AURA tracking validation (internal QA, not a customer email).', { htmlBody: html, name: 'DGL AURA QA' });
     v6EnsureContactRecipientSchema_();
     var nowIso = new Date().toISOString();

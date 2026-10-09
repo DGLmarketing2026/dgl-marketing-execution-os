@@ -1,3 +1,4 @@
+require('./helpers/aura-environment'); // Apps Script global scope: environment module always loaded
 const assert=require('assert'),fs=require('fs'),vm=require('vm'),path=require('path');
 const read=n=>fs.readFileSync(path.join(__dirname,'../backend/apps-script-v6',n),'utf8');
 let state=[['opportunityId','priorityRank'],['old',2]],backup=null,fail=false,calls=0,released=0;
