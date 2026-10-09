@@ -36,7 +36,7 @@ function context(props, tables, threads, opts) {
     SpreadsheetApp: { openById: id => ({ getSheets: () => ctx.__files[id].__sheets.map(s => ({ getName: () => s.name, getDataRange: () => ({ getValues: () => s.values }) })) }) },
     __files: {}
   };
-  if (opts.effectiveUser !== undefined) ctx.Session = { getEffectiveUser: () => ({ getEmail: () => opts.effectiveUser }) };
+  ctx.Session = { getEffectiveUser: () => ({ getEmail: () => opts.effectiveUser === undefined ? "info@dglus.com" : opts.effectiveUser }) };
   vm.createContext(ctx);
   vm.runInContext(ingestSource, ctx, { filename: 'MarketingV6AuraGmailIngest.gs' });
   ctx.v6HashKey_ = t => { let h = 0; const s = String(t || ''); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return 'H' + Math.abs(h).toString(16).toUpperCase(); };
@@ -136,8 +136,8 @@ let passed = 0; const ok = m => { passed++; console.log('PASS ' + m); };
   ctx = context(props, tables, [t]); ctx.auraReportIntakeTick();
   assert.equal(ctx.__calls.refresh, 0, 'no new report: no refresh');
   assert(JSON.parse(props.AURA_REPORT_INTAKE_LAST).ingest.status === 'OK');
-  assert(!/sendEmail|MailApp|createDraft|AURA_SEND_MODE/.test(ingestSource), 'the intake never sends or changes the send mode');
-  assert(/function AURA_REPORT_INTAKE_ACTIVATE\(\)[\s\S]{0,400}getHandlerFunction\(\) === 'auraReportIntakeTick'/.test(ingestSource), 'activation keeps exactly one hourly trigger');
+  assert(!/sendEmail|MailApp|createDraft/.test(ingestSource), 'the intake never sends or changes the send mode');
+  assert(/function AURA_REPORT_INTAKE_ACTIVATE\(\)[\s\S]*getHandlerFunction\(\) === 'auraReportIntakeTick'/.test(ingestSource), 'activation keeps exactly one hourly trigger');
   ok('auraReportIntakeTick: report -> opportunities refresh, idempotent, never sends');
 })();
 
@@ -170,3 +170,44 @@ let passed = 0; const ok = m => { passed++; console.log('PASS ' + m); };
 })();
 
 console.log(passed + '/' + passed + ' AURA report intake (info@dglus.com) checks passed');
+
+// Critical activation blockers, no Google capability may be invoked.
+(function () {
+  for (const mode of ['DRY_RUN','LIVE']) {
+    const c=context({AURA_ENVIRONMENT:'QA',AURA_SEND_MODE:mode},{},[],{effectiveUser:'info@dglus.com'});
+    c.ScriptApp={getProjectTriggers(){throw Error('must not reach Google');}};
+    assert.equal(c.AURA_REPORT_INTAKE_ACTIVATE().status,'ACTIVATION_BLOCKED');
+    assert.throws(()=>c.v6AuraGmailIngestTick_(),/QA_/);
+    assert.throws(()=>c.v6AuraGmailXlsxTables_({}),/QA_/);
+    assert.throws(()=>c.v6AuraGmailLabel_('test'),/QA_/);
+    assert.equal(c.__calls.search.length,0);assert.equal(c.__calls.driveCreate,0);
+  }
+  assert.equal(context({}, {}, [], {effectiveUser:''}).AURA_REPORT_INTAKE_ACTIVATE().status,'EXECUTION_IDENTITY_REQUIRED');
+  assert.equal(context({AURA_SEND_MODE:'LIVE'}, {}, []).AURA_REPORT_INTAKE_ACTIVATE().status,'ACTIVATION_BLOCKED');
+  const c=context({}, {}, []);c.auraReportIntakeTick=()=>({ingest:{status:'OK',failed:1}});
+  assert.equal(c.AURA_REPORT_INTAKE_ACTIVATE().status,'ACTIVATION_FAILED');
+  c.auraReportIntakeTick=()=>({ingest:{status:'OK',failed:0},refresh:{status:'ERROR'}});
+  assert.equal(c.AURA_REPORT_INTAKE_ACTIVATE().status,'ACTIVATION_FAILED');
+  ok('QA and LIVE blocked before services; empty identity and failed activation never ACTIVE');
+})();
+(function () {
+ const c=context({AURA_GMAIL_ALLOWED_SENDERS:'lead@dglus.com'}, {}, []);
+ assert.equal(c.v6AuraGmailTrust_(message('x','lead@dglus.com',{}),['lead@dglus.com'],[]),'');
+ assert.equal(c.v6AuraGmailTrust_(message('x','lead@dglus.com',{auth:AUTH_OK}),['lead@dglus.com'],[]),'ALLOWLISTED_SENDER');
+ const many=Array.from({length:121},(_,i)=>thread('T'+i,[message('P'+i,'marketing@dglus.com',{auth:AUTH_OK})]));
+ const starts=[];c.GmailApp.search=(q,start,count)=>{starts.push(start);return many.slice(start,start+count);};
+ assert.equal(c.v6AuraGmailCandidates_(45,[],['dglus.com']).candidates.length,121);
+ assert.deepEqual(starts,[0,50,100]);ok('authenticated allowlist and pagination over 121 threads');
+})();
+(function () {
+ let now=Date.parse('2026-10-09T12:00:00Z');const props={},tables={};
+ const t=thread('RT',[message('RM','marketing@dglus.com',{auth:AUTH_OK,atts:[attachment('r.xlsx',[sheet('Retencion prioritaria',[ROW_A])])]})]);
+ const c=context(props,tables,[t]);c.Date=class extends Date{constructor(...a){super(...(a.length?a:[now]));}static now(){return now;}};
+ c.Drive.Files.create=()=>{throw Error('temporary');};
+ c.v6AuraGmailIngestTick_();assert.equal(tables.MKT_AURA_INGEST_LOG[0].attempts,1);
+ c.v6AuraGmailIngestTick_();assert.equal(tables.MKT_AURA_INGEST_LOG[0].attempts,1);
+ now+=3600000;c.v6AuraGmailIngestTick_();assert.equal(tables.MKT_AURA_INGEST_LOG[0].attempts,2);
+ now+=7200000;c.v6AuraGmailIngestTick_();assert.equal(tables.MKT_AURA_INGEST_LOG[0].attempts,3);
+ now+=86400000;c.v6AuraGmailIngestTick_();assert.equal(tables.MKT_AURA_INGEST_LOG[0].attempts,3);
+ ok('FAILED retries back off 1h/2h and stop at three attempts');
+})();

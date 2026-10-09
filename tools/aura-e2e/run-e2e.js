@@ -18,10 +18,11 @@ const INBOX = 'info@dglus.com';
 const AUTH_PASS = d => 'mx.google.com; dkim=pass header.i=@' + d + '; spf=pass smtp.mailfrom=qa@' + d + '; dmarc=pass (p=NONE) header.from=' + d;
 
 function xlsxValues(file) {
-  return JSON.parse(execFileSync('python', [path.join(__dirname, 'xlsx_to_values.py'), file], { encoding: 'utf8' }));
+  return JSON.parse(execFileSync(process.env.AURA_QA_PYTHON || 'python', [path.join(__dirname, 'xlsx_to_values.py'), file], { encoding: 'utf8' }));
 }
 
-function run() {
+function run(options = {}) {
+  if (String(options.sendMode || process.env.AURA_SEND_MODE || 'DRY_RUN').toUpperCase() !== 'DRY_RUN') throw new Error('QA_LIVE_BLOCKED');
   const RealDate = Date, clock = { now: RealDate.parse('2026-10-12T08:00:00.000Z') };
   function FakeDate(...a) { return a.length ? new RealDate(...a) : new RealDate(clock.now); }
   FakeDate.prototype = RealDate.prototype; FakeDate.now = () => clock.now; FakeDate.parse = RealDate.parse; FakeDate.UTC = RealDate.UTC;
@@ -68,7 +69,7 @@ function run() {
       newTrigger: h => ({ timeBased: () => ({ everyHours: n => ({ create: () => { const t = { getHandlerFunction: () => h, everyHours: n, minute: h === 'auraAgentTick' ? 38 : 10 }; triggers.push(t); return t; } }) }) })
     },
     GmailApp: {
-      search: q => search(q), getUserLabelByName: n => null, createLabel: n => ({ getName: () => n }),
+      search: (q, start, count) => search(q).slice(start, start + count), getUserLabelByName: n => null, createLabel: n => ({ getName: () => n }),
       sendEmail: () => { audit.external.gmailSend++; }, createDraft: () => { audit.external.gmailDraft++; }
     },
     MailApp: { sendEmail: () => { audit.external.mailApp++; } },
@@ -144,7 +145,7 @@ function run() {
   const plansV1 = (tables.AURA_AGENT_ACTIONS || []).filter(a => a.actionType === 'PREPARE_CAMPAIGN_PLAN').map(a => ({ taskId: a.taskId, status: a.status, plan: JSON.parse(a.result || '{}').plan }));
   // 10:05 the same file is re-sent by the allowlisted AM lead (duplicate).
   clock.now = RealDate.parse('2026-10-12T10:05:00.000Z');
-  deliver('QA-M2', 'AM Lead QA <am-lead-qa@dglus.com>', { subject: 'Reenvio: Sugerencias de Marketing', files: [FIX('Marketing_DGL_QA_SINTETICO_v1.xlsx')] });
+  deliver('QA-M2', 'AM Lead QA <am-lead-qa@dglus.com>', { subject: 'Reenvio: Sugerencias de Marketing', auth: AUTH_PASS('dglus.com'), files: [FIX('Marketing_DGL_QA_SINTETICO_v1.xlsx')] });
   advanceTo('2026-10-12T10:59:00.000Z');
   const conversionsAfterDup = audit.driveConversions, s2 = snap('after duplicate');
   // 11:00-11:59 no new mail: the intake must not open the Data Hub.

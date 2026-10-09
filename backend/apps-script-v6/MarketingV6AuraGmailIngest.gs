@@ -16,7 +16,7 @@
 // report that reaches info@dglus.com from a trusted source is detected by its content (an
 // XLSX/CSV whose tabs match the governed report layout).
 //
-// Security: a message is opened only when its sender is trusted -- listed in the
+// Security: a message is opened only when its sender is authenticated and trusted -- listed in the
 // AURA_GMAIL_ALLOWED_SENDERS script property (comma-separated), or a sender of a trusted
 // internal domain (AURA_GMAIL_TRUSTED_DOMAINS, default: the inbox domain) whose message Gmail
 // itself authenticated (DMARC/DKIM/SPF pass). Everything else is never opened. Everything in
@@ -30,7 +30,7 @@ var MKT_V6_AURA_GMAIL_SCHEMA = {
   MKT_AURA_GMAIL_OPPORTUNITIES: ['opportunityId', 'accountId', 'accountName', 'amOwner', 'opportunityType', 'service', 'signalDate', 'qnbWindow', 'lane', 'sourceReport', 'sourceRecordId', 'priorityRank', 'eligibilityStatus', 'suppressionReason', 'campaignId', 'detectedAt', 'updatedAt', 'sourceType', 'sourceMessageId', 'sourceFile', 'sourceRow', 'sourceReceivedAt', 'sourceSheet'],
   // trustRule + sourceHash added (additive, appended at the end): why the sender was trusted, and
   // the SHA-256 of the report file so the same file re-sent in another email is not re-ingested.
-  MKT_AURA_INGEST_LOG: ['ingestId', 'gmailMessageId', 'gmailThreadId', 'senderHash', 'subject', 'receivedAt', 'attachmentCount', 'sourceFiles', 'rowsParsed', 'rowsAccepted', 'rowsRejected', 'opportunitiesCreated', 'opportunitiesUpdated', 'status', 'errorCode', 'processedAt', 'trustRule', 'sourceHash'],
+  MKT_AURA_INGEST_LOG: ['ingestId', 'gmailMessageId', 'gmailThreadId', 'senderHash', 'subject', 'receivedAt', 'attachmentCount', 'sourceFiles', 'rowsParsed', 'rowsAccepted', 'rowsRejected', 'opportunitiesCreated', 'opportunitiesUpdated', 'status', 'errorCode', 'processedAt', 'trustRule', 'sourceHash', 'attempts', 'nextRetryAt'],
   MKT_AURA_INGEST_REJECTIONS: ['rejectionId', 'gmailMessageId', 'sourceFile', 'sheetName', 'row', 'reason', 'processedAt']
 };
 
@@ -89,7 +89,8 @@ function v6AuraReportInbox_() { return AURA_REPORT_INBOX_; }
 function v6AuraReportInboxConnection_() {
   var me = '', inbox = v6AuraReportInbox_();
   try { me = v6AuraGmailText_(Session.getEffectiveUser().getEmail()).toLowerCase(); } catch (e) {}
-  if (me && me !== inbox) return { connected: false, status: 'INBOX_NOT_CONNECTED', inbox: inbox, detail: 'AURA must run as ' + inbox + ' (the authorized Gmail integration) to read the Marketing report inbox.' };
+  if (!me) return { connected: false, status: 'EXECUTION_IDENTITY_REQUIRED', inbox: inbox };
+  if (me !== inbox) return { connected: false, status: 'INBOX_NOT_CONNECTED', inbox: inbox, detail: 'AURA must run as ' + inbox + ' (the authorized Gmail integration) to read the Marketing report inbox.' };
   return { connected: true, inbox: inbox, accountVerified: !!me };
 }
 function v6AuraGmailDomain_(email) {
@@ -107,17 +108,18 @@ function v6AuraGmailTrustedDomains_() {
 function v6AuraGmailAuthVerified_(msg, domain) {
   var h = '';
   try { h = String((msg.getHeader && msg.getHeader('Authentication-Results')) || ''); } catch (e) {}
-  if (!h || !domain || !/mx\.google\.com/i.test(h)) return false;
+  if (!h || !domain || !/^\s*mx\.google\.com\s*;/i.test(h)) return false;
+  if (/dmarc=fail/i.test(h)) return false;
   var d = domain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), end = '(?![\\w.-])';
   return new RegExp('dmarc=pass[^;]*header\\.from=' + d + end, 'i').test(h) ||
     new RegExp('dkim=pass[^;]*header\\.[id]=@?' + d + end, 'i').test(h) ||
     new RegExp('spf=pass[^;]*smtp\\.mailfrom=[^;\\s]*@' + d + end, 'i').test(h);
 }
-// ALLOWLISTED_SENDER: explicit AURA_GMAIL_ALLOWED_SENDERS entry (unchanged behavior).
+// ALLOWLISTED_SENDER: explicit entry AND aligned Gmail authentication.
 // VERIFIED_INTERNAL_SENDER: a trusted-domain sender whose message Gmail authenticated.
 function v6AuraGmailTrust_(msg, allowed, domains) {
   var email = v6AuraGmailExtractEmail_(msg.getFrom());
-  if (email && allowed.indexOf(email) >= 0) return 'ALLOWLISTED_SENDER';
+  if (email && allowed.indexOf(email) >= 0 && v6AuraGmailAuthVerified_(msg, v6AuraGmailDomain_(email))) return 'ALLOWLISTED_SENDER';
   var domain = v6AuraGmailDomain_(email);
   if (domain && domains.indexOf(domain) >= 0 && v6AuraGmailAuthVerified_(msg, domain)) return 'VERIFIED_INTERNAL_SENDER';
   return '';
@@ -126,13 +128,17 @@ function v6AuraGmailTrust_(msg, allowed, domains) {
 // Google Sheet link), plus XLSX/CSV attachments from trusted internal domains. Untrusted
 // messages are counted, never opened.
 function v6AuraGmailCandidates_(days, allowed, domains) {
+  v6AuraIntakeSafety_();
   var inbox = v6AuraReportInbox_(), to = '(to:' + inbox + ' OR cc:' + inbox + ' OR deliveredto:' + inbox + ')';
   var when = ' newer_than:' + Math.max(1, Number(days) || 45) + 'd -in:sent', queries = [];
   if (allowed.length) queries.push(to + ' (' + allowed.map(function (a) { return 'from:' + a; }).join(' OR ') + ')' + when);
   if (domains.length) queries.push(to + ' (' + domains.map(function (d) { return 'from:' + d; }).join(' OR ') + ') has:attachment (filename:xlsx OR filename:csv)' + when);
   var seen = {}, candidates = [], untrusted = 0;
   queries.forEach(function (q) {
-    GmailApp.search(q, 0, 50).forEach(function (t) {
+    var page, start = 0;
+    do {
+    page = GmailApp.search(q, start, 50);
+    page.forEach(function (t) {
       t.getMessages().forEach(function (m) {
         var id = m.getId(); if (seen[id]) return; seen[id] = true;
         var trust = v6AuraGmailTrust_(m, allowed, domains);
@@ -140,6 +146,8 @@ function v6AuraGmailCandidates_(days, allowed, domains) {
         else untrusted++;
       });
     });
+    start += page.length;
+    } while (page.length === 50);
   });
   return { candidates: candidates, untrusted: untrusted };
 }
@@ -153,6 +161,7 @@ function v6AuraGmailBlobHash_(att) {
 
 // --- Gmail labels ------------------------------------------------------------
 function v6AuraGmailLabel_(name) {
+  v6AuraIntakeSafety_();
   return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name);
 }
 function v6AuraGmailApplyLabel_(thread, name) {
@@ -244,6 +253,7 @@ function v6AuraGmailUpsertOpportunity_(candidate, ctx) {
 // delete the temp file. CSV: parsed directly. A Google Sheet link in the body
 // is read in place (never copied) since the sender is already allowlisted.
 function v6AuraGmailXlsxTables_(blob) {
+  v6AuraIntakeSafety_();
   var file = Drive.Files.create({ name: 'AURA_GMAIL_INGEST_' + Date.now(), mimeType: 'application/vnd.google-apps.spreadsheet' }, blob);
   try {
     var ss = SpreadsheetApp.openById(file.id);
@@ -257,6 +267,7 @@ function v6AuraGmailCsvTables_(blob) {
   return [{ name: 'CSV', values: rows }];
 }
 function v6AuraGmailSheetLinkTables_(body) {
+  v6AuraIntakeSafety_();
   var m = /docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/.exec(body || '');
   if (!m) return null;
   var ss = SpreadsheetApp.openById(m[1]);
@@ -265,6 +276,7 @@ function v6AuraGmailSheetLinkTables_(body) {
 
 // --- Per-message processing ----------------------------------------------------
 function v6AuraGmailProcessMessage_(msg, thread, opts) {
+  v6AuraIntakeSafety_();
   opts = opts || {};
   var messageId = msg.getId(), receivedAt = msg.getDate().toISOString(), subject = msg.getSubject();
   var ctx = { messageId: messageId, receivedAt: receivedAt };
@@ -273,7 +285,7 @@ function v6AuraGmailProcessMessage_(msg, thread, opts) {
     senderHash: v6HashKey_(v6AuraGmailExtractEmail_(msg.getFrom())), subject: subject, receivedAt: receivedAt,
     attachmentCount: 0, sourceFiles: '', rowsParsed: 0, rowsAccepted: 0, rowsRejected: 0,
     opportunitiesCreated: 0, opportunitiesUpdated: 0, status: 'PROCESSING', errorCode: '', processedAt: v6AuraGmailNow_(),
-    trustRule: opts.trustRule || 'ALLOWLISTED_SENDER', sourceHash: ''
+    trustRule: opts.trustRule || 'ALLOWLISTED_SENDER', sourceHash: '', attempts: Number(opts.attempts || 0) + 1, nextRetryAt: ''
   };
   var recognized = false;
   try {
@@ -347,6 +359,7 @@ function v6AuraGmailProcessMessage_(msg, thread, opts) {
     // function only ever upserts, it never clears MKT_AURA_GMAIL_OPPORTUNITIES.
     logRow.status = 'FAILED'; logRow.errorCode = String(err && err.message || err);
   }
+  if (logRow.status === 'FAILED' && logRow.attempts < 3) logRow.nextRetryAt = new Date(Date.now() + Math.pow(2, logRow.attempts - 1) * 3600000).toISOString();
   logRow.processedAt = v6AuraGmailNow_();
   v6UpsertByKey_('MKT_AURA_INGEST_LOG', ['gmailMessageId'], logRow);
   if (logRow.status !== 'NOT_A_MARKETING_REPORT') {
@@ -378,6 +391,7 @@ function v6AuraGmailWithLock_(fn) {
   try { return fn(); } finally { if (lock) { try { lock.releaseLock(); } catch (e) {} } }
 }
 function v6AuraGmailIngestTick_() {
+  v6AuraIntakeSafety_();
   var conn = v6AuraReportInboxConnection_();
   if (!conn.connected) return { status: conn.status, inbox: conn.inbox, detail: conn.detail, messagesFound: 0, messagesProcessed: 0 };
   var allowed = v6AuraGmailAllowedSenders_(), domains = v6AuraGmailTrustedDomains_();
@@ -386,19 +400,24 @@ function v6AuraGmailIngestTick_() {
     var props = PropertiesService.getScriptProperties();
     var found = v6AuraGmailCandidates_(45, allowed, domains), cache = {};
     try { (JSON.parse(props.getProperty(AURA_REPORT_SEEN_PROP_) || '[]') || []).forEach(function (id) { cache[id] = true; }); } catch (e) { cache = {}; }
-    var fresh = found.candidates.filter(function (c) { return !cache[c.msg.getId()]; }), processed = [];
+    var retry = {};
+    try { retry = JSON.parse(props.getProperty('AURA_REPORT_RETRIES') || '{}'); } catch (e) {}
+    var fresh = found.candidates.filter(function (c) { var id = c.msg.getId(); return !cache[id] || (retry[id] && Date.parse(retry[id]) <= Date.now()); }), processed = [];
     if (fresh.length) {
       var alreadySeen = {}, knownHashes = {};
       v6AuraGmailRows_('MKT_AURA_INGEST_LOG').forEach(function (r) {
-        alreadySeen[v6AuraGmailText_(r.gmailMessageId)] = true;
+        alreadySeen[v6AuraGmailText_(r.gmailMessageId)] = r;
         if (r.sourceHash && /^(OK|PARTIAL)$/.test(v6AuraGmailText_(r.status))) knownHashes[r.sourceHash] = v6AuraGmailText_(r.gmailMessageId);
       });
       fresh.forEach(function (c) {
-        if (alreadySeen[c.msg.getId()]) return;
-        var row = v6AuraGmailProcessMessage_(c.msg, c.thread, { trustRule: c.trust, knownHashes: knownHashes });
+        var previous = alreadySeen[c.msg.getId()];
+        if (previous && !(previous.status === 'FAILED' && Number(previous.attempts || 1) < 3 && Date.parse(previous.nextRetryAt || previous.processedAt) <= Date.now())) return;
+        var row = v6AuraGmailProcessMessage_(c.msg, c.thread, { trustRule: c.trust, knownHashes: knownHashes, attempts: previous && previous.attempts || 0 });
         if (row.sourceHash && /^(OK|PARTIAL)$/.test(row.status)) knownHashes[row.sourceHash] = row.gmailMessageId;
+        if (row.nextRetryAt) retry[row.gmailMessageId] = row.nextRetryAt; else delete retry[row.gmailMessageId];
         processed.push(row);
       });
+      props.setProperty('AURA_REPORT_RETRIES', JSON.stringify(retry));
       var ids = Object.keys(cache).concat(fresh.map(function (c) { return c.msg.getId(); }));
       try { props.setProperty(AURA_REPORT_SEEN_PROP_, JSON.stringify(ids.slice(-300))); } catch (e) {}
     }
@@ -413,6 +432,7 @@ function v6AuraGmailIngestTick_() {
 // ingested under the OLD mapping. Safe to call any number of times: v6AuraGmailProcessMessage_
 // only ever upserts by messageId/opportunityId, it never clears or duplicates prior data.
 function v6AuraGmailReprocessRecent_(days) {
+  v6AuraIntakeSafety_();
   var conn = v6AuraReportInboxConnection_();
   if (!conn.connected) return { status: conn.status, inbox: conn.inbox, detail: conn.detail, messagesFound: 0, messagesProcessed: 0 };
   var allowed = v6AuraGmailAllowedSenders_(), domains = v6AuraGmailTrustedDomains_();
@@ -429,6 +449,7 @@ function v6AuraGmailReprocessRecent_(days) {
 // added rows does it refresh MKT_OPPORTUNITIES, so the next AURA agent cycle analyzes the report
 // and prepares (never sends) campaign plans that wait for one human approval. Never sends email.
 function auraReportIntakeTick() {
+  v6AuraIntakeSafety_();
   var out = { at: v6AuraGmailNow_() };
   try { out.ingest = v6AuraGmailIngestTick_(); } catch (err) { out.ingest = { status: 'ERROR', error: String(err && err.message || err) }; }
   if (out.ingest && out.ingest.ok > 0 && typeof v6RefreshOpportunitiesFromReports_ === 'function') {
@@ -440,13 +461,30 @@ function auraReportIntakeTick() {
 }
 // Operator step (run once from the Apps Script editor after deploying): keeps exactly ONE hourly
 // auraReportIntakeTick trigger and runs one intake. Refuses when AURA is not running as the inbox.
+// QA is exclusively the offline harness. No Google operation is allowed in QA.
+function v6AuraIntakeSafety_() {
+  var p = PropertiesService.getScriptProperties(), env = String(p.getProperty('AURA_ENVIRONMENT') || 'PRODUCTION').toUpperCase();
+  if (env !== 'PRODUCTION') throw new Error(p.getProperty('AURA_SEND_MODE') === 'LIVE' ? 'QA_LIVE_BLOCKED' : 'QA_GOOGLE_ACCESS_BLOCKED');
+  if (String(p.getProperty('AURA_SEND_MODE') || '').toUpperCase() === 'LIVE') throw new Error('INTAKE_LIVE_BLOCKED');
+}
 function AURA_REPORT_INTAKE_ACTIVATE() {
+  try { v6AuraIntakeSafety_(); } catch (err) { return { status: 'ACTIVATION_BLOCKED', error: String(err.message || err) }; }
   var conn = v6AuraReportInboxConnection_();
   if (!conn.connected) return conn;
-  var ticks = ScriptApp.getProjectTriggers().filter(function (t) { return t.getHandlerFunction() === 'auraReportIntakeTick'; });
-  for (var i = 1; i < ticks.length; i++) ScriptApp.deleteTrigger(ticks[i]);
-  if (!ticks.length) ScriptApp.newTrigger('auraReportIntakeTick').timeBased().everyHours(1).create();
-  return { status: 'ACTIVE', inbox: conn.inbox, schedule: 'HOURLY', firstRun: auraReportIntakeTick() };
+  var first = auraReportIntakeTick();
+  if (!first.ingest || first.ingest.status !== 'OK' || first.ingest.failed > 0 || (first.refresh && first.refresh.status !== 'REPORT_SOURCE_SYNCED')) {
+    return { status: 'ACTIVATION_FAILED', firstRun: first };
+  }
+  var created = null;
+  try {
+    var ticks = ScriptApp.getProjectTriggers().filter(function (t) { return t.getHandlerFunction() === 'auraReportIntakeTick'; });
+    if (!ticks.length) created = ScriptApp.newTrigger('auraReportIntakeTick').timeBased().everyHours(1).create();
+    for (var i = 1; i < ticks.length; i++) ScriptApp.deleteTrigger(ticks[i]);
+    return { status: 'ACTIVE', inbox: conn.inbox, schedule: 'HOURLY', firstRun: first };
+  } catch (err) {
+    if (created) { try { ScriptApp.deleteTrigger(created); } catch (_) {} }
+    return { status: 'ACTIVATION_FAILED', error: String(err.message || err), firstRun: first };
+  }
 }
 
 // --- Merge into the governed opportunity pipeline -----------------------------

@@ -71,6 +71,7 @@ function makeContext(tables){
     };
   };
   ctx.__tables=tables;
+  require('./helpers/atomic-sheets-fake')(ctx);
   return ctx;
 }
 

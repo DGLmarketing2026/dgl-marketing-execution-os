@@ -43,6 +43,8 @@ var AURA_EMAIL_DISPATCH_MAX_LIMIT_ = 50;
 var AURA_EMAIL_DISPATCH_COOLDOWN_DAYS_ = 30;
 
 function v6AuraSendMode_() {
+  var env = String(PropertiesService.getScriptProperties().getProperty('AURA_ENVIRONMENT') || 'PRODUCTION').toUpperCase();
+  if (env !== 'PRODUCTION') throw new Error('QA_DISPATCH_BLOCKED');
   var v = String(PropertiesService.getScriptProperties().getProperty(AURA_SEND_MODE_PROPERTY_KEY_) || '').toUpperCase();
   return v === 'LIVE' ? 'LIVE' : 'DRY_RUN';
 }
@@ -50,6 +52,7 @@ function v6AuraSendMode_() {
 // v6AuraAutomationTick_, or by auraInstallTriggers() -- going LIVE is always a separate,
 // explicit, human action.
 function auraEnableLiveSending() {
+  if (String(PropertiesService.getScriptProperties().getProperty('AURA_ENVIRONMENT') || 'PRODUCTION').toUpperCase() !== 'PRODUCTION') throw new Error('QA_LIVE_BLOCKED');
   PropertiesService.getScriptProperties().setProperty(AURA_SEND_MODE_PROPERTY_KEY_, 'LIVE');
   return { status: 'LIVE_ENABLED', sendMode: 'LIVE', warning: 'auraProcessEmailQueue() will now call GmailApp.sendEmail for real on its next run (manual or triggered).' };
 }

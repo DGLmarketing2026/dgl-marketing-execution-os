@@ -205,6 +205,7 @@ function makeContext(opts){
     vm.runInContext(source,ctx,{filename:'src-'+i+'.gs'});
   });
   ctx.__sheets=sheets;ctx.__drive=driveState;ctx.__props=props;ctx.__script=scriptState;
+  require('./helpers/atomic-sheets-fake')(ctx);
   return ctx;
 }
 

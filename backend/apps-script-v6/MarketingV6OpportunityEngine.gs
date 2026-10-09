@@ -14,7 +14,7 @@ function v6ReadProjected_(s,exclude){
   return rows;
 }
 function v6RowsMemoInvalidate_(name){if(V6_ROWS_MEMO_)delete V6_ROWS_MEMO_.rows[name];}
-function v6Sheet_(name){if(V6_ROWS_MEMO_){V6_ROWS_MEMO_.book=V6_ROWS_MEMO_.book||SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID);return V6_ROWS_MEMO_.book.getSheetByName(name);}return SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).getSheetByName(name);}
+function v6Sheet_(name){if(String(PropertiesService.getScriptProperties().getProperty('AURA_ENVIRONMENT')||'PRODUCTION').toUpperCase()!=='PRODUCTION')throw new Error('QA_GOOGLE_ACCESS_BLOCKED');if(V6_ROWS_MEMO_){V6_ROWS_MEMO_.book=V6_ROWS_MEMO_.book||SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID);return V6_ROWS_MEMO_.book.getSheetByName(name);}return SpreadsheetApp.openById(MKT_V6_DATA_HUB_ID).getSheetByName(name);}
 function v6Rows_(name){
   var memo=V6_ROWS_MEMO_,rows=memo&&memo.rows[name];
   if(!rows){

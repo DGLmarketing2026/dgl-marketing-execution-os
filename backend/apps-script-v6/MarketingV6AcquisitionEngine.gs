@@ -24,7 +24,7 @@ var MKT_V6_ACQ_LANGUAGES=['en'];
 function v6AcqText_(v){return String(v==null?'':v).trim();}
 function v6AcqNow_(){return new Date().toISOString();}
 function v6AcqId_(prefix){return prefix+'-'+Utilities.getUuid().replace(/-/g,'').slice(0,18).toUpperCase();}
-function v6AcqBook_(){
+function v6AcqBook_(){if(String(PropertiesService.getScriptProperties().getProperty('AURA_ENVIRONMENT')||'PRODUCTION').toUpperCase()!=='PRODUCTION')throw new Error('QA_GOOGLE_ACCESS_BLOCKED');
   var anchor=(typeof v6Sheet_==='function'&&(v6Sheet_('MKT_OPPORTUNITIES')||v6Sheet_('MKT_ACCOUNT_PIPELINE')))||null;
   if(anchor)return anchor.getParent();
   var id=PropertiesService.getScriptProperties().getProperty('MKT_DATA_HUB_ID');

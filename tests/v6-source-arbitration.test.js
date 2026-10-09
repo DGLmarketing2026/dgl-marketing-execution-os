@@ -52,6 +52,7 @@ function makeContext(tables,lastUpdated,withGmail){
     };
   };
   ctx.__tables=tables;
+  require('./helpers/atomic-sheets-fake')(ctx);
   return ctx;
 }
 function emptyReportTables(overrides){

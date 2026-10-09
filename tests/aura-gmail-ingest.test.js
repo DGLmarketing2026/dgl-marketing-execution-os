@@ -22,6 +22,7 @@ function fakeMessage(id,from,subject,dateIso,body,attachments){
   return {
     getId:()=>id, getFrom:()=>from, getSubject:()=>subject,
     getDate:()=>new Date(dateIso), getPlainBody:()=>body||'',
+    getHeader:()=> {const d=from.replace(/.*@/,'').replace(/>.*/,'');return "mx.google.com; dmarc=pass header.from="+d;},
     getAttachments:()=>attachments||[]
   };
 }
@@ -57,7 +58,7 @@ function workbookFromSheets(sheetDefs){
 function makeContext(props,tables){
   tables=tables||{};
   var ctx={
-    Date:Date,String:String,Array:Array,Object:Object,Number:Number,Math:Math,console:console,
+    Session:{getEffectiveUser:()=>({getEmail:()=>"info@dglus.com"})},Date:Date,String:String,Array:Array,Object:Object,Number:Number,Math:Math,console:console,
     PropertiesService:{getScriptProperties:()=>({getProperty:k=>Object.prototype.hasOwnProperty.call(props,k)?props[k]:null,setProperty:(k,v)=>{props[k]=v;}})},
     Utilities:{
       computeDigest:(algo,text)=>{var h=0;for(var i=0;i<text.length;i++){h=(h*31+text.charCodeAt(i))|0;}var bytes=[];for(var b=0;b<8;b++){bytes.push((h>>(b*4))&0xff);}return bytes;},
