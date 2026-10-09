@@ -25,7 +25,8 @@ function makeContext(tables){
 // 1. This task never touched the Gmail ingestion pipeline itself
 (function testIngestionUntouched(){
   assert(/function v6AuraGmailIngestTick_\s*\(/.test(ingestSource),'v6AuraGmailIngestTick_ must still exist, unmodified in shape');
-  assert(/newer_than:45d/.test(ingestSource),'the already-shipped 45-day bound must still be present — this file is not touched again by the visibility layer');
+  // 2026-10-09: the bound is built by v6AuraGmailCandidates_(45, ...) ('newer_than:' + days + 'd').
+  assert(/newer_than:45d/.test(ingestSource)||(/v6AuraGmailCandidates_\(45,/.test(ingestSource)&&/newer_than:' +/.test(ingestSource)),'the already-shipped 45-day bound must still be present — this file is not touched again by the visibility layer');
   console.log('PASS: Gmail ingestion pipeline file is untouched by the platform-visibility work');
 })();
 
